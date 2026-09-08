@@ -5,9 +5,9 @@ service cloud.firestore {
     function email(){ return request.auth.token.email; }
     function student(){ return signedIn() && email().matches('^[^@]+@student\\.tdtu\\.edu\\.vn$'); }
     function staff(){ return signedIn() && email().matches('^[^@]+@tdtu\\.edu\\.vn$'); }
-    function participant(){ return student() || staff(); }
+    function participant(){ return student() || staff() || admin(); }
     function owner(){ return staff() && email() == 'tranquanghai@tdtu.edu.vn'; }
-    function admin(){ return owner() || (staff() && exists(/databases/$(database)/documents/admins/$(email()))); }
+    function admin(){ return owner() || (signedIn() && exists(/databases/$(database)/documents/admins/$(email()))); }
     function settings(){ return get(/databases/$(database)/documents/settings/main).data; }
     function eventAfter(id){ return getAfter(/databases/$(database)/documents/events/$(id)).data; }
     function eventBefore(id){ return get(/databases/$(database)/documents/events/$(id)).data; }
@@ -21,7 +21,7 @@ service cloud.firestore {
       allow delete: if false;
     }
     match /admins/{adminEmail} {
-      allow get: if owner() || (staff() && email() == adminEmail);
+      allow get: if owner() || (signedIn() && email() == adminEmail);
       allow list, create, update, delete: if owner();
     }
     match /events/{eventId} {
