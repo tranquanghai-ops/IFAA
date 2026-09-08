@@ -5,6 +5,7 @@ service cloud.firestore {
     function email(){ return request.auth.token.email; }
     function student(){ return signedIn() && email().matches('^[^@]+@student\\.tdtu\\.edu\\.vn$'); }
     function staff(){ return signedIn() && email().matches('^[^@]+@tdtu\\.edu\\.vn$'); }
+    function participant(){ return student() || staff(); }
     function owner(){ return staff() && email() == 'tranquanghai@tdtu.edu.vn'; }
     function admin(){ return owner() || (staff() && exists(/databases/$(database)/documents/admins/$(email()))); }
     function settings(){ return get(/databases/$(database)/documents/settings/main).data; }
@@ -33,7 +34,7 @@ service cloud.firestore {
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.registeredCount == resource.data.registeredCount
         && request.resource.data.capacity >= resource.data.registeredCount)
-        || (student()
+        || (participant()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['registeredCount','updatedAt'])
         && (
           (request.resource.data.registeredCount == resource.data.registeredCount + 1
@@ -50,16 +51,16 @@ service cloud.firestore {
         && (owner() || (admin() && resource.data.createdByUid == request.auth.uid));
     }
     match /registrations/{regId} {
-      allow list: if admin() || (student() && resource.data.uid == request.auth.uid);
-      allow get: if admin() || (student() && resource.data.uid == request.auth.uid);
-      allow create: if student() && regId == request.auth.uid + '_' + request.resource.data.eventId
+      allow list: if admin() || (participant() && resource.data.uid == request.auth.uid);
+      allow get: if admin() || (participant() && resource.data.uid == request.auth.uid);
+      allow create: if participant() && regId == request.auth.uid + '_' + request.resource.data.eventId
         && request.resource.data.uid == request.auth.uid && request.resource.data.email == email()
         && eventAfter(request.resource.data.eventId).registeredCount == eventBefore(request.resource.data.eventId).registeredCount + 1
         && existsAfter(statPath(request.auth.uid))
         && statAfter(request.auth.uid).eventIds.hasAll([request.resource.data.eventId])
         && statAfter(request.auth.uid).count == (exists(statPath(request.auth.uid))
           ? get(statPath(request.auth.uid)).data.count + 1 : 1);
-      allow delete: if student() && resource.data.uid == request.auth.uid
+      allow delete: if participant() && resource.data.uid == request.auth.uid
         && eventAfter(resource.data.eventId).registeredCount == eventBefore(resource.data.eventId).registeredCount - 1
         && existsAfter(statPath(request.auth.uid))
         && !statAfter(request.auth.uid).eventIds.hasAny([resource.data.eventId])
@@ -67,9 +68,9 @@ service cloud.firestore {
       allow update: if false;
     }
     match /studentStats/{uid} {
-      allow get: if admin() || (student() && uid == request.auth.uid);
+      allow get: if admin() || (participant() && uid == request.auth.uid);
       allow list: if admin();
-      allow create, update: if student() && uid == request.auth.uid
+      allow create, update: if participant() && uid == request.auth.uid
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.email == email()
         && request.resource.data.count >= 0
