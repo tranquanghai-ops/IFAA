@@ -5,40 +5,92 @@ service cloud.firestore {
     function email(){ return request.auth.token.email; }
     function student(){ return signedIn() && email().matches('^[^@]+@student\\.tdtu\\.edu\\.vn$'); }
     function staff(){ return signedIn() && email().matches('^[^@]+@tdtu\\.edu\\.vn$'); }
-    function participant(){ return student() || staff() || admin(); }
     function owner(){ return staff() && email() == 'tranquanghai@tdtu.edu.vn'; }
     function admin(){ return owner() || (signedIn() && exists(/databases/$(database)/documents/admins/$(email()))); }
-    function settings(){ return get(/databases/$(database)/documents/settings/main).data; }
+    function participant(){ return student() || staff() || admin(); }
     function eventAfter(id){ return getAfter(/databases/$(database)/documents/events/$(id)).data; }
     function eventBefore(id){ return get(/databases/$(database)/documents/events/$(id)).data; }
     function regPath(uid,id){ return /databases/$(database)/documents/registrations/$(uid + '_' + id); }
-    function statPath(uid){ return /databases/$(database)/documents/studentStats/$(uid); }
-    function statAfter(uid){ return getAfter(statPath(uid)).data; }
+    function profilePath(uid){ return /databases/$(database)/documents/profiles/$(uid); }
+    function groupPath(id){ return /databases/$(database)/documents/eventGroups/$(id); }
+    function limitPath(uid,id){ return /databases/$(database)/documents/registrationLimits/$(uid + '_' + id); }
+    function limitAfter(uid,id){ return getAfter(limitPath(uid,id)).data; }
+    function groupedEvent(id){ return eventBefore(id).groupId != ''; }
+    function validEventGroup(data){
+      return data.groupId == ''
+        || (exists(groupPath(data.groupId))
+          && data.groupName == get(groupPath(data.groupId)).data.name
+          && data.groupMaxRegistrations == get(groupPath(data.groupId)).data.maxRegistrations);
+    }
 
     match /settings/main {
       allow read: if signedIn();
       allow create, update: if owner();
       allow delete: if false;
     }
+
     match /admins/{adminEmail} {
       allow get: if owner() || (signedIn() && email() == adminEmail);
       allow list, create, update, delete: if owner();
     }
+
+    match /profiles/{uid} {
+      allow get: if admin() || (participant() && uid == request.auth.uid);
+      allow list: if admin();
+      allow create: if participant() && uid == request.auth.uid
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == email()
+        && request.resource.data.name is string
+        && request.resource.data.phone is string
+        && request.resource.data.faculty is string;
+      allow update: if participant() && uid == request.auth.uid
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.name is string
+        && request.resource.data.phone is string
+        && request.resource.data.faculty is string;
+      allow delete: if false;
+    }
+
+    match /eventGroups/{groupId} {
+      allow read: if signedIn();
+      allow create: if admin()
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.name is string
+        && request.resource.data.maxRegistrations is int
+        && request.resource.data.maxRegistrations >= 1
+        && request.resource.data.maxRegistrations <= 20;
+      allow update: if admin()
+        && request.resource.data.createdByUid == resource.data.createdByUid
+        && request.resource.data.createdByEmail == resource.data.createdByEmail
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.maxRegistrations is int
+        && request.resource.data.maxRegistrations >= 1
+        && request.resource.data.maxRegistrations <= 20;
+      allow delete: if false;
+    }
+
     match /events/{eventId} {
       allow read: if signedIn();
-      allow create: if admin() && request.resource.data.createdByUid == request.auth.uid
-        && request.resource.data.registeredCount == 0;
+      allow create: if admin()
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.registeredCount == 0
+        && validEventGroup(request.resource.data);
       allow update: if (admin()
         && request.resource.data.createdByUid == resource.data.createdByUid
         && request.resource.data.createdByEmail == resource.data.createdByEmail
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.registeredCount == resource.data.registeredCount
-        && request.resource.data.capacity >= resource.data.registeredCount)
+        && request.resource.data.capacity >= resource.data.registeredCount
+        && (resource.data.registeredCount == 0 || request.resource.data.groupId == resource.data.groupId)
+        && validEventGroup(request.resource.data))
         || (participant()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['registeredCount','updatedAt'])
         && (
           (request.resource.data.registeredCount == resource.data.registeredCount + 1
-            && resource.data.status == 'open' && resource.data.registeredCount < resource.data.capacity
+            && resource.data.status == 'open'
+            && resource.data.registeredCount < resource.data.capacity
             && (resource.data.openAt == null || request.time >= resource.data.openAt)
             && (resource.data.closeAt == null || request.time <= resource.data.closeAt)
             && existsAfter(regPath(request.auth.uid,eventId)))
@@ -50,31 +102,44 @@ service cloud.firestore {
       allow delete: if resource.data.registeredCount == 0
         && (owner() || (admin() && resource.data.createdByUid == request.auth.uid));
     }
+
     match /registrations/{regId} {
       allow list: if admin() || (participant() && resource.data.uid == request.auth.uid);
       allow get: if admin() || (participant() && resource.data.uid == request.auth.uid);
-      allow create: if participant() && regId == request.auth.uid + '_' + request.resource.data.eventId
-        && request.resource.data.uid == request.auth.uid && request.resource.data.email == email()
-        && eventAfter(request.resource.data.eventId).registeredCount == eventBefore(request.resource.data.eventId).registeredCount + 1
-        && existsAfter(statPath(request.auth.uid))
-        && statAfter(request.auth.uid).eventIds.hasAll([request.resource.data.eventId])
-        && statAfter(request.auth.uid).count == (exists(statPath(request.auth.uid))
-          ? get(statPath(request.auth.uid)).data.count + 1 : 1);
-      allow delete: if participant() && resource.data.uid == request.auth.uid
-        && eventAfter(resource.data.eventId).registeredCount == eventBefore(resource.data.eventId).registeredCount - 1
-        && existsAfter(statPath(request.auth.uid))
-        && !statAfter(request.auth.uid).eventIds.hasAny([resource.data.eventId])
-        && statAfter(request.auth.uid).count == get(statPath(request.auth.uid)).data.count - 1;
-      allow update: if false;
-    }
-    match /studentStats/{uid} {
-      allow get: if admin() || (participant() && uid == request.auth.uid);
-      allow list: if admin();
-      allow create, update: if participant() && uid == request.auth.uid
+      allow create: if participant()
+        && exists(profilePath(request.auth.uid))
+        && regId == request.auth.uid + '_' + request.resource.data.eventId
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.email == email()
+        && request.resource.data.groupId == eventBefore(request.resource.data.eventId).groupId
+        && eventAfter(request.resource.data.eventId).registeredCount == eventBefore(request.resource.data.eventId).registeredCount + 1
+        && (!groupedEvent(request.resource.data.eventId)
+          || (existsAfter(limitPath(request.auth.uid,request.resource.data.groupId))
+            && limitAfter(request.auth.uid,request.resource.data.groupId).eventIds.hasAll([request.resource.data.eventId])
+            && limitAfter(request.auth.uid,request.resource.data.groupId).count == (exists(limitPath(request.auth.uid,request.resource.data.groupId))
+              ? get(limitPath(request.auth.uid,request.resource.data.groupId)).data.count + 1 : 1)));
+      allow delete: if participant()
+        && resource.data.uid == request.auth.uid
+        && eventAfter(resource.data.eventId).registeredCount == eventBefore(resource.data.eventId).registeredCount - 1
+        && (!groupedEvent(resource.data.eventId)
+          || (existsAfter(limitPath(request.auth.uid,resource.data.groupId))
+            && !limitAfter(request.auth.uid,resource.data.groupId).eventIds.hasAny([resource.data.eventId])
+            && limitAfter(request.auth.uid,resource.data.groupId).count == get(limitPath(request.auth.uid,resource.data.groupId)).data.count - 1));
+      allow update: if false;
+    }
+
+    match /registrationLimits/{limitId} {
+      allow get: if admin() || (participant() && resource.data.uid == request.auth.uid);
+      allow list: if admin() || (participant() && resource.data.uid == request.auth.uid);
+      allow create, update: if participant()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == email()
+        && limitId == request.auth.uid + '_' + request.resource.data.groupId
+        && exists(groupPath(request.resource.data.groupId))
+        && request.resource.data.maxRegistrations == get(groupPath(request.resource.data.groupId)).data.maxRegistrations
+        && request.resource.data.count is int
         && request.resource.data.count >= 0
-        && request.resource.data.count <= settings().maxRegistrations
+        && request.resource.data.count <= get(groupPath(request.resource.data.groupId)).data.maxRegistrations
         && request.resource.data.eventIds.size() == request.resource.data.count;
       allow delete: if false;
     }
