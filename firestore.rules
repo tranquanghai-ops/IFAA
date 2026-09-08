@@ -1,0 +1,81 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn(){ return request.auth != null && request.auth.token.email_verified == true; }
+    function email(){ return request.auth.token.email; }
+    function student(){ return signedIn() && email().matches('^[^@]+@student\\.tdtu\\.edu\\.vn$'); }
+    function staff(){ return signedIn() && email().matches('^[^@]+@tdtu\\.edu\\.vn$'); }
+    function owner(){ return staff() && email() == 'tranquanghai@tdtu.edu.vn'; }
+    function admin(){ return owner() || (staff() && exists(/databases/$(database)/documents/admins/$(email()))); }
+    function settings(){ return get(/databases/$(database)/documents/settings/main).data; }
+    function eventAfter(id){ return getAfter(/databases/$(database)/documents/events/$(id)).data; }
+    function eventBefore(id){ return get(/databases/$(database)/documents/events/$(id)).data; }
+    function regPath(uid,id){ return /databases/$(database)/documents/registrations/$(uid + '_' + id); }
+    function statPath(uid){ return /databases/$(database)/documents/studentStats/$(uid); }
+    function statAfter(uid){ return getAfter(statPath(uid)).data; }
+
+    match /settings/main {
+      allow read: if signedIn();
+      allow create, update: if owner();
+      allow delete: if false;
+    }
+    match /admins/{adminEmail} {
+      allow get: if owner() || (staff() && email() == adminEmail);
+      allow list, create, update, delete: if owner();
+    }
+    match /events/{eventId} {
+      allow read: if signedIn();
+      allow create: if admin() && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.registeredCount == 0;
+      allow update: if (admin()
+        && request.resource.data.createdByUid == resource.data.createdByUid
+        && request.resource.data.createdByEmail == resource.data.createdByEmail
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.registeredCount == resource.data.registeredCount
+        && request.resource.data.capacity >= resource.data.registeredCount)
+        || (student()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['registeredCount','updatedAt'])
+        && (
+          (request.resource.data.registeredCount == resource.data.registeredCount + 1
+            && resource.data.status == 'open' && resource.data.registeredCount < resource.data.capacity
+            && (resource.data.openAt == null || request.time >= resource.data.openAt)
+            && (resource.data.closeAt == null || request.time <= resource.data.closeAt)
+            && existsAfter(regPath(request.auth.uid,eventId)))
+          ||
+          (request.resource.data.registeredCount == resource.data.registeredCount - 1
+            && request.resource.data.registeredCount >= 0
+            && !existsAfter(regPath(request.auth.uid,eventId)))
+        ));
+      allow delete: if resource.data.registeredCount == 0
+        && (owner() || (admin() && resource.data.createdByUid == request.auth.uid));
+    }
+    match /registrations/{regId} {
+      allow list: if admin() || (student() && resource.data.uid == request.auth.uid);
+      allow get: if admin() || (student() && resource.data.uid == request.auth.uid);
+      allow create: if student() && regId == request.auth.uid + '_' + request.resource.data.eventId
+        && request.resource.data.uid == request.auth.uid && request.resource.data.email == email()
+        && eventAfter(request.resource.data.eventId).registeredCount == eventBefore(request.resource.data.eventId).registeredCount + 1
+        && existsAfter(statPath(request.auth.uid))
+        && statAfter(request.auth.uid).eventIds.hasAll([request.resource.data.eventId])
+        && statAfter(request.auth.uid).count == (exists(statPath(request.auth.uid))
+          ? get(statPath(request.auth.uid)).data.count + 1 : 1);
+      allow delete: if student() && resource.data.uid == request.auth.uid
+        && eventAfter(resource.data.eventId).registeredCount == eventBefore(resource.data.eventId).registeredCount - 1
+        && existsAfter(statPath(request.auth.uid))
+        && !statAfter(request.auth.uid).eventIds.hasAny([resource.data.eventId])
+        && statAfter(request.auth.uid).count == get(statPath(request.auth.uid)).data.count - 1;
+      allow update: if false;
+    }
+    match /studentStats/{uid} {
+      allow get: if admin() || (student() && uid == request.auth.uid);
+      allow list: if admin();
+      allow create, update: if student() && uid == request.auth.uid
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == email()
+        && request.resource.data.count >= 0
+        && request.resource.data.count <= settings().maxRegistrations
+        && request.resource.data.eventIds.size() == request.resource.data.count;
+      allow delete: if false;
+    }
+  }
+}
