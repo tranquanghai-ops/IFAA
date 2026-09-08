@@ -1,0 +1,14 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#a71930"><title>IFAHr — Đăng ký sự kiện</title><meta name="description" content="Hệ thống đăng ký sự kiện Khoa Mỹ thuật Công nghiệp"><link rel="stylesheet" href="./styles.css"></head><body>
+<main class="shell">
+  <header class="topbar"><div class="brand"><div class="mark">IFA</div><div><h1>IFAHr</h1><p>Đăng ký sự kiện · Khoa Mỹ thuật Công nghiệp</p></div></div><div class="account"><span id="accountEmail" class="account-email"></span><a class="btn btn-small" href="./admin/">Admin</a><button id="logoutBtn" class="btn btn-small hidden">Đăng xuất</button></div></header>
+  <section id="loginCard" class="card login-card"><div class="mark">IFA</div><h2>Đăng ký sự kiện</h2><p>Vui lòng đăng nhập bằng email sinh viên TDTU để xem và đăng ký các sự kiện đang mở.</p><button id="loginBtn" class="btn btn-primary">Đăng nhập bằng Google</button><p style="font-size:13px">Chỉ chấp nhận <b>MSSV@student.tdtu.edu.vn</b></p></section>
+  <div id="studentApp" class="hidden">
+    <div id="notice" class="notice hidden"></div>
+    <section class="card hero"><div class="hero-grid"><div><p>Sự kiện dành cho sinh viên IFA</p><h2>Chọn hoạt động phù hợp với lịch của bạn.</h2><p>Số chỗ được cập nhật tự động. Sự kiện đã đủ sẽ khóa đăng ký ngay lập tức.</p></div><div class="quota"><b id="quotaValue">0/1</b><span>Sự kiện đã đăng ký</span></div></div></section>
+    <div class="section-head"><div><h2>Sự kiện</h2><p id="eventSummary">Đang tải danh sách…</p></div><div class="filters"><button class="btn btn-small filter active" data-filter="open">Đang mở</button><button class="btn btn-small filter" data-filter="mine">Đã đăng ký</button><button class="btn btn-small filter" data-filter="all">Tất cả</button></div></div>
+    <section id="eventGrid" class="event-grid"></section>
+  </div>
+  <footer class="foot">IFAHr · Khoa Mỹ thuật Công nghiệp · V1.0</footer>
+</main>
+<dialog id="detailDialog"><div class="modal"><div class="modal-head"><h2 id="detailTitle"></h2><button class="btn btn-small" data-close>Đóng</button></div><div id="detailBody"></div><div class="modal-actions"><button class="btn" data-close>Hủy</button><button id="confirmBtn" class="btn btn-primary">Xác nhận đăng ký</button></div></div></dialog>
+<script type="module" src="./student.mjs"></script></body></html>
