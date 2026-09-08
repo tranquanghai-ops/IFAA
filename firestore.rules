@@ -16,6 +16,10 @@ service cloud.firestore {
     function limitPath(uid,id){ return /databases/$(database)/documents/registrationLimits/$(uid + '_' + id); }
     function limitAfter(uid,id){ return getAfter(limitPath(uid,id)).data; }
     function groupedEvent(id){ return eventBefore(id).groupId != ''; }
+    function facultyAllowed(eventId, uid){
+      return !eventBefore(eventId).keys().hasAll(['allowedFaculties'])
+        || eventBefore(eventId).allowedFaculties.hasAny([get(profilePath(uid)).data.faculty]);
+    }
     function validEventGroup(data){
       return data.groupId == ''
         || (exists(groupPath(data.groupId))
@@ -76,6 +80,8 @@ service cloud.firestore {
       allow create: if admin()
         && request.resource.data.createdByUid == request.auth.uid
         && request.resource.data.registeredCount == 0
+        && request.resource.data.allowedFaculties is list
+        && request.resource.data.allowedFaculties.size() >= 1
         && validEventGroup(request.resource.data);
       allow update: if (admin()
         && request.resource.data.createdByUid == resource.data.createdByUid
@@ -83,6 +89,8 @@ service cloud.firestore {
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.registeredCount == resource.data.registeredCount
         && request.resource.data.capacity >= resource.data.registeredCount
+        && request.resource.data.allowedFaculties is list
+        && request.resource.data.allowedFaculties.size() >= 1
         && (resource.data.registeredCount == 0 || request.resource.data.groupId == resource.data.groupId)
         && validEventGroup(request.resource.data))
         || (participant()
@@ -91,12 +99,15 @@ service cloud.firestore {
           (request.resource.data.registeredCount == resource.data.registeredCount + 1
             && resource.data.status == 'open'
             && resource.data.registeredCount < resource.data.capacity
+            && facultyAllowed(eventId, request.auth.uid)
             && (resource.data.openAt == null || request.time >= resource.data.openAt)
             && (resource.data.closeAt == null || request.time <= resource.data.closeAt)
             && existsAfter(regPath(request.auth.uid,eventId)))
           ||
           (request.resource.data.registeredCount == resource.data.registeredCount - 1
             && request.resource.data.registeredCount >= 0
+            && resource.data.keys().hasAll(['allowCancellation'])
+            && resource.data.allowCancellation == true
             && !existsAfter(regPath(request.auth.uid,eventId)))
         ));
       allow delete: if resource.data.registeredCount == 0
@@ -111,6 +122,7 @@ service cloud.firestore {
         && regId == request.auth.uid + '_' + request.resource.data.eventId
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.email == email()
+        && facultyAllowed(request.resource.data.eventId, request.auth.uid)
         && request.resource.data.groupId == eventBefore(request.resource.data.eventId).groupId
         && eventAfter(request.resource.data.eventId).registeredCount == eventBefore(request.resource.data.eventId).registeredCount + 1
         && (!groupedEvent(request.resource.data.eventId)
@@ -120,6 +132,8 @@ service cloud.firestore {
               ? get(limitPath(request.auth.uid,request.resource.data.groupId)).data.count + 1 : 1)));
       allow delete: if participant()
         && resource.data.uid == request.auth.uid
+        && eventBefore(resource.data.eventId).keys().hasAll(['allowCancellation'])
+        && eventBefore(resource.data.eventId).allowCancellation == true
         && eventAfter(resource.data.eventId).registeredCount == eventBefore(resource.data.eventId).registeredCount - 1
         && (!groupedEvent(resource.data.eventId)
           || (existsAfter(limitPath(request.auth.uid,resource.data.groupId))
