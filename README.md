@@ -9,6 +9,12 @@ Hệ thống đăng ký sự kiện dành cho Khoa Mỹ thuật Công nghiệp, 
 - Chủ sở hữu: `tranquanghai@tdtu.edu.vn`, quản lý toàn hệ thống và danh sách Admin.
 - Admin: bất kỳ tài khoản Google nào được chủ sở hữu cấp quyền; có thể vào trang quản trị và đăng ký sự kiện ở trang ngoài.
 
+## Cách giới hạn đăng ký
+
+- Người tham gia nhập họ tên, số điện thoại và khoa/đơn vị ở lần đầu; hồ sơ được lưu và có thể sửa lại.
+- Mỗi nhóm sự kiện có một giới hạn riêng, ví dụ tối đa 1 hoặc 2 sự kiện/người trong nhóm.
+- Sự kiện không thuộc nhóm không bị tính vào giới hạn; sức chứa của từng sự kiện vẫn luôn được áp dụng.
+
 ## Hoàn tất Firebase
 
 1. Bật Authentication > Google.
@@ -16,7 +22,7 @@ Hệ thống đăng ký sự kiện dành cho Khoa Mỹ thuật Công nghiệp, 
 3. Chép các giá trị cấu hình Web vào `firebase-config.mjs`.
 4. Thêm `tranquanghai-ops.github.io` vào Authentication > Settings > Authorized domains.
 5. Dán `firestore.rules` vào Firestore > Rules và Publish.
-6. Tạo tài liệu `settings/main` ở lần đầu bằng trang Admin, hoặc đặt `maxRegistrations: 1`, `allowCancellation: false`.
+6. Tạo tài liệu `settings/main` ở lần đầu bằng trang Admin, hoặc đặt `maxRegistrations: 1`, `allowCancellation: false`. `maxRegistrations` là giá trị mặc định khi tạo nhóm mới.
 
 ## GitHub Pages
 
