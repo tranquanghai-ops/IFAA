@@ -1,19 +1,294 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
-import { getAuth,GoogleAuthProvider,signInWithPopup,signOut,onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
-import { getFirestore,collection,doc,getDoc,setDoc,addDoc,updateDoc,deleteDoc,onSnapshot,query,orderBy,serverTimestamp,Timestamp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
-import { firebaseConfig,OWNER_EMAIL } from "../firebase-config.mjs";
-const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app),provider=new GoogleAuthProvider();provider.setCustomParameters({prompt:"select_account"});const $=s=>document.querySelector(s);let user=null,isOwner=false,events=[],regs=[],admins=[],groups=[],settings={maxRegistrations:1,allowCancellation:false};
-const safe=s=>String(s??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));const ts=v=>v?.toDate?new Intl.DateTimeFormat("vi-VN",{dateStyle:"short",timeStyle:"short"}).format(v.toDate()):"";const notice=(m,t="")=>{const n=$("#adminNotice");n.textContent=m;n.className=`notice ${t}`;n.classList.remove("hidden");setTimeout(()=>n.classList.add("hidden"),5000)};
-async function hasAccess(u){if(u.email.toLowerCase()===OWNER_EMAIL)return true;return (await getDoc(doc(db,"admins",u.email.toLowerCase()))).exists()}
-function render(){$("#metricEvents").textContent=events.length;$("#metricOpen").textContent=events.filter(e=>e.status==="open").length;$("#metricRegs").textContent=regs.length;$("#eventRows").innerHTML=events.map(e=>{const canDelete=(e.registeredCount||0)===0&&(isOwner||e.createdByUid===user.uid),reason=(e.registeredCount||0)>0?"Không thể xóa sự kiện đã có đăng ký":"Chỉ xóa sự kiện do mình tạo";return `<tr><td><b>${safe(e.title)}</b><br><small>${safe(e.location)}</small></td><td>${e.groupId?`${safe(e.groupName)}<br><small>Tối đa ${e.groupMaxRegistrations}/người</small>`:"Không nhóm"}</td><td>${safe(e.date)}<br>${safe(e.startTime||"")}</td><td>${e.registeredCount||0}/${e.capacity}</td><td>${safe(e.createdByName||e.createdByEmail)}</td><td><span class="tag ${e.status==="open"?"open":"closed"}">${e.status==="open"?"ĐANG MỞ":"ĐÃ ĐÓNG"}</span></td><td><div class="actions"><button class="btn btn-small" data-edit="${e.id}">Sửa</button><button class="btn btn-small btn-danger" data-delete="${e.id}" ${canDelete?"":`disabled title='${reason}'`}>Xóa</button></div></td></tr>`}).join("");$("#eventFilter").innerHTML='<option value="">Tất cả sự kiện</option>'+events.map(e=>`<option value="${e.id}">${safe(e.title)}</option>`).join("");renderRegs();if(isOwner)$("#adminRows").innerHTML=admins.map(a=>`<tr><td>${safe(a.name||"")}</td><td>${safe(a.email)}</td><td>${ts(a.addedAt)}</td><td><button class="btn btn-small btn-danger" data-remove-admin="${safe(a.email)}">Xóa</button></td></tr>`).join("")}
-function renderRegs(){const f=$("#eventFilter").value;const list=f?regs.filter(r=>r.eventId===f):regs;$("#regRows").innerHTML=list.map((r,i)=>`<tr><td>${i+1}</td><td><b>${safe(r.identifier||r.mssv)}</b></td><td>${safe(r.name)}</td><td>${safe(r.phone)}</td><td>${safe(r.faculty)}</td><td>${safe(r.participantType||"Sinh viên")}</td><td>${safe(r.email)}</td><td>${safe(r.eventTitle)}</td><td>${ts(r.createdAt)}</td></tr>`).join("")}
-function refreshGroupOptions(selected=""){const select=$("#groupId");select.innerHTML='<option value="">Không thuộc nhóm — không giới hạn lượt</option>'+groups.map(g=>`<option value="${g.id}">${safe(g.name)} — tối đa ${g.maxRegistrations}</option>`).join("")+'<option value="__new__">＋ Tạo nhóm mới</option>';select.value=selected||""}
-function listen(){onSnapshot(doc(db,"settings","main"),s=>{if(s.exists())settings={...settings,...s.data()};$("#maxRegistrations").value=settings.maxRegistrations;$("#allowCancellation").checked=!!settings.allowCancellation});onSnapshot(query(collection(db,"eventGroups"),orderBy("createdAt","desc")),s=>{groups=s.docs.map(d=>({id:d.id,...d.data()}));refreshGroupOptions($("#groupId").value)});onSnapshot(query(collection(db,"events"),orderBy("createdAt","desc")),s=>{events=s.docs.map(d=>({id:d.id,...d.data()}));render()});onSnapshot(query(collection(db,"registrations"),orderBy("createdAt","desc")),s=>{regs=s.docs.map(d=>({id:d.id,...d.data()}));render()});if(isOwner)onSnapshot(collection(db,"admins"),s=>{admins=s.docs.map(d=>({id:d.id,...d.data()}));render()})}
-const inputDateTime=v=>{if(!v)return"";const d=v?.toDate?v.toDate():new Date(v);if(Number.isNaN(d.getTime()))return"";const local=new Date(d.getTime()-d.getTimezoneOffset()*60000);return local.toISOString().slice(0,16)};
-function openEvent(e=null){$("#eventForm").reset();$("#eventFormError").classList.add("hidden");$("#eventId").value=e?.id||"";$("#eventDialogTitle").textContent=e?"Chỉnh sửa sự kiện":"Tạo sự kiện";for(const k of ["title","description","date","location","startTime","endTime","capacity","status"])if(e&&$("#"+k))$("#"+k).value=e[k]??"";if(e){$("#openAt").value=inputDateTime(e.openAt);$("#closeAt").value=inputDateTime(e.closeAt)}if(!e)$("#status").value="open";refreshGroupOptions(e?.groupId||"");$("#groupId").disabled=!!e&&(e.registeredCount||0)>0;$("#newGroupFields").classList.add("hidden");$("#newGroupMax").value=settings.maxRegistrations||1;$("#eventDialog").showModal()}
-$("#groupId").onchange=()=>{const creating=$("#groupId").value==="__new__";$("#newGroupFields").classList.toggle("hidden",!creating);$("#newGroupName").required=creating;$("#newGroupMax").required=creating};
-$("#eventForm").onsubmit=async ev=>{ev.preventDefault();const submit=ev.submitter||ev.target.querySelector('button[type="submit"],button:not([type])'),error=$("#eventFormError");submit.disabled=true;submit.textContent="Đang lưu…";error.classList.add("hidden");const id=$("#eventId").value,data={};for(const k of ["title","description","date","location","startTime","endTime","status"])data[k]=$("#"+k).value.trim();data.openAt=$("#openAt").value?Timestamp.fromDate(new Date($("#openAt").value)):null;data.closeAt=$("#closeAt").value?Timestamp.fromDate(new Date($("#closeAt").value)):null;data.capacity=Number($("#capacity").value);data.updatedAt=serverTimestamp();try{if(!data.title||!data.date||!data.location||!data.startTime||!Number.isInteger(data.capacity)||data.capacity<1)throw Error("Vui lòng nhập đầy đủ các trường bắt buộc.");if(data.openAt&&data.closeAt&&data.openAt.toMillis()>=data.closeAt.toMillis())throw Error("Giờ đóng phải sau giờ mở đăng ký.");let selectedGroup=$("#groupId").value,group=null;if(selectedGroup==="__new__"){const name=$("#newGroupName").value.trim(),maxRegistrations=Number($("#newGroupMax").value);if(!name||!Number.isInteger(maxRegistrations)||maxRegistrations<1||maxRegistrations>20)throw Error("Tên nhóm và giới hạn từ 1 đến 20 là bắt buộc.");const groupRef=await addDoc(collection(db,"eventGroups"),{name,maxRegistrations,createdByUid:user.uid,createdByEmail:user.email.toLowerCase(),createdAt:serverTimestamp(),updatedAt:serverTimestamp()});selectedGroup=groupRef.id;group={id:groupRef.id,name,maxRegistrations}}else if(selectedGroup){group=groups.find(g=>g.id===selectedGroup);if(!group)throw Error("Nhóm sự kiện không tồn tại.")}data.groupId=group?.id||"";data.groupName=group?.name||"";data.groupMaxRegistrations=group?.maxRegistrations||0;if(id){const old=events.find(e=>e.id===id);if(!old)throw Error("Không tìm thấy sự kiện.");if(data.capacity<(old.registeredCount||0))throw Error("Sức chứa không thể nhỏ hơn số đã đăng ký.");if((old.registeredCount||0)>0&&data.groupId!==(old.groupId||""))throw Error("Không thể đổi nhóm khi sự kiện đã có người đăng ký.");await updateDoc(doc(db,"events",id),data)}else await addDoc(collection(db,"events"),{...data,registeredCount:0,createdByUid:user.uid,createdByEmail:user.email.toLowerCase(),createdByName:user.displayName||"",createdAt:serverTimestamp()});$("#eventDialog").close();notice("Đã lưu sự kiện.","success")}catch(e){error.textContent=e.message||"Không thể lưu sự kiện.";error.classList.remove("hidden")}finally{submit.disabled=false;submit.textContent="Lưu sự kiện"}};
-$("#settingsForm").onsubmit=async e=>{e.preventDefault();try{await setDoc(doc(db,"settings","main"),{maxRegistrations:Number($("#maxRegistrations").value),allowCancellation:$("#allowCancellation").checked,participantDomains:["student.tdtu.edu.vn","tdtu.edu.vn"],updatedBy:user.email,updatedAt:serverTimestamp()},{merge:true});notice("Đã lưu thiết lập.","success")}catch(e){notice(e.message,"error")}};
-$("#adminForm").onsubmit=async e=>{e.preventDefault();const email=$("#adminEmail").value.trim().toLowerCase();try{await setDoc(doc(db,"admins",email),{email,name:$("#adminName").value.trim(),addedByUid:user.uid,addedAt:serverTimestamp()});e.target.reset();notice("Đã thêm Admin.","success")}catch(e){notice(e.message,"error")}};
-document.addEventListener("click",async e=>{const b=e.target.closest("button");if(!b)return;if(b.dataset.pane){document.querySelectorAll(".nav-btn").forEach(x=>x.classList.remove("active"));b.classList.add("active");document.querySelectorAll(".pane").forEach(x=>x.classList.toggle("hidden",x.dataset.paneId!==b.dataset.pane))}if(b.dataset.newEvent!==undefined)openEvent();if(b.dataset.close!==undefined)$("#eventDialog").close();if(b.dataset.edit)openEvent(events.find(x=>x.id===b.dataset.edit));if(b.dataset.delete){const ev=events.find(x=>x.id===b.dataset.delete);if(ev&&confirm(`Xóa sự kiện “${ev.title}”?`))try{await deleteDoc(doc(db,"events",ev.id));notice("Đã xóa sự kiện.","success")}catch(err){notice(err.message,"error")}}if(b.dataset.removeAdmin&&confirm(`Xóa quyền Admin của ${b.dataset.removeAdmin}?`))try{await deleteDoc(doc(db,"admins",b.dataset.removeAdmin));notice("Đã xóa Admin.","success")}catch(err){notice(err.message,"error")}});$("#eventFilter").onchange=renderRegs;$("#exportBtn").onclick=()=>{const f=$("#eventFilter").value,list=f?regs.filter(r=>r.eventId===f):regs,rows=list.map((r,i)=>({STT:i+1,"Mã số":r.identifier||r.mssv,"Họ tên":r.name,"Số điện thoại":r.phone,"Khoa/Đơn vị":r.faculty,"Đối tượng":r.participantType||"Sinh viên",Email:r.email,"Sự kiện":r.eventTitle,"Nhóm sự kiện":r.groupName||"Không nhóm","Ngày sự kiện":r.eventDate,"Thời gian đăng ký":ts(r.createdAt)}));const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows),"Đăng ký");XLSX.writeFile(wb,`IFAHr_Danh_sach_${new Date().toISOString().slice(0,10)}.xlsx`)};$("#loginBtn").onclick=()=>signInWithPopup(auth,provider);$("#logoutBtn").onclick=()=>signOut(auth);
-onAuthStateChanged(auth,async u=>{if(!u){$("#adminLogin").classList.remove("hidden");$("#adminApp").classList.add("hidden");return}if(!u.emailVerified||!(await hasAccess(u))){await signOut(auth);alert("Tài khoản này chưa được cấp quyền Admin IFAHr.");return}user=u;isOwner=u.email.toLowerCase()===OWNER_EMAIL;$("#accountEmail").textContent=u.email;$("#roleText").textContent=`Quyền hiện tại: ${isOwner?"Chủ sở hữu":"Admin"}`;$("#adminLogin").classList.add("hidden");$("#adminApp").classList.remove("hidden");$("#logoutBtn").classList.remove("hidden");$("#adminNav").classList.toggle("hidden",!isOwner);$("#settingsNav").classList.toggle("hidden",!isOwner);listen()});
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
+import { getFirestore, collection, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp, Timestamp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
+import { firebaseConfig, OWNER_EMAIL } from "../firebase-config.mjs";
+
+const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const provider = new GoogleAuthProvider();
+provider.setCustomParameters({ prompt: "select_account" });
+const $ = (selector) => document.querySelector(selector);
+const safe = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
+const ts = (value) => value?.toDate ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" }).format(value.toDate()) : "";
+
+let user = null;
+let isOwner = false;
+let events = [];
+let regs = [];
+let admins = [];
+let groups = [];
+let settings = { maxRegistrations: 1, faculties: [DEFAULT_FACULTY] };
+
+function notice(message, type = "") {
+  const element = $("#adminNotice");
+  element.textContent = message;
+  element.className = `notice ${type}`;
+  element.classList.remove("hidden");
+  setTimeout(() => element.classList.add("hidden"), 5000);
+}
+
+async function hasAccess(currentUser) {
+  if (currentUser.email.toLowerCase() === OWNER_EMAIL) return true;
+  return (await getDoc(doc(db, "admins", currentUser.email.toLowerCase()))).exists();
+}
+
+function statusLabel(event) {
+  if (event.status === "hidden" || event.status === "draft") return ["closed", "ĐÃ ẨN"];
+  if (event.status === "closed") return ["closed", "ĐÃ ĐÓNG"];
+  return ["open", "HIỂN THỊ"];
+}
+
+function render() {
+  $("#metricEvents").textContent = events.length;
+  $("#metricOpen").textContent = events.filter((event) => event.status === "open").length;
+  $("#metricRegs").textContent = regs.length;
+  $("#eventRows").innerHTML = events.map((event) => {
+    const canDelete = (event.registeredCount || 0) === 0 && (isOwner || event.createdByUid === user.uid);
+    const reason = (event.registeredCount || 0) > 0 ? "Không thể xóa sự kiện đã có đăng ký" : "Chỉ xóa sự kiện do mình tạo";
+    const [statusClass, statusText] = statusLabel(event);
+    return `<tr><td><b>${safe(event.title)}</b><br><small>${safe(event.location)}</small></td><td>${event.groupId ? `${safe(event.groupName)}<br><small>Tối đa ${event.groupMaxRegistrations}/người</small>` : "Không nhóm"}</td><td>${safe(event.date)}<br>${safe(event.startTime || "")}</td><td>${event.registeredCount || 0}/${event.capacity}</td><td>${safe(event.createdByName || event.createdByEmail)}</td><td><span class="tag ${statusClass}">${statusText}</span></td><td><div class="actions"><button class="btn btn-small" data-edit="${event.id}">Sửa</button><button class="btn btn-small btn-danger" data-delete="${event.id}" ${canDelete ? "" : `disabled title='${reason}'`}>Xóa</button></div></td></tr>`;
+  }).join("");
+  $("#eventFilter").innerHTML = '<option value="">Tất cả sự kiện</option>' + events.map((event) => `<option value="${event.id}">${safe(event.title)}</option>`).join("");
+  renderRegs();
+  if (isOwner) $("#adminRows").innerHTML = admins.map((admin) => `<tr><td>${safe(admin.name || "")}</td><td>${safe(admin.email)}</td><td>${ts(admin.addedAt)}</td><td><button class="btn btn-small btn-danger" data-remove-admin="${safe(admin.email)}">Xóa</button></td></tr>`).join("");
+}
+
+function renderRegs() {
+  const filter = $("#eventFilter").value;
+  const list = filter ? regs.filter((registration) => registration.eventId === filter) : regs;
+  $("#regRows").innerHTML = list.map((registration, index) => `<tr><td>${index + 1}</td><td><b>${safe(registration.identifier || registration.mssv)}</b></td><td>${safe(registration.name)}</td><td>${safe(registration.phone)}</td><td>${safe(registration.faculty)}</td><td>${safe(registration.participantType || "Sinh viên")}</td><td>${safe(registration.email)}</td><td>${safe(registration.eventTitle)}</td><td>${ts(registration.createdAt)}</td></tr>`).join("");
+}
+
+function refreshGroupOptions(selected = "") {
+  const select = $("#groupId");
+  select.innerHTML = '<option value="">Không thuộc nhóm — không giới hạn lượt</option>' + groups.map((group) => `<option value="${group.id}">${safe(group.name)} — tối đa ${group.maxRegistrations}</option>`).join("") + '<option value="__new__">＋ Tạo nhóm mới</option>';
+  select.value = selected || "";
+}
+
+function renderFacultySettings() {
+  const faculties = settings.faculties || [DEFAULT_FACULTY];
+  $("#facultySettingsList").innerHTML = faculties.map((faculty) => `<span class="check-chip"><span>${safe(faculty)}</span>${faculty === DEFAULT_FACULTY ? "" : `<button type="button" class="btn btn-small btn-danger" data-remove-faculty="${safe(faculty)}">×</button>`}</span>`).join("");
+}
+
+function renderEventFaculties(selected = [DEFAULT_FACULTY]) {
+  const faculties = settings.faculties || [DEFAULT_FACULTY];
+  $("#eventFacultyList").innerHTML = faculties.map((faculty) => `<label class="check-chip"><input class="event-faculty" type="checkbox" value="${safe(faculty)}" ${selected.includes(faculty) ? "checked" : ""}> ${safe(faculty)}</label>`).join("");
+}
+
+function listen() {
+  onSnapshot(doc(db, "settings", "main"), (snapshot) => {
+    if (snapshot.exists()) settings = { ...settings, ...snapshot.data() };
+    settings.faculties = [...new Set([DEFAULT_FACULTY, ...(settings.faculties || [])])];
+    $("#maxRegistrations").value = settings.maxRegistrations || 1;
+    renderFacultySettings();
+  }, (error) => notice(error.message, "error"));
+  onSnapshot(query(collection(db, "eventGroups"), orderBy("createdAt", "desc")), (snapshot) => {
+    groups = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    refreshGroupOptions($("#groupId").value);
+  }, (error) => notice(error.message, "error"));
+  onSnapshot(query(collection(db, "events"), orderBy("createdAt", "desc")), (snapshot) => {
+    events = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    render();
+  }, (error) => notice(error.message, "error"));
+  onSnapshot(query(collection(db, "registrations"), orderBy("createdAt", "desc")), (snapshot) => {
+    regs = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    render();
+  }, (error) => notice(error.message, "error"));
+  if (isOwner) onSnapshot(collection(db, "admins"), (snapshot) => {
+    admins = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    render();
+  }, (error) => notice(error.message, "error"));
+}
+
+const inputDateTime = (value) => {
+  if (!value) return "";
+  const date = value?.toDate ? value.toDate() : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+};
+
+function openEvent(event = null) {
+  $("#eventForm").reset();
+  $("#eventFormError").classList.add("hidden");
+  $("#eventId").value = event?.id || "";
+  $("#eventDialogTitle").textContent = event ? "Chỉnh sửa sự kiện" : "Tạo sự kiện";
+  for (const key of ["title", "description", "date", "location", "startTime", "endTime", "capacity", "status"]) if (event && $("#" + key)) $("#" + key).value = event[key] ?? "";
+  if (event?.status === "draft") $("#status").value = "hidden";
+  if (event) {
+    $("#openAt").value = inputDateTime(event.openAt);
+    $("#closeAt").value = inputDateTime(event.closeAt);
+  } else {
+    $("#status").value = "open";
+  }
+  $("#eventAllowCancellation").checked = !!event?.allowCancellation;
+  refreshGroupOptions(event?.groupId || "");
+  $("#groupId").disabled = !!event && (event.registeredCount || 0) > 0;
+  $("#newGroupFields").classList.add("hidden");
+  $("#newGroupMax").value = settings.maxRegistrations || 1;
+  renderEventFaculties(event?.allowedFaculties?.length ? event.allowedFaculties : [DEFAULT_FACULTY]);
+  $("#eventDialog").showModal();
+}
+
+$("#groupId").onchange = () => {
+  const creating = $("#groupId").value === "__new__";
+  $("#newGroupFields").classList.toggle("hidden", !creating);
+  $("#newGroupName").required = creating;
+  $("#newGroupMax").required = creating;
+};
+
+$("#eventForm").onsubmit = async (event) => {
+  event.preventDefault();
+  const submit = event.submitter || event.target.querySelector('button[type="submit"],button:not([type])');
+  const error = $("#eventFormError");
+  submit.disabled = true;
+  submit.textContent = "Đang lưu…";
+  error.classList.add("hidden");
+  const id = $("#eventId").value;
+  const data = {};
+  for (const key of ["title", "description", "date", "location", "startTime", "endTime", "status"]) data[key] = $("#" + key).value.trim();
+  data.openAt = $("#openAt").value ? Timestamp.fromDate(new Date($("#openAt").value)) : null;
+  data.closeAt = $("#closeAt").value ? Timestamp.fromDate(new Date($("#closeAt").value)) : null;
+  data.capacity = Number($("#capacity").value);
+  data.allowedFaculties = [...document.querySelectorAll(".event-faculty:checked")].map((input) => input.value);
+  data.allowCancellation = $("#eventAllowCancellation").checked;
+  data.updatedAt = serverTimestamp();
+  try {
+    if (!data.title || !data.date || !data.location || !data.startTime || !Number.isInteger(data.capacity) || data.capacity < 1) throw Error("Vui lòng nhập đầy đủ các trường bắt buộc.");
+    if (!data.openAt || !data.closeAt) throw Error("Vui lòng chọn thời gian mở và đóng đăng ký.");
+    if (data.openAt.toMillis() >= data.closeAt.toMillis()) throw Error("Giờ đóng phải sau giờ mở đăng ký.");
+    if (!data.allowedFaculties.length) throw Error("Vui lòng chọn ít nhất một khoa/đơn vị.");
+    let selectedGroup = $("#groupId").value;
+    let group = null;
+    if (selectedGroup === "__new__") {
+      const name = $("#newGroupName").value.trim();
+      const maxRegistrations = Number($("#newGroupMax").value);
+      if (!name || !Number.isInteger(maxRegistrations) || maxRegistrations < 1 || maxRegistrations > 20) throw Error("Tên nhóm và giới hạn từ 1 đến 20 là bắt buộc.");
+      const groupRef = await addDoc(collection(db, "eventGroups"), { name, maxRegistrations, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      selectedGroup = groupRef.id;
+      group = { id: groupRef.id, name, maxRegistrations };
+    } else if (selectedGroup) {
+      group = groups.find((item) => item.id === selectedGroup);
+      if (!group) throw Error("Nhóm sự kiện không tồn tại.");
+    }
+    data.groupId = group?.id || "";
+    data.groupName = group?.name || "";
+    data.groupMaxRegistrations = group?.maxRegistrations || 0;
+    if (id) {
+      const old = events.find((item) => item.id === id);
+      if (!old) throw Error("Không tìm thấy sự kiện.");
+      if (data.capacity < (old.registeredCount || 0)) throw Error("Sức chứa không thể nhỏ hơn số đã đăng ký.");
+      if ((old.registeredCount || 0) > 0 && data.groupId !== (old.groupId || "")) throw Error("Không thể đổi nhóm khi sự kiện đã có người đăng ký.");
+      await updateDoc(doc(db, "events", id), data);
+    } else {
+      await addDoc(collection(db, "events"), { ...data, registeredCount: 0, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdByName: user.displayName || "", createdAt: serverTimestamp() });
+    }
+    $("#eventDialog").close();
+    notice("Đã lưu sự kiện.", "success");
+  } catch (saveError) {
+    error.textContent = saveError.message || "Không thể lưu sự kiện.";
+    error.classList.remove("hidden");
+  } finally {
+    submit.disabled = false;
+    submit.textContent = "Lưu sự kiện";
+  }
+};
+
+$("#addFacultyBtn").onclick = () => {
+  const name = $("#newFaculty").value.trim();
+  if (!name) return;
+  settings.faculties = [...new Set([...(settings.faculties || [DEFAULT_FACULTY]), name])];
+  $("#newFaculty").value = "";
+  renderFacultySettings();
+};
+
+$("#settingsForm").onsubmit = async (event) => {
+  event.preventDefault();
+  try {
+    await setDoc(doc(db, "settings", "main"), { maxRegistrations: Number($("#maxRegistrations").value), faculties: settings.faculties || [DEFAULT_FACULTY], participantDomains: ["student.tdtu.edu.vn", "tdtu.edu.vn"], updatedBy: user.email, updatedAt: serverTimestamp() }, { merge: true });
+    notice("Đã lưu thiết lập.", "success");
+  } catch (error) {
+    notice(error.message, "error");
+  }
+};
+
+$("#adminForm").onsubmit = async (event) => {
+  event.preventDefault();
+  const email = $("#adminEmail").value.trim().toLowerCase();
+  try {
+    await setDoc(doc(db, "admins", email), { email, name: $("#adminName").value.trim(), addedByUid: user.uid, addedAt: serverTimestamp() });
+    event.target.reset();
+    notice("Đã thêm Admin.", "success");
+  } catch (error) {
+    notice(error.message, "error");
+  }
+};
+
+document.addEventListener("click", async (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  if (button.dataset.pane) {
+    document.querySelectorAll(".nav-btn").forEach((item) => item.classList.remove("active"));
+    button.classList.add("active");
+    document.querySelectorAll(".pane").forEach((item) => item.classList.toggle("hidden", item.dataset.paneId !== button.dataset.pane));
+  }
+  if (button.dataset.newEvent !== undefined) openEvent();
+  if (button.dataset.close !== undefined) $("#eventDialog").close();
+  if (button.dataset.edit) openEvent(events.find((item) => item.id === button.dataset.edit));
+  if (button.dataset.delete) {
+    const selected = events.find((item) => item.id === button.dataset.delete);
+    if (selected && confirm(`Xóa sự kiện “${selected.title}”?`)) try {
+      await deleteDoc(doc(db, "events", selected.id));
+      notice("Đã xóa sự kiện.", "success");
+    } catch (error) {
+      notice(error.message, "error");
+    }
+  }
+  if (button.dataset.removeAdmin && confirm(`Xóa quyền Admin của ${button.dataset.removeAdmin}?`)) try {
+    await deleteDoc(doc(db, "admins", button.dataset.removeAdmin));
+    notice("Đã xóa Admin.", "success");
+  } catch (error) {
+    notice(error.message, "error");
+  }
+  if (button.dataset.removeFaculty) {
+    settings.faculties = (settings.faculties || []).filter((faculty) => faculty !== button.dataset.removeFaculty);
+    renderFacultySettings();
+  }
+});
+
+$("#eventFilter").onchange = renderRegs;
+$("#exportBtn").onclick = () => {
+  const filter = $("#eventFilter").value;
+  const list = filter ? regs.filter((registration) => registration.eventId === filter) : regs;
+  const rows = list.map((registration, index) => ({ STT: index + 1, "Mã số": registration.identifier || registration.mssv, "Họ tên": registration.name, "Số điện thoại": registration.phone, "Khoa/Đơn vị": registration.faculty, "Đối tượng": registration.participantType || "Sinh viên", Email: registration.email, "Sự kiện": registration.eventTitle, "Nhóm sự kiện": registration.groupName || "Không nhóm", "Ngày sự kiện": registration.eventDate, "Thời gian đăng ký": ts(registration.createdAt) }));
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), "Đăng ký");
+  XLSX.writeFile(workbook, `IFAHr_Danh_sach_${new Date().toISOString().slice(0, 10)}.xlsx`);
+};
+$("#loginBtn").onclick = () => signInWithPopup(auth, provider);
+$("#logoutBtn").onclick = () => signOut(auth);
+
+onAuthStateChanged(auth, async (currentUser) => {
+  if (!currentUser) {
+    $("#adminLogin").classList.remove("hidden");
+    $("#adminApp").classList.add("hidden");
+    return;
+  }
+  if (!currentUser.emailVerified || !(await hasAccess(currentUser))) {
+    await signOut(auth);
+    alert("Tài khoản này chưa được cấp quyền Admin IFAHr.");
+    return;
+  }
+  user = currentUser;
+  isOwner = currentUser.email.toLowerCase() === OWNER_EMAIL;
+  $("#accountEmail").textContent = currentUser.email;
+  $("#roleText").textContent = `Quyền hiện tại: ${isOwner ? "Chủ sở hữu" : "Admin"}`;
+  $("#adminLogin").classList.add("hidden");
+  $("#adminApp").classList.remove("hidden");
+  $("#logoutBtn").classList.remove("hidden");
+  $("#adminNav").classList.toggle("hidden", !isOwner);
+  $("#settingsNav").classList.toggle("hidden", !isOwner);
+  listen();
+});
