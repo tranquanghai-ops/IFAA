@@ -14,6 +14,8 @@ Hệ thống đăng ký sự kiện dành cho Khoa Mỹ thuật Công nghiệp, 
 - Người tham gia nhập họ tên, số điện thoại và khoa/đơn vị ở lần đầu; hồ sơ được lưu và có thể sửa lại.
 - Mỗi nhóm sự kiện có một giới hạn riêng, ví dụ tối đa 1 hoặc 2 sự kiện/người trong nhóm.
 - Sự kiện không thuộc nhóm không bị tính vào giới hạn; sức chứa của từng sự kiện vẫn luôn được áp dụng.
+- Trang người tham gia hiển thị sự kiện sắp mở, đang mở, đã đóng và đã kết thúc kèm đồng hồ đếm ngược.
+- Admin có thể ẩn sự kiện cũ, chọn khoa/đơn vị được tham gia và bật quyền tự hủy riêng cho từng sự kiện.
 
 ## Hoàn tất Firebase
 
