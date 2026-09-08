@@ -7,7 +7,7 @@ Hệ thống đăng ký sự kiện dành cho Khoa Mỹ thuật Công nghiệp, 
 - Sinh viên: đăng nhập Google bằng `MSSV@student.tdtu.edu.vn`.
 - Giảng viên/nhân sự: đăng nhập Google bằng email `@tdtu.edu.vn` và có thể đăng ký sự kiện như sinh viên.
 - Chủ sở hữu: `tranquanghai@tdtu.edu.vn`, quản lý toàn hệ thống và danh sách Admin.
-- Admin: email `@tdtu.edu.vn` được chủ sở hữu cấp quyền; xem/sửa mọi sự kiện nhưng chỉ xóa sự kiện do mình tạo.
+- Admin: bất kỳ tài khoản Google nào được chủ sở hữu cấp quyền; có thể vào trang quản trị và đăng ký sự kiện ở trang ngoài.
 
 ## Hoàn tất Firebase
 
