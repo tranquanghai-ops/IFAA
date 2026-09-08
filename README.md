@@ -24,7 +24,7 @@ Hệ thống đăng ký sự kiện dành cho Khoa Mỹ thuật Công nghiệp, 
 3. Chép các giá trị cấu hình Web vào `firebase-config.mjs`.
 4. Thêm `tranquanghai-ops.github.io` vào Authentication > Settings > Authorized domains.
 5. Dán `firestore.rules` vào Firestore > Rules và Publish.
-6. Tạo tài liệu `settings/main` ở lần đầu bằng trang Admin, hoặc đặt `maxRegistrations: 1`, `allowCancellation: false`. `maxRegistrations` là giá trị mặc định khi tạo nhóm mới.
+6. Tạo tài liệu `settings/main` ở lần đầu bằng trang Admin, hoặc đặt `maxRegistrations: 1`, `faculties: ["Khoa Mỹ thuật Công nghiệp"]`. `maxRegistrations` là giá trị mặc định khi tạo nhóm mới; quyền tự hủy được thiết lập riêng ở từng sự kiện.
 
 ## GitHub Pages
 
