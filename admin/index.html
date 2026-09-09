@@ -39,7 +39,7 @@
 
 <div class="pane hidden" data-pane-id="settings"><div class="toolbar"><div><h2>Thiết lập đăng ký</h2><p>Quản lý danh sách khoa/đơn vị được sử dụng.</p></div></div><form id="settingsForm" class="card form-grid"><div class="field"><label>Tên hệ thống</label><input value="IFA+A" disabled></div><div class="field span-2"><label>Thêm khoa/đơn vị</label><div class="inline-add"><input id="newFaculty" maxlength="160" placeholder="Nhập tên khoa/đơn vị"><button id="addFacultyBtn" class="btn" type="button">＋ Thêm</button></div><div id="facultySettingsList" class="check-list"></div><small>Mặc định hệ thống có Khoa Mỹ thuật Công nghiệp.</small></div><div><button class="btn btn-primary">Lưu thiết lập</button></div></form></div>
 </section></div>
-<footer class="foot">IFA+A Admin · V1.2</footer>
+<footer class="foot">IFA+A Admin · V1.3</footer>
 </main>
 
 <dialog id="eventDialog"><form id="eventForm" class="modal"><div class="modal-head"><h2 id="eventDialogTitle">Tạo sự kiện</h2><button type="button" class="btn btn-small" data-close>Đóng</button></div><input id="eventId" type="hidden"><div class="form-grid">
@@ -57,6 +57,7 @@
 
 <dialog id="groupDialog"><form id="groupForm" class="modal group-modal"><div class="modal-head"><h2 id="groupDialogTitle">Tạo nhóm sự kiện</h2><button type="button" class="btn btn-small" data-close-group>Đóng</button></div><input id="groupEditId" type="hidden"><div class="form-grid">
   <div class="field span-2"><label>Tên nhóm</label><input id="groupName" maxlength="120" required></div>
+  <div class="field span-2"><label>Mã liên kết dễ nhớ</label><input id="groupShareCode" maxlength="60" placeholder="Ví dụ: MTCN"><small>Liên kết sẽ có dạng <b>?e=MTCN</b>. Để trống, hệ thống tự tạo từ tên nhóm.</small></div>
   <div class="field"><label>Số sự kiện tối đa/người</label><input id="groupMaxRegistrations" type="number" min="1" max="20" value="2" required><small>Mặc định là 2, có thể thay đổi từ 1 đến 20.</small></div>
   <label class="check span-2 event-option"><input id="groupLinkOnly" type="checkbox"> Ẩn nhóm khỏi trang sự kiện chung, chỉ hiển thị khi mở bằng liên kết riêng</label>
 </div><div id="groupFormError" class="notice error hidden" role="alert"></div><div class="modal-actions"><button type="button" class="btn" data-close-group>Hủy</button><button class="btn btn-primary">Lưu nhóm</button></div></form></dialog>
