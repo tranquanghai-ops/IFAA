@@ -215,7 +215,7 @@ function render() {
     const label = { upcoming: "SẮP MỞ", open: "ĐANG MỞ", full: "ĐÃ ĐỦ", closed: "ĐÃ ĐÓNG ĐĂNG KÝ", ended: "ĐÃ KẾT THÚC", hidden: "ĐÃ ẨN" }[state];
     const tagClass = state === "hidden" ? "closed" : state;
     const groupLine = group.text ? `<span><b>${safe(group.text)}</b></span>` : "";
-    return `<article class="card event event-${state} ${registered ? "event-registered" : ""}"><div class="event-top"><div><span class="tag ${tagClass}">${label}</span>${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}<h3>${safe(event.title)}</h3></div></div><div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(formatDate(event))} · ${safe(event.startTime || "")}${event.endTime ? `–${safe(event.endTime)}` : ""} · <b>${safe(dayPeriod(event.startTime))}</b></span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(event, state))}</span>${groupLine}</div><div class="progress"><i style="width:${percent}%"></i></div><div class="capacity"><span>${used}/${capacity} người tham gia</span><b class="${lowSeats ? "low-seats" : ""}">Còn ${left} chỗ</b></div><div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${registered && event.allowCancellation ? `<button class="btn btn-danger" data-cancel="${event.id}">Hủy đăng ký</button>` : `<button class="btn btn-primary" data-register="${event.id}" ${disabled || registered ? "disabled" : ""}>${registered ? "Đã đăng ký" : group.blocked ? "Đã đạt giới hạn nhóm" : state === "upcoming" ? "Chưa đến giờ" : "Đăng ký"}</button>`}</div></article>`;
+    return `<article class="card event event-${state} ${registered ? "event-registered" : ""}"><div class="event-top"><div><span class="tag ${tagClass}">${label}</span>${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}<h3>${safe(event.title)}</h3></div></div><div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(formatDate(event))} · ${safe(event.startTime || "")}${event.endTime ? `–${safe(event.endTime)}` : ""} · <b>${safe(dayPeriod(event.startTime))}</b></span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(event, state))}</span>${groupLine}</div><div class="progress"><i style="width:${percent}%"></i></div><div class="capacity"><span>${used}/${capacity} người tham gia</span><b class="${lowSeats ? "low-seats" : ""}">Còn ${left} chỗ</b></div><div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${registered && event.allowCancellation ? `<button class="btn btn-danger" data-cancel="${event.id}">Hủy đăng ký</button>` : `<button class="btn btn-primary" data-register="${event.id}" ${disabled || registered ? "disabled" : ""}>${registered ? "Đã đăng ký" : group.blocked ? "Đã đạt giới hạn đăng ký" : state === "upcoming" ? "Chưa đến giờ" : "Đăng ký"}</button>`}</div></article>`;
   }).join("");
 }
 
@@ -230,8 +230,10 @@ function showProfileForm(force = false) {
   $("#profileEmail").value = user?.email || "";
   const automaticIdentifier = studentIdentifier(user?.email);
   const emailIdentifier = String(user?.email || "").split("@")[0].toUpperCase();
-  $("#profileIdentifier").value = profile?.identifier || profile?.mssv || automaticIdentifier || emailIdentifier;
+  $("#profileIdentifier").value = automaticIdentifier || profile?.identifier || profile?.mssv || emailIdentifier;
   $("#profileIdentifier").readOnly = !!automaticIdentifier;
+  $("#profileIdentifier").disabled = !!automaticIdentifier;
+  $("#profileIdentifier").title = automaticIdentifier ? "MSSV được lấy tự động từ email sinh viên và không thể chỉnh sửa." : "";
   $("#profileName").value = profile?.name || user?.displayName || "";
   $("#profilePhone").value = profile?.phone || "";
   populateFacultyOptions();
@@ -378,7 +380,9 @@ $("#profileForm").onsubmit = async (event) => {
   button.disabled = true;
   try {
     const previous = profile;
-    const data = { uid: user.uid, email: user.email.toLowerCase(), participantType: participantType(user.email), identifier: $("#profileIdentifier").value.trim().toUpperCase(), mssv: $("#profileIdentifier").value.trim().toUpperCase(), name: $("#profileName").value.trim(), phone: $("#profilePhone").value.trim(), faculty: $("#profileFaculty").value, updatedAt: serverTimestamp() };
+    const automaticIdentifier = studentIdentifier(user.email);
+    const identifier = automaticIdentifier || $("#profileIdentifier").value.trim().toUpperCase();
+    const data = { uid: user.uid, email: user.email.toLowerCase(), participantType: participantType(user.email), identifier, mssv: identifier, name: $("#profileName").value.trim(), phone: $("#profilePhone").value.trim(), faculty: $("#profileFaculty").value, updatedAt: serverTimestamp() };
     if (!data.identifier || !data.name || !data.phone || !data.faculty) throw Error("Vui lòng nhập đầy đủ thông tin.");
     if (!/^[0-9+().\s-]{8,20}$/.test(data.phone)) throw Error("Số điện thoại chưa đúng định dạng.");
     await setDoc(doc(db, "profiles", user.uid), previous ? data : { ...data, createdAt: serverTimestamp() }, { merge: true });

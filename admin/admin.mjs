@@ -108,14 +108,14 @@ function render() {
     const [statusClass, statusText] = statusLabel(event);
     const state = eventState(event);
     const eventGroup = groups.find((item) => item.id === event.groupId);
-    const groupText = event.groupId ? `${safe(event.groupName)}<br><small>${eventGroup?.unlimited ? "Không giới hạn lượt" : `Tối đa ${event.groupMaxRegistrations}/người`}</small>` : "";
+    const groupText = event.groupId ? `${safe(event.groupName)}<br><small>${eventGroup?.unlimited ? "Không giới hạn lượt" : `Tối đa ${event.groupMaxRegistrations}/sự kiện`}</small>` : "";
     return `<tr class="${state === "ended" ? "admin-event-ended" : ""}"><td><b>${safe(event.title)}</b><br><small>${safe(event.location)}</small></td><td>${groupText}</td><td>${safe(event.date)}<br>${safe(event.startTime || "")}</td><td>${event.registeredCount || 0}/${event.capacity}</td><td>${safe(event.createdByName || event.createdByEmail)}</td><td><span class="tag ${statusClass}">${statusText}</span></td><td><div class="actions"><button class="btn btn-small" data-edit="${event.id}">Sửa</button><button class="btn btn-small btn-soft" data-copy-event="${event.id}">Sao chép</button><button class="btn btn-small btn-danger" data-delete="${event.id}" ${canDelete ? "" : `disabled title='${reason}'`}>Xóa</button></div></td></tr>`;
   }).join("") || '<tr><td colspan="7" class="empty">Không có sự kiện ở trạng thái này.</td></tr>';
 
   $("#groupRows").innerHTML = groups.map((group) => {
     const eventCount = events.filter((item) => item.groupId === group.id).length;
     const visibility = group.linkOnly ? '<span class="tag upcoming">CHỈ QUA LINK</span>' : '<span class="tag open">TRANG CHUNG</span>';
-    const limit = group.unlimited ? '<b>Không giới hạn</b>' : `Tối đa <b>${Number(group.maxRegistrations) || 1}</b> sự kiện/người`;
+    const limit = group.unlimited ? '<b>Không giới hạn</b>' : `Tối đa <b>${Number(group.maxRegistrations) || 1}</b>/sự kiện`;
     return `<tr><td><b>${safe(group.name)}</b><br><small>Mã: ${safe(groupCode(group))}</small></td><td>${limit}</td><td>${eventCount}</td><td>${visibility}</td><td><button class="btn btn-small btn-soft" data-copy-group-link="${group.id}">Sao chép liên kết</button></td><td><button class="btn btn-small" data-edit-group="${group.id}">Sửa nhóm</button></td></tr>`;
   }).join("") || '<tr><td colspan="6" class="empty">Chưa có nhóm sự kiện.</td></tr>';
 
