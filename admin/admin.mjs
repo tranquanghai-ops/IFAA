@@ -174,6 +174,8 @@ const inputDateTime = (value) => {
 
 function openEvent(event = null, copy = false) {
   $("#eventForm").reset();
+  delete $("#saveEventBtn").dataset.warningSignature;
+  $("#saveEventBtn").textContent = "Lưu sự kiện";
   $("#descriptionEditor").innerHTML = event?.descriptionHtml || (event?.description ? `<p>${safe(event.description).replace(/\n/g, "<br>")}</p>` : "");
   $("#eventFormError").classList.add("hidden");
   $("#eventId").value = copy ? "" : (event?.id || "");
@@ -235,8 +237,9 @@ $("#descriptionImageFile").onchange = (event) => {
 
 $("#eventForm").onsubmit = async (event) => {
   event.preventDefault();
-  const submit = event.submitter || event.target.querySelector('button[type="submit"],button:not([type])');
+  const submit = event.submitter || $("#saveEventBtn");
   const error = $("#eventFormError");
+  let keepWarningAction = false;
   submit.disabled = true;
   submit.textContent = "Đang lưu…";
   error.classList.add("hidden");
@@ -258,11 +261,21 @@ $("#eventForm").onsubmit = async (event) => {
     const eventEnd = new Date(`${data.date}T${data.endTime || data.startTime}:00`).getTime();
     const now = Date.now();
     if (!Number.isFinite(eventStart) || !Number.isFinite(eventEnd)) throw Error("Ngày hoặc giờ sự kiện không hợp lệ.");
-    if (data.endTime && eventEnd <= eventStart) throw Error("Giờ kết thúc sự kiện phải sau giờ bắt đầu.");
-    if (!id && eventStart <= now) throw Error("Ngày và giờ bắt đầu sự kiện phải sau thời điểm hiện tại.");
-    if (data.openAt.toMillis() >= data.closeAt.toMillis()) throw Error("Thời gian đóng đăng ký phải sau thời gian mở đăng ký.");
-    if (!id && data.closeAt.toMillis() <= now) throw Error("Thời gian đóng đăng ký phải sau thời điểm hiện tại.");
-    if (data.closeAt.toMillis() > eventStart) throw Error("Thời gian đóng đăng ký không được sau giờ bắt đầu sự kiện.");
+    const warnings = [];
+    if (data.endTime && eventEnd <= eventStart) warnings.push("Giờ kết thúc sự kiện đang trước hoặc bằng giờ bắt đầu.");
+    if (!id && eventStart <= now) warnings.push("Ngày và giờ bắt đầu sự kiện đã ở trong quá khứ.");
+    if (data.openAt.toMillis() >= data.closeAt.toMillis()) warnings.push("Thời gian đóng đăng ký đang trước hoặc bằng thời gian mở đăng ký.");
+    if (!id && data.closeAt.toMillis() <= now) warnings.push("Thời gian đóng đăng ký đã ở trong quá khứ.");
+    if (data.closeAt.toMillis() > eventStart) warnings.push("Thời gian đóng đăng ký đang sau giờ bắt đầu sự kiện.");
+    const warningSignature = [id, data.date, data.startTime, data.endTime, data.openAt.toMillis(), data.closeAt.toMillis(), ...warnings].join("|");
+    if (warnings.length && submit.dataset.warningSignature !== warningSignature) {
+      error.innerHTML = `<b>Cảnh báo ngày giờ chưa hợp lý:</b><ul>${warnings.map((message) => `<li>${safe(message)}</li>`).join("")}</ul><b>Nếu thông tin này là chủ ý, bấm “Vẫn lưu sự kiện”.</b>`;
+      error.className = "notice warning";
+      submit.dataset.warningSignature = warningSignature;
+      submit.textContent = "Vẫn lưu sự kiện";
+      keepWarningAction = true;
+      return;
+    }
     if (!data.allowedFaculties.length) throw Error("Vui lòng chọn ít nhất một khoa/đơn vị.");
     if (new Blob([JSON.stringify(data)]).size > 900000) throw Error("Nội dung mô tả hoặc hình ảnh quá lớn. Vui lòng giảm kích thước hình.");
     let selectedGroup = $("#groupId").value;
@@ -294,10 +307,14 @@ $("#eventForm").onsubmit = async (event) => {
     notice("Đã lưu sự kiện.", "success");
   } catch (saveError) {
     error.textContent = saveError.message || "Không thể lưu sự kiện.";
+    error.className = "notice error";
     error.classList.remove("hidden");
   } finally {
     submit.disabled = false;
-    submit.textContent = "Lưu sự kiện";
+    if (!keepWarningAction) {
+      submit.textContent = "Lưu sự kiện";
+      delete submit.dataset.warningSignature;
+    }
   }
 };
 
