@@ -6,7 +6,7 @@
 <section id="adminLogin" class="card login-card"><div class="mark logo-mark" aria-label="Logo Khoa Mỹ thuật Công nghiệp">IFA</div><h2>Trang quản trị</h2><p>Đăng nhập bằng tài khoản Google đã được cấp quyền.</p><button id="loginBtn" class="btn btn-primary">Đăng nhập Google</button></section>
 
 <div id="adminApp" class="admin-layout hidden">
-<aside class="sidebar"><div class="card"><button class="nav-btn active" data-pane="overview">Tổng quan</button><button class="nav-btn" data-pane="events">Sự kiện</button><button class="nav-btn" data-pane="registrations">Đăng ký</button><button id="adminNav" class="nav-btn hidden" data-pane="admins">Quản lý Admin</button><button id="settingsNav" class="nav-btn hidden" data-pane="settings">Thiết lập</button></div></aside>
+<aside class="sidebar"><div class="card"><button class="nav-btn active" data-pane="overview">Tổng quan</button><button class="nav-btn" data-pane="events">Sự kiện</button><button class="nav-btn" data-pane="groups">Nhóm sự kiện</button><button class="nav-btn" data-pane="registrations">Đăng ký</button><button id="adminNav" class="nav-btn hidden" data-pane="admins">Quản lý Admin</button><button id="settingsNav" class="nav-btn hidden" data-pane="settings">Thiết lập</button></div></aside>
 <section>
 <div id="adminNotice" class="notice hidden"></div>
 
@@ -28,13 +28,18 @@
   <div class="card table-wrap"><table><thead><tr><th>Sự kiện</th><th>Nhóm</th><th>Thời gian</th><th>Sức chứa</th><th>Người tạo</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody id="eventRows"></tbody></table></div>
 </div>
 
+<div class="pane hidden" data-pane-id="groups">
+  <div class="toolbar"><div><h2>Nhóm sự kiện</h2><p>Tạo nhóm, đặt giới hạn và lấy liên kết riêng để gửi cho sinh viên.</p></div><button id="newGroupBtn" class="btn btn-primary">＋ Tạo nhóm</button></div>
+  <div class="card table-wrap"><table><thead><tr><th>Nhóm</th><th>Giới hạn</th><th>Số sự kiện</th><th>Hiển thị</th><th>Liên kết riêng</th><th>Thao tác</th></tr></thead><tbody id="groupRows"></tbody></table></div>
+</div>
+
 <div class="pane hidden" data-pane-id="registrations"><div class="toolbar"><div><h2>Danh sách đăng ký</h2><p>Lọc theo sự kiện và xuất Excel.</p></div><button id="exportBtn" class="btn btn-primary">↓ Xuất Excel</button></div><div class="card"><div class="field"><label>Sự kiện</label><select id="eventFilter"><option value="">Tất cả sự kiện</option></select></div></div><div class="card table-wrap"><table><thead><tr><th>STT</th><th>MSSV/Mã số</th><th>Họ tên</th><th>Điện thoại</th><th>Khoa/Đơn vị</th><th>Đối tượng</th><th>Email</th><th>Sự kiện</th><th>Thời gian</th></tr></thead><tbody id="regRows"></tbody></table></div></div>
 
 <div class="pane hidden" data-pane-id="admins"><div class="toolbar"><div><h2>Quản lý Admin</h2><p>Chỉ chủ sở hữu được thêm hoặc xóa Admin; chấp nhận mọi tài khoản Google.</p></div></div><div class="card"><form id="adminForm" class="form-grid"><div class="field"><label>Email Admin</label><input id="adminEmail" type="email" placeholder="email@gmail.com" required></div><div class="field"><label>Tên hiển thị</label><input id="adminName" maxlength="100"></div><div><button class="btn btn-primary">Thêm Admin</button></div></form></div><div class="card table-wrap"><table><thead><tr><th>Tên</th><th>Email</th><th>Ngày thêm</th><th></th></tr></thead><tbody id="adminRows"></tbody></table></div></div>
 
 <div class="pane hidden" data-pane-id="settings"><div class="toolbar"><div><h2>Thiết lập đăng ký</h2><p>Quản lý danh sách khoa/đơn vị được sử dụng.</p></div></div><form id="settingsForm" class="card form-grid"><div class="field"><label>Tên hệ thống</label><input value="IFA+A" disabled></div><div class="field span-2"><label>Thêm khoa/đơn vị</label><div class="inline-add"><input id="newFaculty" maxlength="160" placeholder="Nhập tên khoa/đơn vị"><button id="addFacultyBtn" class="btn" type="button">＋ Thêm</button></div><div id="facultySettingsList" class="check-list"></div><small>Mặc định hệ thống có Khoa Mỹ thuật Công nghiệp.</small></div><div><button class="btn btn-primary">Lưu thiết lập</button></div></form></div>
 </section></div>
-<footer class="foot">IFA+A Admin · V1.1</footer>
+<footer class="foot">IFA+A Admin · V1.2</footer>
 </main>
 
 <dialog id="eventDialog"><form id="eventForm" class="modal"><div class="modal-head"><h2 id="eventDialogTitle">Tạo sự kiện</h2><button type="button" class="btn btn-small" data-close>Đóng</button></div><input id="eventId" type="hidden"><div class="form-grid">
@@ -49,5 +54,11 @@
   <div class="field"><label>Mở đăng ký lúc</label><input id="openAt" type="datetime-local" required></div><div class="field"><label>Đóng đăng ký lúc</label><input id="closeAt" type="datetime-local" required></div>
   <label class="check span-2 event-option"><input id="eventAllowCancellation" type="checkbox"> Cho phép người tham gia tự hủy đăng ký sự kiện này</label>
 </div><div id="eventFormError" class="notice error hidden" role="alert"></div><div class="modal-actions"><button type="button" class="btn" data-close>Hủy</button><button class="btn btn-primary">Lưu sự kiện</button></div></form></dialog>
+
+<dialog id="groupDialog"><form id="groupForm" class="modal group-modal"><div class="modal-head"><h2 id="groupDialogTitle">Tạo nhóm sự kiện</h2><button type="button" class="btn btn-small" data-close-group>Đóng</button></div><input id="groupEditId" type="hidden"><div class="form-grid">
+  <div class="field span-2"><label>Tên nhóm</label><input id="groupName" maxlength="120" required></div>
+  <div class="field"><label>Số sự kiện tối đa/người</label><input id="groupMaxRegistrations" type="number" min="1" max="20" value="2" required><small>Mặc định là 2, có thể thay đổi từ 1 đến 20.</small></div>
+  <label class="check span-2 event-option"><input id="groupLinkOnly" type="checkbox"> Ẩn nhóm khỏi trang sự kiện chung, chỉ hiển thị khi mở bằng liên kết riêng</label>
+</div><div id="groupFormError" class="notice error hidden" role="alert"></div><div class="modal-actions"><button type="button" class="btn" data-close-group>Hủy</button><button class="btn btn-primary">Lưu nhóm</button></div></form></dialog>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script><script type="module" src="./admin.mjs"></script>
 </body></html>
