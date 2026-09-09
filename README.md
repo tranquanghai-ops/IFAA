@@ -1,4 +1,4 @@
-# IFAHr V1.0
+# IFA+A (IFAA) V1.1
 
 Hệ thống đăng ký sự kiện dành cho Khoa Mỹ thuật Công nghiệp, TDTU.
 
@@ -20,12 +20,12 @@ Hệ thống đăng ký sự kiện dành cho Khoa Mỹ thuật Công nghiệp, 
 ## Hoàn tất Firebase
 
 1. Bật Authentication > Google.
-2. Đăng ký một Web app tên `IFAHr Web`.
+2. Đăng ký một Web app tên `IFA+A Web`.
 3. Chép các giá trị cấu hình Web vào `firebase-config.mjs`.
 4. Thêm `tranquanghai-ops.github.io` vào Authentication > Settings > Authorized domains.
 5. Dán `firestore.rules` vào Firestore > Rules và Publish.
-6. Tạo tài liệu `settings/main` ở lần đầu bằng trang Admin, hoặc đặt `maxRegistrations: 1`, `faculties: ["Khoa Mỹ thuật Công nghiệp"]`. `maxRegistrations` là giá trị mặc định khi tạo nhóm mới; quyền tự hủy được thiết lập riêng ở từng sự kiện.
+6. Tạo tài liệu `settings/main` ở lần đầu bằng trang Admin, với `faculties: ["Khoa Mỹ thuật Công nghiệp"]`. Giới hạn được chọn riêng khi tạo từng nhóm (mặc định 2); quyền tự hủy được thiết lập riêng ở từng sự kiện.
 
 ## GitHub Pages
 
-Đưa toàn bộ thư mục lên repository `IFAHr`, rồi bật Pages từ nhánh `main`, thư mục `/ (root)`.
+Đưa toàn bộ thư mục lên repository `IFAA`, rồi bật Pages từ nhánh `main`, thư mục `/ (root)`.
