@@ -15,6 +15,14 @@ const millis = (value) => value?.toDate ? value.toDate().getTime() : (value ? ne
 const studentIdentifier = (email) => String(email || "").toLowerCase().endsWith(STUDENT_DOMAIN) ? String(email).split("@")[0].toUpperCase() : "";
 const linkedGroupId = new URLSearchParams(window.location.search).get("e")?.trim() || "";
 
+function shareCode(value) {
+  return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/gi, "d").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60).toUpperCase();
+}
+
+function groupCode(group) {
+  return shareCode(group?.shareCode || group?.name) || group?.id || "";
+}
+
 function sanitizeRichHtml(value) {
   const template = document.createElement("template");
   template.innerHTML = String(value || "");
@@ -127,7 +135,7 @@ function facultyAllowed(event) {
 }
 
 function groupStatus(event) {
-  if (!event.groupId) return { text: "Không giới hạn lượt", blocked: false };
+  if (!event.groupId) return { text: "", blocked: false };
   const stat = groupLimits.get(event.groupId);
   const groupInfo = groups.get(event.groupId);
   const used = stat?.count || 0;
@@ -136,7 +144,7 @@ function groupStatus(event) {
 }
 
 function render() {
-  const focusedGroup = linkedGroupId ? groups.get(linkedGroupId) : null;
+  const focusedGroup = linkedGroupId ? [...groups.values()].find((group) => group.id === linkedGroupId || groupCode(group) === shareCode(linkedGroupId)) : null;
   $("#groupFocusPanel").classList.toggle("hidden", !linkedGroupId);
   if (linkedGroupId) {
     $("#groupFocusTitle").textContent = focusedGroup?.name || (groupsLoaded ? "Không tìm thấy nhóm sự kiện" : "Đang tải nhóm sự kiện…");
@@ -146,9 +154,9 @@ function render() {
   }
   const candidates = events.filter((event) => {
     if (!facultyAllowed(event)) return false;
-    if (filter === "mine") return myRegs.has(event.id) && (!linkedGroupId || event.groupId === linkedGroupId);
+    if (filter === "mine") return myRegs.has(event.id) && (!linkedGroupId || event.groupId === focusedGroup?.id);
     if (eventState(event) === "hidden") return false;
-    if (linkedGroupId) return event.groupId === linkedGroupId;
+    if (linkedGroupId) return event.groupId === focusedGroup?.id;
     return !groups.get(event.groupId)?.linkOnly;
   });
   const list = candidates.filter((event) => {
@@ -181,7 +189,8 @@ function render() {
     const disabled = state !== "open" || group.blocked;
     const label = { upcoming: "SẮP MỞ", open: "ĐANG MỞ", full: "ĐÃ ĐỦ", closed: "ĐÃ ĐÓNG ĐĂNG KÝ", ended: "ĐÃ KẾT THÚC", hidden: "ĐÃ ẨN" }[state];
     const tagClass = state === "hidden" ? "closed" : state;
-    return `<article class="card event"><div class="event-top"><div><span class="tag ${tagClass}">${label}</span>${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}<h3>${safe(event.title)}</h3></div></div><div class="meta"><span>◷ ${safe(formatDate(event))} · ${safe(event.startTime || "")}${event.endTime ? `–${safe(event.endTime)}` : ""}</span><span>⌖ ${safe(event.location || "Chưa cập nhật địa điểm")}</span><span class="countdown">${safe(timingStatus(event, state))}</span><span><b>${safe(group.text)}</b></span></div><div class="progress"><i style="width:${percent}%"></i></div><div class="capacity"><span>${used}/${capacity} người tham gia</span><b>Còn ${left} chỗ</b></div><div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${registered && event.allowCancellation ? `<button class="btn btn-danger" data-cancel="${event.id}">Hủy đăng ký</button>` : `<button class="btn btn-primary" data-register="${event.id}" ${disabled || registered ? "disabled" : ""}>${registered ? "Đã đăng ký" : group.blocked ? "Đã đạt giới hạn nhóm" : state === "upcoming" ? "Chưa đến giờ" : "Đăng ký"}</button>`}</div></article>`;
+    const groupLine = group.text ? `<span><b>${safe(group.text)}</b></span>` : "";
+    return `<article class="card event event-${state} ${registered ? "event-registered" : ""}"><div class="event-top"><div><span class="tag ${tagClass}">${label}</span>${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}<h3>${safe(event.title)}</h3></div></div><div class="meta"><span>◷ ${safe(formatDate(event))} · ${safe(event.startTime || "")}${event.endTime ? `–${safe(event.endTime)}` : ""}</span><span>⌖ ${safe(event.location || "Chưa cập nhật địa điểm")}</span><span class="countdown">${safe(timingStatus(event, state))}</span>${groupLine}</div><div class="progress"><i style="width:${percent}%"></i></div><div class="capacity"><span>${used}/${capacity} người tham gia</span><b>Còn ${left} chỗ</b></div><div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${registered && event.allowCancellation ? `<button class="btn btn-danger" data-cancel="${event.id}">Hủy đăng ký</button>` : `<button class="btn btn-primary" data-register="${event.id}" ${disabled || registered ? "disabled" : ""}>${registered ? "Đã đăng ký" : group.blocked ? "Đã đạt giới hạn nhóm" : state === "upcoming" ? "Chưa đến giờ" : "Đăng ký"}</button>`}</div></article>`;
   }).join("");
 }
 
@@ -330,7 +339,8 @@ function openDetail(id) {
   const group = groupStatus(chosen);
   $("#detailTitle").textContent = chosen.title;
   const description = chosen.descriptionHtml ? sanitizeRichHtml(chosen.descriptionHtml) : `<p>${safe(chosen.description || "Không có mô tả.")}</p>`;
-  $("#detailBody").innerHTML = `<div class="meta"><span><b>Thời gian:</b> ${safe(formatDate(chosen))}, ${safe(chosen.startTime || "")}${chosen.endTime ? `–${safe(chosen.endTime)}` : ""}</span><span><b>Địa điểm:</b> ${safe(chosen.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(chosen, state))}</span><span><b>${safe(group.text)}</b></span></div><div class="rich-content">${description}</div><div class="notice">Còn ${Math.max(0, chosen.capacity - (chosen.registeredCount || 0))} chỗ.</div>`;
+  const groupLine = group.text ? `<span><b>${safe(group.text)}</b></span>` : "";
+  $("#detailBody").innerHTML = `<div class="meta"><span><b>Thời gian:</b> ${safe(formatDate(chosen))}, ${safe(chosen.startTime || "")}${chosen.endTime ? `–${safe(chosen.endTime)}` : ""}</span><span><b>Địa điểm:</b> ${safe(chosen.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(chosen, state))}</span>${groupLine}</div><div class="rich-content">${description}</div><div class="notice">Còn ${Math.max(0, chosen.capacity - (chosen.registeredCount || 0))} chỗ.</div>`;
   $("#confirmBtn").disabled = state !== "open" || group.blocked || myRegs.has(chosen.id);
   $("#detailDialog").showModal();
 }
