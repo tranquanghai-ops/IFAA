@@ -23,6 +23,14 @@ let groups = [];
 let settings = { faculties: [DEFAULT_FACULTY] };
 let adminStatusFilter = "all";
 
+function groupShareUrl(groupId) {
+  const url = new URL("../", window.location.href);
+  url.search = "";
+  url.hash = "";
+  url.searchParams.set("e", groupId);
+  return url.toString();
+}
+
 function notice(message, type = "") {
   const element = $("#adminNotice");
   element.textContent = message;
@@ -82,8 +90,14 @@ function render() {
     const reason = (event.registeredCount || 0) > 0 ? "Không thể xóa sự kiện đã có đăng ký" : "Chỉ xóa sự kiện do mình tạo";
     const [statusClass, statusText] = statusLabel(event);
     const groupText = event.groupId ? `${safe(event.groupName)}<br><small>Tối đa ${event.groupMaxRegistrations}/người</small>` : "Không giới hạn lượt";
-    return `<tr><td><b>${safe(event.title)}</b><br><small>${safe(event.location)}</small></td><td>${groupText}</td><td>${safe(event.date)}<br>${safe(event.startTime || "")}</td><td>${event.registeredCount || 0}/${event.capacity}</td><td>${safe(event.createdByName || event.createdByEmail)}</td><td><span class="tag ${statusClass}">${statusText}</span></td><td><div class="actions"><button class="btn btn-small" data-edit="${event.id}">Sửa</button><button class="btn btn-small btn-danger" data-delete="${event.id}" ${canDelete ? "" : `disabled title='${reason}'`}>Xóa</button></div></td></tr>`;
+    return `<tr><td><b>${safe(event.title)}</b><br><small>${safe(event.location)}</small></td><td>${groupText}</td><td>${safe(event.date)}<br>${safe(event.startTime || "")}</td><td>${event.registeredCount || 0}/${event.capacity}</td><td>${safe(event.createdByName || event.createdByEmail)}</td><td><span class="tag ${statusClass}">${statusText}</span></td><td><div class="actions"><button class="btn btn-small" data-edit="${event.id}">Sửa</button><button class="btn btn-small btn-soft" data-copy-event="${event.id}">Sao chép</button><button class="btn btn-small btn-danger" data-delete="${event.id}" ${canDelete ? "" : `disabled title='${reason}'`}>Xóa</button></div></td></tr>`;
   }).join("") || '<tr><td colspan="7" class="empty">Không có sự kiện ở trạng thái này.</td></tr>';
+
+  $("#groupRows").innerHTML = groups.map((group) => {
+    const eventCount = events.filter((item) => item.groupId === group.id).length;
+    const visibility = group.linkOnly ? '<span class="tag upcoming">CHỈ QUA LINK</span>' : '<span class="tag open">TRANG CHUNG</span>';
+    return `<tr><td><b>${safe(group.name)}</b><br><small>${safe(group.createdByEmail || "")}</small></td><td>Tối đa <b>${Number(group.maxRegistrations) || 1}</b> sự kiện/người</td><td>${eventCount}</td><td>${visibility}</td><td><button class="btn btn-small btn-soft" data-copy-group-link="${group.id}">Sao chép liên kết</button></td><td><button class="btn btn-small" data-edit-group="${group.id}">Sửa nhóm</button></td></tr>`;
+  }).join("") || '<tr><td colspan="6" class="empty">Chưa có nhóm sự kiện.</td></tr>';
 
   const selectedFilter = $("#eventFilter").value;
   $("#eventFilter").innerHTML = '<option value="">Tất cả sự kiện</option>' + events.map((event) => `<option value="${event.id}">${safe(event.title)}</option>`).join("");
@@ -102,6 +116,17 @@ function refreshGroupOptions(selected = "") {
   const select = $("#groupId");
   select.innerHTML = '<option value="">Không nhóm — không giới hạn lượt</option>' + groups.map((group) => `<option value="${group.id}">${safe(group.name)} — tối đa ${group.maxRegistrations}</option>`).join("") + '<option value="__new__">＋ Tạo nhóm mới</option>';
   select.value = selected || "";
+}
+
+function openGroup(group = null) {
+  $("#groupForm").reset();
+  $("#groupEditId").value = group?.id || "";
+  $("#groupDialogTitle").textContent = group ? "Chỉnh sửa nhóm sự kiện" : "Tạo nhóm sự kiện";
+  $("#groupName").value = group?.name || "";
+  $("#groupMaxRegistrations").value = group?.maxRegistrations || 2;
+  $("#groupLinkOnly").checked = !!group?.linkOnly;
+  $("#groupFormError").classList.add("hidden");
+  $("#groupDialog").showModal();
 }
 
 function renderFacultySettings() {
@@ -123,6 +148,7 @@ function listen() {
   onSnapshot(query(collection(db, "eventGroups"), orderBy("createdAt", "desc")), (snapshot) => {
     groups = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
     refreshGroupOptions($("#groupId").value);
+    render();
   }, (error) => notice(error.message, "error"));
   onSnapshot(query(collection(db, "events"), orderBy("createdAt", "desc")), (snapshot) => {
     events = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
@@ -146,12 +172,12 @@ const inputDateTime = (value) => {
   return local.toISOString().slice(0, 16);
 };
 
-function openEvent(event = null) {
+function openEvent(event = null, copy = false) {
   $("#eventForm").reset();
   $("#descriptionEditor").innerHTML = event?.descriptionHtml || (event?.description ? `<p>${safe(event.description).replace(/\n/g, "<br>")}</p>` : "");
   $("#eventFormError").classList.add("hidden");
-  $("#eventId").value = event?.id || "";
-  $("#eventDialogTitle").textContent = event ? "Chỉnh sửa sự kiện" : "Tạo sự kiện";
+  $("#eventId").value = copy ? "" : (event?.id || "");
+  $("#eventDialogTitle").textContent = copy ? "Sao chép sự kiện" : event ? "Chỉnh sửa sự kiện" : "Tạo sự kiện";
   for (const key of ["title", "date", "location", "startTime", "endTime", "capacity", "status"]) if (event && $("#" + key)) $("#" + key).value = event[key] ?? "";
   if (event?.status === "draft") $("#status").value = "hidden";
   if (event) {
@@ -162,7 +188,7 @@ function openEvent(event = null) {
   }
   $("#eventAllowCancellation").checked = !!event?.allowCancellation;
   refreshGroupOptions(event?.groupId || "");
-  $("#groupId").disabled = !!event && (event.registeredCount || 0) > 0;
+  $("#groupId").disabled = !copy && !!event && (event.registeredCount || 0) > 0;
   $("#newGroupFields").classList.add("hidden");
   $("#newGroupMax").value = 2;
   renderEventFaculties(event?.allowedFaculties?.length ? event.allowedFaculties : [DEFAULT_FACULTY]);
@@ -228,7 +254,15 @@ $("#eventForm").onsubmit = async (event) => {
   try {
     if (!data.title || !data.date || !data.location || !data.startTime || !Number.isInteger(data.capacity) || data.capacity < 1) throw Error("Vui lòng nhập đầy đủ các trường bắt buộc.");
     if (!data.openAt || !data.closeAt) throw Error("Vui lòng chọn thời gian mở và đóng đăng ký.");
-    if (data.openAt.toMillis() >= data.closeAt.toMillis()) throw Error("Giờ đóng phải sau giờ mở đăng ký.");
+    const eventStart = new Date(`${data.date}T${data.startTime}:00`).getTime();
+    const eventEnd = new Date(`${data.date}T${data.endTime || data.startTime}:00`).getTime();
+    const now = Date.now();
+    if (!Number.isFinite(eventStart) || !Number.isFinite(eventEnd)) throw Error("Ngày hoặc giờ sự kiện không hợp lệ.");
+    if (data.endTime && eventEnd <= eventStart) throw Error("Giờ kết thúc sự kiện phải sau giờ bắt đầu.");
+    if (!id && eventStart <= now) throw Error("Ngày và giờ bắt đầu sự kiện phải sau thời điểm hiện tại.");
+    if (data.openAt.toMillis() >= data.closeAt.toMillis()) throw Error("Thời gian đóng đăng ký phải sau thời gian mở đăng ký.");
+    if (!id && data.closeAt.toMillis() <= now) throw Error("Thời gian đóng đăng ký phải sau thời điểm hiện tại.");
+    if (data.closeAt.toMillis() > eventStart) throw Error("Thời gian đóng đăng ký không được sau giờ bắt đầu sự kiện.");
     if (!data.allowedFaculties.length) throw Error("Vui lòng chọn ít nhất một khoa/đơn vị.");
     if (new Blob([JSON.stringify(data)]).size > 900000) throw Error("Nội dung mô tả hoặc hình ảnh quá lớn. Vui lòng giảm kích thước hình.");
     let selectedGroup = $("#groupId").value;
@@ -237,7 +271,7 @@ $("#eventForm").onsubmit = async (event) => {
       const name = $("#newGroupName").value.trim();
       const maxRegistrations = Number($("#newGroupMax").value || 2);
       if (!name || !Number.isInteger(maxRegistrations) || maxRegistrations < 1 || maxRegistrations > 20) throw Error("Tên nhóm và giới hạn từ 1 đến 20 là bắt buộc.");
-      const groupRef = await addDoc(collection(db, "eventGroups"), { name, maxRegistrations, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      const groupRef = await addDoc(collection(db, "eventGroups"), { name, maxRegistrations, linkOnly: false, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
       selectedGroup = groupRef.id;
       group = { id: groupRef.id, name, maxRegistrations };
     } else if (selectedGroup) {
@@ -264,6 +298,43 @@ $("#eventForm").onsubmit = async (event) => {
   } finally {
     submit.disabled = false;
     submit.textContent = "Lưu sự kiện";
+  }
+};
+
+$("#groupForm").onsubmit = async (event) => {
+  event.preventDefault();
+  const submit = event.submitter || event.target.querySelector('button[type="submit"],button:not([type])');
+  const error = $("#groupFormError");
+  submit.disabled = true;
+  submit.textContent = "Đang lưu…";
+  error.classList.add("hidden");
+  try {
+    const id = $("#groupEditId").value;
+    const name = $("#groupName").value.trim();
+    const maxRegistrations = Number($("#groupMaxRegistrations").value);
+    if (!name || !Number.isInteger(maxRegistrations) || maxRegistrations < 1 || maxRegistrations > 20) throw Error("Vui lòng nhập tên nhóm và giới hạn từ 1 đến 20.");
+    if (id) {
+      const countsByUser = new Map();
+      regs.filter((item) => item.groupId === id).forEach((item) => countsByUser.set(item.uid || item.email, (countsByUser.get(item.uid || item.email) || 0) + 1));
+      const highestCurrentCount = Math.max(0, ...countsByUser.values());
+      if (maxRegistrations < highestCurrentCount) throw Error(`Không thể giảm giới hạn xuống ${maxRegistrations}; hiện có người đã đăng ký ${highestCurrentCount} sự kiện trong nhóm.`);
+    }
+    const data = { name, maxRegistrations, linkOnly: $("#groupLinkOnly").checked, updatedAt: serverTimestamp() };
+    if (id) {
+      await updateDoc(doc(db, "eventGroups", id), data);
+      const groupedEvents = events.filter((item) => item.groupId === id);
+      await Promise.all(groupedEvents.map((item) => updateDoc(doc(db, "events", item.id), { groupName: name, groupMaxRegistrations: maxRegistrations, updatedAt: serverTimestamp() })));
+    } else {
+      await addDoc(collection(db, "eventGroups"), { ...data, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdAt: serverTimestamp() });
+    }
+    $("#groupDialog").close();
+    notice(id ? "Đã cập nhật nhóm sự kiện." : "Đã tạo nhóm sự kiện.", "success");
+  } catch (saveError) {
+    error.textContent = saveError.message || "Không thể lưu nhóm sự kiện.";
+    error.classList.remove("hidden");
+  } finally {
+    submit.disabled = false;
+    submit.textContent = "Lưu nhóm";
   }
 };
 
@@ -316,6 +387,19 @@ document.addEventListener("click", async (event) => {
   if (button.dataset.newEvent !== undefined) openEvent();
   if (button.dataset.close !== undefined) $("#eventDialog").close();
   if (button.dataset.edit) openEvent(events.find((item) => item.id === button.dataset.edit));
+  if (button.dataset.copyEvent) openEvent(events.find((item) => item.id === button.dataset.copyEvent), true);
+  if (button.id === "newGroupBtn") openGroup();
+  if (button.dataset.closeGroup !== undefined) $("#groupDialog").close();
+  if (button.dataset.editGroup) openGroup(groups.find((item) => item.id === button.dataset.editGroup));
+  if (button.dataset.copyGroupLink) {
+    const link = groupShareUrl(button.dataset.copyGroupLink);
+    try {
+      await navigator.clipboard.writeText(link);
+      notice("Đã sao chép liên kết riêng của nhóm.", "success");
+    } catch {
+      window.prompt("Sao chép liên kết nhóm:", link);
+    }
+  }
   if (button.dataset.delete) {
     const selected = events.find((item) => item.id === button.dataset.delete);
     if (selected && confirm(`Xóa sự kiện “${selected.title}”?`)) try {
