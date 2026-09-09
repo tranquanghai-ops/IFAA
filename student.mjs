@@ -154,9 +154,9 @@ function groupStatus(event) {
   const stat = groupLimits.get(event.groupId);
   const groupInfo = groups.get(event.groupId);
   const used = stat?.count || 0;
-  if (groupInfo?.unlimited) return { text: `Nhóm: ${groupInfo.name || event.groupName || "Chưa đặt tên"} · Không giới hạn lượt đăng ký`, blocked: false };
+  if (groupInfo?.unlimited) return { text: "", blocked: false };
   const max = Number(groupInfo?.maxRegistrations || event.groupMaxRegistrations || stat?.maxRegistrations || 1);
-  return { text: `Nhóm: ${groupInfo?.name || event.groupName || "Chưa đặt tên"} · Bạn đã chọn ${used}/${max}`, blocked: used >= max && !myRegs.has(event.id) };
+  return { text: `Giới hạn nhóm: Bạn đã đăng ký ${used}/${max} sự kiện`, blocked: used >= max && !myRegs.has(event.id) };
 }
 
 function render() {
@@ -166,7 +166,7 @@ function render() {
     $("#groupFocusTitle").textContent = focusedGroup?.name || (groupsLoaded ? "Không tìm thấy nhóm sự kiện" : "Đang tải nhóm sự kiện…");
     $("#groupFocusText").textContent = focusedGroup
       ? focusedGroup.unlimited
-        ? "Trang này chỉ hiển thị các sự kiện thuộc nhóm này. Nhóm không giới hạn số sự kiện mỗi người được đăng ký."
+        ? "Trang này chỉ hiển thị các sự kiện thuộc nhóm này."
         : `Trang này chỉ hiển thị các sự kiện thuộc nhóm này. Mỗi người được đăng ký tối đa ${focusedGroup.maxRegistrations} sự kiện.`
       : groupsLoaded ? "Liên kết có thể không đúng hoặc nhóm đã ngừng sử dụng." : "Vui lòng chờ trong giây lát.";
   }
@@ -208,7 +208,7 @@ function render() {
     const label = { upcoming: "SẮP MỞ", open: "ĐANG MỞ", full: "ĐÃ ĐỦ", closed: "ĐÃ ĐÓNG ĐĂNG KÝ", ended: "ĐÃ KẾT THÚC", hidden: "ĐÃ ẨN" }[state];
     const tagClass = state === "hidden" ? "closed" : state;
     const groupLine = group.text ? `<span><b>${safe(group.text)}</b></span>` : "";
-    return `<article class="card event event-${state} ${registered ? "event-registered" : ""}"><div class="event-top"><div><span class="tag ${tagClass}">${label}</span>${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}<h3>${safe(event.title)}</h3></div></div><div class="meta"><span class="event-schedule"><b>${safe(dayPeriod(event.startTime))}</b> · <b>Ngày sự kiện:</b> ${safe(formatDate(event))} · ${safe(event.startTime || "")}${event.endTime ? `–${safe(event.endTime)}` : ""}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(event, state))}</span>${groupLine}</div><div class="progress"><i style="width:${percent}%"></i></div><div class="capacity"><span>${used}/${capacity} người tham gia</span><b>Còn ${left} chỗ</b></div><div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${registered && event.allowCancellation ? `<button class="btn btn-danger" data-cancel="${event.id}">Hủy đăng ký</button>` : `<button class="btn btn-primary" data-register="${event.id}" ${disabled || registered ? "disabled" : ""}>${registered ? "Đã đăng ký" : group.blocked ? "Đã đạt giới hạn nhóm" : state === "upcoming" ? "Chưa đến giờ" : "Đăng ký"}</button>`}</div></article>`;
+    return `<article class="card event event-${state} ${registered ? "event-registered" : ""}"><div class="event-top"><div><span class="tag ${tagClass}">${label}</span>${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}<h3>${safe(event.title)}</h3></div></div><div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(formatDate(event))} · ${safe(event.startTime || "")}${event.endTime ? `–${safe(event.endTime)}` : ""} · <b>${safe(dayPeriod(event.startTime))}</b></span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(event, state))}</span>${groupLine}</div><div class="progress"><i style="width:${percent}%"></i></div><div class="capacity"><span>${used}/${capacity} người tham gia</span><b>Còn ${left} chỗ</b></div><div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${registered && event.allowCancellation ? `<button class="btn btn-danger" data-cancel="${event.id}">Hủy đăng ký</button>` : `<button class="btn btn-primary" data-register="${event.id}" ${disabled || registered ? "disabled" : ""}>${registered ? "Đã đăng ký" : group.blocked ? "Đã đạt giới hạn nhóm" : state === "upcoming" ? "Chưa đến giờ" : "Đăng ký"}</button>`}</div></article>`;
   }).join("");
 }
 
@@ -358,7 +358,7 @@ function openDetail(id) {
   $("#detailTitle").textContent = chosen.title;
   const description = chosen.descriptionHtml ? sanitizeRichHtml(chosen.descriptionHtml) : `<p>${safe(chosen.description || "Không có mô tả.")}</p>`;
   const groupLine = group.text ? `<span><b>${safe(group.text)}</b></span>` : "";
-  $("#detailBody").innerHTML = `<div class="meta"><span class="event-schedule"><b>${safe(dayPeriod(chosen.startTime))}</b> · <b>Ngày sự kiện:</b> ${safe(formatDate(chosen))}, ${safe(chosen.startTime || "")}${chosen.endTime ? `–${safe(chosen.endTime)}` : ""}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(chosen.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(chosen, state))}</span>${groupLine}</div><div class="rich-content">${description}</div><div class="notice">Còn ${Math.max(0, chosen.capacity - (chosen.registeredCount || 0))} chỗ.</div>`;
+  $("#detailBody").innerHTML = `<div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(formatDate(chosen))} · ${safe(chosen.startTime || "")}${chosen.endTime ? `–${safe(chosen.endTime)}` : ""} · <b>${safe(dayPeriod(chosen.startTime))}</b></span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(chosen.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(chosen, state))}</span>${groupLine}</div><div class="rich-content">${description}</div><div class="notice">Còn ${Math.max(0, chosen.capacity - (chosen.registeredCount || 0))} chỗ.</div>`;
   $("#confirmBtn").disabled = state !== "open" || group.blocked || myRegs.has(chosen.id);
   $("#detailDialog").showModal();
 }

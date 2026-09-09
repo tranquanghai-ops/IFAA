@@ -93,7 +93,9 @@ service cloud.firestore {
         && request.resource.data.createdByUid == resource.data.createdByUid
         && request.resource.data.createdByEmail == resource.data.createdByEmail
         && request.resource.data.createdAt == resource.data.createdAt
-        && request.resource.data.registeredCount == resource.data.registeredCount
+        && request.resource.data.registeredCount is int
+        && request.resource.data.registeredCount >= 0
+        && request.resource.data.registeredCount <= resource.data.registeredCount
         && request.resource.data.capacity >= resource.data.registeredCount
         && request.resource.data.allowedFaculties is list
         && request.resource.data.allowedFaculties.size() >= 1
@@ -122,7 +124,7 @@ service cloud.firestore {
 
     match /registrations/{regId} {
       allow list: if admin() || (participant() && resource.data.uid == request.auth.uid);
-      allow get: if admin() || (participant() && resource.data.uid == request.auth.uid);
+      allow get: if admin() || (participant() && regId.matches('^' + request.auth.uid + '_.*$'));
       allow create: if participant()
         && exists(profilePath(request.auth.uid))
         && regId == request.auth.uid + '_' + request.resource.data.eventId
@@ -136,7 +138,7 @@ service cloud.firestore {
             && limitAfter(request.auth.uid,request.resource.data.groupId).eventIds.hasAll([request.resource.data.eventId])
             && limitAfter(request.auth.uid,request.resource.data.groupId).count == (exists(limitPath(request.auth.uid,request.resource.data.groupId))
               ? get(limitPath(request.auth.uid,request.resource.data.groupId)).data.count + 1 : 1)));
-      allow delete: if participant()
+      allow delete: if admin() || (participant()
         && resource.data.uid == request.auth.uid
         && eventBefore(resource.data.eventId).keys().hasAll(['allowCancellation'])
         && eventBefore(resource.data.eventId).allowCancellation == true
@@ -144,14 +146,14 @@ service cloud.firestore {
         && (!groupedEvent(resource.data.eventId)
           || (existsAfter(limitPath(request.auth.uid,resource.data.groupId))
             && !limitAfter(request.auth.uid,resource.data.groupId).eventIds.hasAny([resource.data.eventId])
-            && limitAfter(request.auth.uid,resource.data.groupId).count == get(limitPath(request.auth.uid,resource.data.groupId)).data.count - 1));
+            && limitAfter(request.auth.uid,resource.data.groupId).count == get(limitPath(request.auth.uid,resource.data.groupId)).data.count - 1)));
       allow update: if false;
     }
 
     match /registrationLimits/{limitId} {
-      allow get: if admin() || (participant() && resource.data.uid == request.auth.uid);
+      allow get: if admin() || (participant() && limitId.matches('^' + request.auth.uid + '_.*$'));
       allow list: if admin() || (participant() && resource.data.uid == request.auth.uid);
-      allow create, update: if participant()
+      allow create: if participant()
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.email == email()
         && limitId == request.auth.uid + '_' + request.resource.data.groupId
@@ -162,6 +164,26 @@ service cloud.firestore {
         && (unlimitedGroup(request.resource.data.groupId)
           || request.resource.data.count <= get(groupPath(request.resource.data.groupId)).data.maxRegistrations)
         && request.resource.data.eventIds.size() == request.resource.data.count;
+      allow update: if (admin()
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.groupId == resource.data.groupId
+        && request.resource.data.maxRegistrations == resource.data.maxRegistrations
+        && request.resource.data.count is int
+        && request.resource.data.count >= 0
+        && request.resource.data.eventIds is list
+        && request.resource.data.eventIds.size() == request.resource.data.count)
+        || (participant()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == email()
+        && limitId == request.auth.uid + '_' + request.resource.data.groupId
+        && exists(groupPath(request.resource.data.groupId))
+        && request.resource.data.maxRegistrations == get(groupPath(request.resource.data.groupId)).data.maxRegistrations
+        && request.resource.data.count is int
+        && request.resource.data.count >= 0
+        && (unlimitedGroup(request.resource.data.groupId)
+          || request.resource.data.count <= get(groupPath(request.resource.data.groupId)).data.maxRegistrations)
+        && request.resource.data.eventIds.size() == request.resource.data.count);
       allow delete: if false;
     }
   }
