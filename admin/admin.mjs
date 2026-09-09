@@ -57,6 +57,15 @@ function eventEnd(event) {
   return Number.isNaN(date.getTime()) ? Infinity : date.getTime();
 }
 
+function dayPeriod(time) {
+  const hour = Number(String(time || "").slice(0, 2));
+  if (!Number.isFinite(hour)) return "";
+  if (hour >= 5 && hour < 11) return "Buổi sáng";
+  if (hour >= 11 && hour < 13) return "Buổi trưa";
+  if (hour >= 13 && hour < 18) return "Buổi chiều";
+  return "Buổi tối";
+}
+
 function eventState(event) {
   if (event.status === "hidden" || event.status === "draft") return "hidden";
   const now = Date.now();
@@ -132,7 +141,7 @@ function renderRegs() {
   const list = filteredRegistrations();
   const eventId = $("#eventFilter").value;
   $("#resetEventBtn").disabled = !eventId || !list.length;
-  $("#regRows").innerHTML = list.map((registration, index) => `<tr><td>${index + 1}</td><td><b>${safe(registration.identifier || registration.mssv)}</b></td><td>${safe(registration.name)}</td><td>${safe(registration.phone)}</td><td>${safe(registration.faculty)}</td><td>${safe(registration.participantType || "Sinh viên")}</td><td>${safe(registration.email)}</td><td>${safe(registration.eventTitle)}</td><td>${ts(registration.createdAt)}</td><td><button class="btn btn-small btn-danger" data-delete-registration="${registration.id}">Xóa</button></td></tr>`).join("") || '<tr><td colspan="10" class="empty">Không có dữ liệu đăng ký.</td></tr>';
+  $("#regRows").innerHTML = list.map((registration, index) => `<tr><td class="col-stt">${index + 1}</td><td class="col-identifier"><b>${safe(registration.identifier || registration.mssv)}</b></td><td>${safe(registration.name)}</td><td>${safe(registration.phone)}</td><td>${safe(registration.faculty)}</td><td>${safe(registration.participantType || "Sinh viên")}</td><td>${safe(registration.eventTitle)}</td><td>${ts(registration.createdAt)}</td><td><button class="btn btn-small btn-danger" data-delete-registration="${registration.id}">Xóa</button></td></tr>`).join("") || '<tr><td colspan="9" class="empty">Không có dữ liệu đăng ký.</td></tr>';
 }
 
 async function removeRegistration(registration) {
@@ -586,13 +595,20 @@ $("#exportBtn").onclick = () => {
   const filter = $("#eventFilter").value;
   const groupFilter = $("#groupFilter").value;
   const list = filteredRegistrations();
-  const rows = list.map((registration, index) => ({ STT: index + 1, "MSSV/Mã số": registration.identifier || registration.mssv, "Họ tên": registration.name, "Số điện thoại": registration.phone, "Khoa/Đơn vị": registration.faculty, "Đối tượng": registration.participantType || "Sinh viên", Email: registration.email, "Sự kiện": registration.eventTitle, "Nhóm sự kiện": registration.groupName || "Không nhóm", "Ngày sự kiện": registration.eventDate, "Thời gian đăng ký": ts(registration.createdAt) }));
+  const rows = list.map((registration, index) => {
+    const selectedRegistrationEvent = events.find((event) => event.id === registration.eventId);
+    const row = { STT: index + 1, "MSSV/Mã số": registration.identifier || registration.mssv, "Họ tên": registration.name, "Số điện thoại": registration.phone, "Khoa/Đơn vị": registration.faculty, "Đối tượng": registration.participantType || "Sinh viên", Email: registration.email, "Sự kiện": registration.eventTitle, "Ngày sự kiện": registration.eventDate, "Giờ bắt đầu": selectedRegistrationEvent?.startTime || "", "Giờ kết thúc": selectedRegistrationEvent?.endTime || "", "Buổi": dayPeriod(selectedRegistrationEvent?.startTime), "Thời gian đăng ký": ts(registration.createdAt) };
+    if (!groupFilter) row["Nhóm sự kiện"] = registration.groupName || "Không nhóm";
+    return row;
+  });
   const selectedEvent = events.find((event) => event.id === filter);
   const selectedGroup = groups.find((group) => group.id === groupFilter);
   const exportName = selectedEvent?.title || (selectedGroup ? `Nhom_${selectedGroup.name}` : "Tat_ca_su_kien");
   const cleanName = exportName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 70) || "Su_kien";
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), (selectedEvent?.title || selectedGroup?.name || "Đăng ký").slice(0, 31));
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+  worksheet["!cols"] = [{ wch: 6 }, { wch: 15 }, { wch: 24 }, { wch: 16 }, { wch: 28 }, { wch: 14 }, { wch: 32 }, { wch: 14 }, { wch: 13 }, { wch: 13 }, { wch: 14 }, { wch: 20 }];
+  XLSX.utils.book_append_sheet(workbook, worksheet, (selectedEvent?.title || selectedGroup?.name || "Đăng ký").slice(0, 31));
   XLSX.writeFile(workbook, `IFAA_${cleanName}_${new Date().toISOString().slice(0, 10)}.xlsx`);
 };
 

@@ -23,3 +23,11 @@
 .hero .hero-kicker{font-size:clamp(20px,2.4vw,27px);line-height:1.25;font-weight:850;color:#fff;margin:0 0 10px}
 .hero h2{font-size:clamp(22px,3vw,34px);letter-spacing:-.5px}
 .group-focus{display:block}
+
+/* V1.6: cảnh báo sắp hết chỗ và bảng đăng ký gọn hơn */
+@keyframes low-seats-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.42;transform:scale(1.06)}}
+.capacity .low-seats{color:#e36b00;animation:low-seats-pulse 1s ease-in-out infinite;transform-origin:right center}
+.low-seats-notice{background:#fff3e6;color:#c45500;font-weight:850;animation:low-seats-pulse 1s ease-in-out infinite;transform-origin:left center}
+.registration-table .col-stt{width:52px;min-width:52px;max-width:52px;text-align:center;padding-left:6px;padding-right:6px}
+.registration-table .col-identifier{width:118px;min-width:118px;max-width:118px;white-space:nowrap;padding-left:8px;padding-right:8px}
+@media (prefers-reduced-motion:reduce){.capacity .low-seats,.low-seats-notice{animation:none}}

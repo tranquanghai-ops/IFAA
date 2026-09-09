@@ -127,10 +127,16 @@ function eventState(event) {
 function countdown(target) {
   const difference = Math.max(0, target - Date.now());
   const days = Math.floor(difference / 86400000);
-  const hours = Math.floor((difference % 86400000) / 3600000);
+  const totalHours = Math.floor(difference / 3600000);
+  const remainingHours = totalHours % 24;
   const minutes = Math.floor((difference % 3600000) / 60000);
   const seconds = Math.floor((difference % 60000) / 1000);
-  return `${days ? `${days} ngày ` : ""}${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  const clock = `${String(totalHours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  if (!days) return clock;
+  const detail = [`${days} ngày`];
+  if (remainingHours) detail.push(`${remainingHours} giờ`);
+  if (minutes) detail.push(`${String(minutes).padStart(2, "0")} phút`);
+  return `${clock} (${detail.join(" ")})`;
 }
 
 function timingStatus(event, state) {
@@ -203,12 +209,13 @@ function render() {
     const capacity = event.capacity || 0;
     const left = Math.max(0, capacity - used);
     const percent = capacity ? Math.min(100, used / capacity * 100) : 0;
+    const lowSeats = capacity > 0 && left / capacity < 0.1;
     const group = groupStatus(event);
     const disabled = state !== "open" || group.blocked;
     const label = { upcoming: "SẮP MỞ", open: "ĐANG MỞ", full: "ĐÃ ĐỦ", closed: "ĐÃ ĐÓNG ĐĂNG KÝ", ended: "ĐÃ KẾT THÚC", hidden: "ĐÃ ẨN" }[state];
     const tagClass = state === "hidden" ? "closed" : state;
     const groupLine = group.text ? `<span><b>${safe(group.text)}</b></span>` : "";
-    return `<article class="card event event-${state} ${registered ? "event-registered" : ""}"><div class="event-top"><div><span class="tag ${tagClass}">${label}</span>${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}<h3>${safe(event.title)}</h3></div></div><div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(formatDate(event))} · ${safe(event.startTime || "")}${event.endTime ? `–${safe(event.endTime)}` : ""} · <b>${safe(dayPeriod(event.startTime))}</b></span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(event, state))}</span>${groupLine}</div><div class="progress"><i style="width:${percent}%"></i></div><div class="capacity"><span>${used}/${capacity} người tham gia</span><b>Còn ${left} chỗ</b></div><div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${registered && event.allowCancellation ? `<button class="btn btn-danger" data-cancel="${event.id}">Hủy đăng ký</button>` : `<button class="btn btn-primary" data-register="${event.id}" ${disabled || registered ? "disabled" : ""}>${registered ? "Đã đăng ký" : group.blocked ? "Đã đạt giới hạn nhóm" : state === "upcoming" ? "Chưa đến giờ" : "Đăng ký"}</button>`}</div></article>`;
+    return `<article class="card event event-${state} ${registered ? "event-registered" : ""}"><div class="event-top"><div><span class="tag ${tagClass}">${label}</span>${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}<h3>${safe(event.title)}</h3></div></div><div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(formatDate(event))} · ${safe(event.startTime || "")}${event.endTime ? `–${safe(event.endTime)}` : ""} · <b>${safe(dayPeriod(event.startTime))}</b></span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(event, state))}</span>${groupLine}</div><div class="progress"><i style="width:${percent}%"></i></div><div class="capacity"><span>${used}/${capacity} người tham gia</span><b class="${lowSeats ? "low-seats" : ""}">Còn ${left} chỗ</b></div><div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${registered && event.allowCancellation ? `<button class="btn btn-danger" data-cancel="${event.id}">Hủy đăng ký</button>` : `<button class="btn btn-primary" data-register="${event.id}" ${disabled || registered ? "disabled" : ""}>${registered ? "Đã đăng ký" : group.blocked ? "Đã đạt giới hạn nhóm" : state === "upcoming" ? "Chưa đến giờ" : "Đăng ký"}</button>`}</div></article>`;
   }).join("");
 }
 
@@ -358,7 +365,9 @@ function openDetail(id) {
   $("#detailTitle").textContent = chosen.title;
   const description = chosen.descriptionHtml ? sanitizeRichHtml(chosen.descriptionHtml) : `<p>${safe(chosen.description || "Không có mô tả.")}</p>`;
   const groupLine = group.text ? `<span><b>${safe(group.text)}</b></span>` : "";
-  $("#detailBody").innerHTML = `<div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(formatDate(chosen))} · ${safe(chosen.startTime || "")}${chosen.endTime ? `–${safe(chosen.endTime)}` : ""} · <b>${safe(dayPeriod(chosen.startTime))}</b></span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(chosen.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(chosen, state))}</span>${groupLine}</div><div class="rich-content">${description}</div><div class="notice">Còn ${Math.max(0, chosen.capacity - (chosen.registeredCount || 0))} chỗ.</div>`;
+  const detailLeft = Math.max(0, chosen.capacity - (chosen.registeredCount || 0));
+  const detailLowSeats = chosen.capacity > 0 && detailLeft / chosen.capacity < 0.1;
+  $("#detailBody").innerHTML = `<div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(formatDate(chosen))} · ${safe(chosen.startTime || "")}${chosen.endTime ? `–${safe(chosen.endTime)}` : ""} · <b>${safe(dayPeriod(chosen.startTime))}</b></span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(chosen.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(chosen, state))}</span>${groupLine}</div><div class="rich-content">${description}</div><div class="notice ${detailLowSeats ? "low-seats-notice" : ""}">Còn ${detailLeft} chỗ.</div>`;
   $("#confirmBtn").disabled = state !== "open" || group.blocked || myRegs.has(chosen.id);
   $("#detailDialog").showModal();
 }
