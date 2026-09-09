@@ -53,7 +53,7 @@
   <div class="field"><label>Sức chứa</label><input id="capacity" type="number" min="1" required></div><div class="field"><label>Hiển thị</label><select id="status"><option value="open">Hiển thị ở trang người tham gia</option><option value="hidden">Ẩn sự kiện</option><option value="closed">Kết thúc đăng ký thủ công</option></select></div>
   <div class="field"><label>Mở đăng ký lúc</label><input id="openAt" type="datetime-local" required></div><div class="field"><label>Đóng đăng ký lúc</label><input id="closeAt" type="datetime-local" required></div>
   <label class="check span-2 event-option"><input id="eventAllowCancellation" type="checkbox"> Cho phép người tham gia tự hủy đăng ký sự kiện này</label>
-</div><div id="eventFormError" class="notice error hidden" role="alert"></div><div class="modal-actions"><button type="button" class="btn" data-close>Hủy</button><button class="btn btn-primary">Lưu sự kiện</button></div></form></dialog>
+</div><div id="eventFormError" class="notice error hidden" role="alert"></div><div class="modal-actions"><button type="button" class="btn" data-close>Hủy</button><button id="saveEventBtn" class="btn btn-primary">Lưu sự kiện</button></div></form></dialog>
 
 <dialog id="groupDialog"><form id="groupForm" class="modal group-modal"><div class="modal-head"><h2 id="groupDialogTitle">Tạo nhóm sự kiện</h2><button type="button" class="btn btn-small" data-close-group>Đóng</button></div><input id="groupEditId" type="hidden"><div class="form-grid">
   <div class="field span-2"><label>Tên nhóm</label><input id="groupName" maxlength="120" required></div>
