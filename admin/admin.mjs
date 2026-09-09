@@ -98,14 +98,16 @@ function render() {
     const reason = (event.registeredCount || 0) > 0 ? "Không thể xóa sự kiện đã có đăng ký" : "Chỉ xóa sự kiện do mình tạo";
     const [statusClass, statusText] = statusLabel(event);
     const state = eventState(event);
-    const groupText = event.groupId ? `${safe(event.groupName)}<br><small>Tối đa ${event.groupMaxRegistrations}/người</small>` : "";
+    const eventGroup = groups.find((item) => item.id === event.groupId);
+    const groupText = event.groupId ? `${safe(event.groupName)}<br><small>${eventGroup?.unlimited ? "Không giới hạn lượt" : `Tối đa ${event.groupMaxRegistrations}/người`}</small>` : "";
     return `<tr class="${state === "ended" ? "admin-event-ended" : ""}"><td><b>${safe(event.title)}</b><br><small>${safe(event.location)}</small></td><td>${groupText}</td><td>${safe(event.date)}<br>${safe(event.startTime || "")}</td><td>${event.registeredCount || 0}/${event.capacity}</td><td>${safe(event.createdByName || event.createdByEmail)}</td><td><span class="tag ${statusClass}">${statusText}</span></td><td><div class="actions"><button class="btn btn-small" data-edit="${event.id}">Sửa</button><button class="btn btn-small btn-soft" data-copy-event="${event.id}">Sao chép</button><button class="btn btn-small btn-danger" data-delete="${event.id}" ${canDelete ? "" : `disabled title='${reason}'`}>Xóa</button></div></td></tr>`;
   }).join("") || '<tr><td colspan="7" class="empty">Không có sự kiện ở trạng thái này.</td></tr>';
 
   $("#groupRows").innerHTML = groups.map((group) => {
     const eventCount = events.filter((item) => item.groupId === group.id).length;
     const visibility = group.linkOnly ? '<span class="tag upcoming">CHỈ QUA LINK</span>' : '<span class="tag open">TRANG CHUNG</span>';
-    return `<tr><td><b>${safe(group.name)}</b><br><small>Mã: ${safe(groupCode(group))}</small></td><td>Tối đa <b>${Number(group.maxRegistrations) || 1}</b> sự kiện/người</td><td>${eventCount}</td><td>${visibility}</td><td><button class="btn btn-small btn-soft" data-copy-group-link="${group.id}">Sao chép liên kết</button></td><td><button class="btn btn-small" data-edit-group="${group.id}">Sửa nhóm</button></td></tr>`;
+    const limit = group.unlimited ? '<b>Không giới hạn</b>' : `Tối đa <b>${Number(group.maxRegistrations) || 1}</b> sự kiện/người`;
+    return `<tr><td><b>${safe(group.name)}</b><br><small>Mã: ${safe(groupCode(group))}</small></td><td>${limit}</td><td>${eventCount}</td><td>${visibility}</td><td><button class="btn btn-small btn-soft" data-copy-group-link="${group.id}">Sao chép liên kết</button></td><td><button class="btn btn-small" data-edit-group="${group.id}">Sửa nhóm</button></td></tr>`;
   }).join("") || '<tr><td colspan="6" class="empty">Chưa có nhóm sự kiện.</td></tr>';
 
   const selectedFilter = $("#eventFilter").value;
@@ -123,8 +125,14 @@ function renderRegs() {
 
 function refreshGroupOptions(selected = "") {
   const select = $("#groupId");
-  select.innerHTML = '<option value="">Không nhóm — không giới hạn lượt</option>' + groups.map((group) => `<option value="${group.id}">${safe(group.name)} — tối đa ${group.maxRegistrations}</option>`).join("") + '<option value="__new__">＋ Tạo nhóm mới</option>';
+  select.innerHTML = '<option value="">Không nhóm</option>' + groups.map((group) => `<option value="${group.id}">${safe(group.name)} — ${group.unlimited ? "không giới hạn" : `tối đa ${group.maxRegistrations}`}</option>`).join("") + '<option value="__new__">＋ Tạo nhóm mới</option>';
   select.value = selected || "";
+}
+
+function setLimitInputState(checkbox, input, help) {
+  input.disabled = checkbox.checked;
+  input.required = !checkbox.checked;
+  if (help) help.textContent = checkbox.checked ? "Đã tắt giới hạn lượt đăng ký cho nhóm này." : "Mặc định là 2, có thể thay đổi từ 1 đến 20.";
 }
 
 function openGroup(group = null) {
@@ -134,6 +142,8 @@ function openGroup(group = null) {
   $("#groupName").value = group?.name || "";
   $("#groupShareCode").value = group ? groupCode(group) : "";
   $("#groupMaxRegistrations").value = group?.maxRegistrations || 2;
+  $("#groupUnlimited").checked = !!group?.unlimited;
+  setLimitInputState($("#groupUnlimited"), $("#groupMaxRegistrations"), $("#groupLimitHelp"));
   $("#groupLinkOnly").checked = !!group?.linkOnly;
   $("#groupFormError").classList.add("hidden");
   $("#groupDialog").showModal();
@@ -174,13 +184,17 @@ function listen() {
   }, (error) => notice(error.message, "error"));
 }
 
-const inputDateTime = (value) => {
-  if (!value) return "";
+const inputDateTimeParts = (value) => {
+  if (!value) return { date: "", time: "" };
   const date = value?.toDate ? value.toDate() : new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
+  if (Number.isNaN(date.getTime())) return { date: "", time: "" };
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 16);
+  const text = local.toISOString();
+  return { date: text.slice(0, 10), time: text.slice(11, 16) };
 };
+
+const validTime24 = (value) => /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value);
+const dateTimeValue = (date, time) => date && validTime24(time) ? new Date(`${date}T${time}:00`) : null;
 
 function openEvent(event = null, copy = false) {
   $("#eventForm").reset();
@@ -193,8 +207,12 @@ function openEvent(event = null, copy = false) {
   for (const key of ["title", "date", "location", "startTime", "endTime", "capacity", "status"]) if (event && $("#" + key)) $("#" + key).value = event[key] ?? "";
   if (event?.status === "draft") $("#status").value = "hidden";
   if (event) {
-    $("#openAt").value = inputDateTime(event.openAt);
-    $("#closeAt").value = inputDateTime(event.closeAt);
+    const opens = inputDateTimeParts(event.openAt);
+    const closes = inputDateTimeParts(event.closeAt);
+    $("#openDate").value = opens.date;
+    $("#openTime").value = opens.time;
+    $("#closeDate").value = closes.date;
+    $("#closeTime").value = closes.time;
   } else {
     $("#status").value = "open";
   }
@@ -203,6 +221,8 @@ function openEvent(event = null, copy = false) {
   $("#groupId").disabled = !copy && !!event && (event.registeredCount || 0) > 0;
   $("#newGroupFields").classList.add("hidden");
   $("#newGroupMax").value = 2;
+  $("#newGroupUnlimited").checked = false;
+  setLimitInputState($("#newGroupUnlimited"), $("#newGroupMax"));
   renderEventFaculties(event?.allowedFaculties?.length ? event.allowedFaculties : [DEFAULT_FACULTY]);
   $("#eventDialog").showModal();
 }
@@ -211,21 +231,49 @@ $("#groupId").onchange = () => {
   const creating = $("#groupId").value === "__new__";
   $("#newGroupFields").classList.toggle("hidden", !creating);
   $("#newGroupName").required = creating;
-  $("#newGroupMax").required = creating;
+  $("#newGroupMax").required = creating && !$("#newGroupUnlimited").checked;
   if (creating && !$("#newGroupMax").value) $("#newGroupMax").value = 2;
 };
 
-document.querySelectorAll("[data-format]").forEach((button) => button.addEventListener("click", () => {
-  $("#descriptionEditor").focus();
-  document.execCommand(button.dataset.format, false);
-}));
-$("#descriptionSize").onchange = (event) => {
-  $("#descriptionEditor").focus();
-  document.execCommand("fontSize", false, event.target.value);
-};
-$("#descriptionColor").oninput = (event) => {
-  $("#descriptionEditor").focus();
-  document.execCommand("foreColor", false, event.target.value);
+$("#groupUnlimited").onchange = () => setLimitInputState($("#groupUnlimited"), $("#groupMaxRegistrations"), $("#groupLimitHelp"));
+$("#newGroupUnlimited").onchange = () => setLimitInputState($("#newGroupUnlimited"), $("#newGroupMax"));
+
+let descriptionRange = null;
+const descriptionEditor = $("#descriptionEditor");
+
+function rememberDescriptionSelection() {
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) return;
+  const range = selection.getRangeAt(0);
+  if (descriptionEditor.contains(range.commonAncestorContainer)) descriptionRange = range.cloneRange();
+}
+
+function runDescriptionCommand(command, value = null) {
+  descriptionEditor.focus();
+  if (descriptionRange) {
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(descriptionRange);
+  }
+  document.execCommand(command, false, value);
+  rememberDescriptionSelection();
+}
+
+descriptionEditor.addEventListener("keyup", rememberDescriptionSelection);
+descriptionEditor.addEventListener("mouseup", rememberDescriptionSelection);
+descriptionEditor.addEventListener("input", rememberDescriptionSelection);
+document.querySelectorAll(".rich-toolbar button,.rich-toolbar select,.rich-toolbar input").forEach((control) => control.addEventListener("pointerdown", rememberDescriptionSelection));
+document.querySelectorAll("[data-format]").forEach((button) => button.addEventListener("click", () => runDescriptionCommand(button.dataset.format)));
+$("#descriptionBlock").onchange = (event) => runDescriptionCommand("formatBlock", `<${event.target.value}>`);
+$("#descriptionSize").onchange = (event) => runDescriptionCommand("fontSize", event.target.value);
+$("#descriptionColor").oninput = (event) => runDescriptionCommand("foreColor", event.target.value);
+$("#descriptionBackgroundColor").oninput = (event) => runDescriptionCommand("hiliteColor", event.target.value);
+$("#insertDescriptionLink").onclick = () => {
+  rememberDescriptionSelection();
+  const url = window.prompt("Nhập liên kết (https://...):", "https://");
+  if (!url) return;
+  if (!/^https:\/\//i.test(url)) return notice("Liên kết phải bắt đầu bằng https://", "error");
+  runDescriptionCommand("createLink", url);
 };
 $("#insertDescriptionImage").onclick = () => $("#descriptionImageFile").click();
 $("#descriptionImageFile").onchange = (event) => {
@@ -238,8 +286,7 @@ $("#descriptionImageFile").onchange = (event) => {
   }
   const reader = new FileReader();
   reader.onload = () => {
-    $("#descriptionEditor").focus();
-    document.execCommand("insertImage", false, reader.result);
+    runDescriptionCommand("insertImage", reader.result);
     event.target.value = "";
   };
   reader.readAsDataURL(file);
@@ -258,15 +305,18 @@ $("#eventForm").onsubmit = async (event) => {
   for (const key of ["title", "date", "location", "startTime", "endTime", "status"]) data[key] = $("#" + key).value.trim();
   data.descriptionHtml = $("#descriptionEditor").innerHTML.trim();
   data.description = $("#descriptionEditor").innerText.trim();
-  data.openAt = $("#openAt").value ? Timestamp.fromDate(new Date($("#openAt").value)) : null;
-  data.closeAt = $("#closeAt").value ? Timestamp.fromDate(new Date($("#closeAt").value)) : null;
+  const openValue = dateTimeValue($("#openDate").value, $("#openTime").value.trim());
+  const closeValue = dateTimeValue($("#closeDate").value, $("#closeTime").value.trim());
+  data.openAt = openValue ? Timestamp.fromDate(openValue) : null;
+  data.closeAt = closeValue ? Timestamp.fromDate(closeValue) : null;
   data.capacity = Number($("#capacity").value);
   data.allowedFaculties = [...document.querySelectorAll(".event-faculty:checked")].map((input) => input.value);
   data.allowCancellation = $("#eventAllowCancellation").checked;
   data.updatedAt = serverTimestamp();
   try {
     if (!data.title || !data.date || !data.location || !data.startTime || !Number.isInteger(data.capacity) || data.capacity < 1) throw Error("Vui lòng nhập đầy đủ các trường bắt buộc.");
-    if (!data.openAt || !data.closeAt) throw Error("Vui lòng chọn thời gian mở và đóng đăng ký.");
+    if (!validTime24(data.startTime) || (data.endTime && !validTime24(data.endTime))) throw Error("Giờ sự kiện phải theo định dạng 24 giờ HH:mm, ví dụ 08:30 hoặc 17:45.");
+    if (!data.openAt || !data.closeAt) throw Error("Vui lòng chọn ngày và nhập giờ mở, đóng đăng ký theo định dạng 24 giờ HH:mm.");
     const eventStart = new Date(`${data.date}T${data.startTime}:00`).getTime();
     const eventEnd = new Date(`${data.date}T${data.endTime || data.startTime}:00`).getTime();
     const now = Date.now();
@@ -292,13 +342,14 @@ $("#eventForm").onsubmit = async (event) => {
     let group = null;
     if (selectedGroup === "__new__") {
       const name = $("#newGroupName").value.trim();
+      const unlimited = $("#newGroupUnlimited").checked;
       const maxRegistrations = Number($("#newGroupMax").value || 2);
-      if (!name || !Number.isInteger(maxRegistrations) || maxRegistrations < 1 || maxRegistrations > 20) throw Error("Tên nhóm và giới hạn từ 1 đến 20 là bắt buộc.");
+      if (!name || (!unlimited && (!Number.isInteger(maxRegistrations) || maxRegistrations < 1 || maxRegistrations > 20))) throw Error("Tên nhóm và giới hạn từ 1 đến 20 là bắt buộc.");
       const code = shareCode(name);
       if (groups.some((item) => groupCode(item) === code)) throw Error(`Mã liên kết ${code} đã được một nhóm khác sử dụng.`);
-      const groupRef = await addDoc(collection(db, "eventGroups"), { name, shareCode: code, maxRegistrations, linkOnly: false, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      const groupRef = await addDoc(collection(db, "eventGroups"), { name, shareCode: code, maxRegistrations: unlimited ? 2 : maxRegistrations, unlimited, linkOnly: false, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
       selectedGroup = groupRef.id;
-      group = { id: groupRef.id, name, maxRegistrations };
+      group = { id: groupRef.id, name, maxRegistrations: unlimited ? 2 : maxRegistrations, unlimited };
     } else if (selectedGroup) {
       group = groups.find((item) => item.id === selectedGroup);
       if (!group) throw Error("Nhóm sự kiện không tồn tại.");
@@ -341,21 +392,23 @@ $("#groupForm").onsubmit = async (event) => {
     const id = $("#groupEditId").value;
     const name = $("#groupName").value.trim();
     const code = shareCode($("#groupShareCode").value || name);
+    const unlimited = $("#groupUnlimited").checked;
     const maxRegistrations = Number($("#groupMaxRegistrations").value);
-    if (!name || !Number.isInteger(maxRegistrations) || maxRegistrations < 1 || maxRegistrations > 20) throw Error("Vui lòng nhập tên nhóm và giới hạn từ 1 đến 20.");
+    if (!name || (!unlimited && (!Number.isInteger(maxRegistrations) || maxRegistrations < 1 || maxRegistrations > 20))) throw Error("Vui lòng nhập tên nhóm và giới hạn từ 1 đến 20.");
     if (!code) throw Error("Mã liên kết nhóm không hợp lệ.");
     if (groups.some((item) => item.id !== id && groupCode(item) === code)) throw Error(`Mã liên kết ${code} đã được một nhóm khác sử dụng.`);
-    if (id) {
+    if (id && !unlimited) {
       const countsByUser = new Map();
       regs.filter((item) => item.groupId === id).forEach((item) => countsByUser.set(item.uid || item.email, (countsByUser.get(item.uid || item.email) || 0) + 1));
       const highestCurrentCount = Math.max(0, ...countsByUser.values());
       if (maxRegistrations < highestCurrentCount) throw Error(`Không thể giảm giới hạn xuống ${maxRegistrations}; hiện có người đã đăng ký ${highestCurrentCount} sự kiện trong nhóm.`);
     }
-    const data = { name, shareCode: code, maxRegistrations, linkOnly: $("#groupLinkOnly").checked, updatedAt: serverTimestamp() };
+    const effectiveMax = unlimited ? (Number.isInteger(maxRegistrations) && maxRegistrations >= 1 ? maxRegistrations : 2) : maxRegistrations;
+    const data = { name, shareCode: code, maxRegistrations: effectiveMax, unlimited, linkOnly: $("#groupLinkOnly").checked, updatedAt: serverTimestamp() };
     if (id) {
       await updateDoc(doc(db, "eventGroups", id), data);
       const groupedEvents = events.filter((item) => item.groupId === id);
-      await Promise.all(groupedEvents.map((item) => updateDoc(doc(db, "events", item.id), { groupName: name, groupMaxRegistrations: maxRegistrations, updatedAt: serverTimestamp() })));
+      await Promise.all(groupedEvents.map((item) => updateDoc(doc(db, "events", item.id), { groupName: name, groupMaxRegistrations: effectiveMax, updatedAt: serverTimestamp() })));
     } else {
       await addDoc(collection(db, "eventGroups"), { ...data, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdAt: serverTimestamp() });
     }

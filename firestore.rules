@@ -16,6 +16,10 @@ service cloud.firestore {
     function limitPath(uid,id){ return /databases/$(database)/documents/registrationLimits/$(uid + '_' + id); }
     function limitAfter(uid,id){ return getAfter(limitPath(uid,id)).data; }
     function groupedEvent(id){ return eventBefore(id).groupId != ''; }
+    function unlimitedGroup(id){
+      return get(groupPath(id)).data.keys().hasAll(['unlimited'])
+        && get(groupPath(id)).data.unlimited == true;
+    }
     function facultyAllowed(eventId, uid){
       return !eventBefore(eventId).keys().hasAll(['allowedFaculties'])
         || eventBefore(eventId).allowedFaculties.hasAny([get(profilePath(uid)).data.faculty]);
@@ -62,6 +66,7 @@ service cloud.firestore {
       allow create: if admin()
         && request.resource.data.createdByUid == request.auth.uid
         && request.resource.data.name is string
+        && (!request.resource.data.keys().hasAll(['unlimited']) || request.resource.data.unlimited is bool)
         && request.resource.data.maxRegistrations is int
         && request.resource.data.maxRegistrations >= 1
         && request.resource.data.maxRegistrations <= 20;
@@ -69,6 +74,7 @@ service cloud.firestore {
         && request.resource.data.createdByUid == resource.data.createdByUid
         && request.resource.data.createdByEmail == resource.data.createdByEmail
         && request.resource.data.createdAt == resource.data.createdAt
+        && (!request.resource.data.keys().hasAll(['unlimited']) || request.resource.data.unlimited is bool)
         && request.resource.data.maxRegistrations is int
         && request.resource.data.maxRegistrations >= 1
         && request.resource.data.maxRegistrations <= 20;
@@ -153,7 +159,8 @@ service cloud.firestore {
         && request.resource.data.maxRegistrations == get(groupPath(request.resource.data.groupId)).data.maxRegistrations
         && request.resource.data.count is int
         && request.resource.data.count >= 0
-        && request.resource.data.count <= get(groupPath(request.resource.data.groupId)).data.maxRegistrations
+        && (unlimitedGroup(request.resource.data.groupId)
+          || request.resource.data.count <= get(groupPath(request.resource.data.groupId)).data.maxRegistrations)
         && request.resource.data.eventIds.size() == request.resource.data.count;
       allow delete: if false;
     }
