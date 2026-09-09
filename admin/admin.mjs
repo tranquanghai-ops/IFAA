@@ -23,11 +23,19 @@ let groups = [];
 let settings = { faculties: [DEFAULT_FACULTY] };
 let adminStatusFilter = "all";
 
-function groupShareUrl(groupId) {
+function shareCode(value) {
+  return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/gi, "d").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60).toUpperCase();
+}
+
+function groupCode(group) {
+  return shareCode(group?.shareCode || group?.name) || group?.id || "NHOM";
+}
+
+function groupShareUrl(group) {
   const url = new URL("../", window.location.href);
   url.search = "";
   url.hash = "";
-  url.searchParams.set("e", groupId);
+  url.searchParams.set("e", groupCode(group));
   return url.toString();
 }
 
@@ -62,7 +70,7 @@ function statusLabel(event) {
   return {
     upcoming: ["upcoming", "SẮP MỞ"],
     open: ["open", "ĐANG MỞ"],
-    ended: ["closed", "KẾT THÚC"],
+    ended: ["admin-ended", "KẾT THÚC"],
     hidden: ["closed", "ĐÃ ẨN"]
   }[state];
 }
@@ -89,14 +97,15 @@ function render() {
     const canDelete = (event.registeredCount || 0) === 0 && (isOwner || event.createdByUid === user.uid);
     const reason = (event.registeredCount || 0) > 0 ? "Không thể xóa sự kiện đã có đăng ký" : "Chỉ xóa sự kiện do mình tạo";
     const [statusClass, statusText] = statusLabel(event);
-    const groupText = event.groupId ? `${safe(event.groupName)}<br><small>Tối đa ${event.groupMaxRegistrations}/người</small>` : "Không giới hạn lượt";
-    return `<tr><td><b>${safe(event.title)}</b><br><small>${safe(event.location)}</small></td><td>${groupText}</td><td>${safe(event.date)}<br>${safe(event.startTime || "")}</td><td>${event.registeredCount || 0}/${event.capacity}</td><td>${safe(event.createdByName || event.createdByEmail)}</td><td><span class="tag ${statusClass}">${statusText}</span></td><td><div class="actions"><button class="btn btn-small" data-edit="${event.id}">Sửa</button><button class="btn btn-small btn-soft" data-copy-event="${event.id}">Sao chép</button><button class="btn btn-small btn-danger" data-delete="${event.id}" ${canDelete ? "" : `disabled title='${reason}'`}>Xóa</button></div></td></tr>`;
+    const state = eventState(event);
+    const groupText = event.groupId ? `${safe(event.groupName)}<br><small>Tối đa ${event.groupMaxRegistrations}/người</small>` : "";
+    return `<tr class="${state === "ended" ? "admin-event-ended" : ""}"><td><b>${safe(event.title)}</b><br><small>${safe(event.location)}</small></td><td>${groupText}</td><td>${safe(event.date)}<br>${safe(event.startTime || "")}</td><td>${event.registeredCount || 0}/${event.capacity}</td><td>${safe(event.createdByName || event.createdByEmail)}</td><td><span class="tag ${statusClass}">${statusText}</span></td><td><div class="actions"><button class="btn btn-small" data-edit="${event.id}">Sửa</button><button class="btn btn-small btn-soft" data-copy-event="${event.id}">Sao chép</button><button class="btn btn-small btn-danger" data-delete="${event.id}" ${canDelete ? "" : `disabled title='${reason}'`}>Xóa</button></div></td></tr>`;
   }).join("") || '<tr><td colspan="7" class="empty">Không có sự kiện ở trạng thái này.</td></tr>';
 
   $("#groupRows").innerHTML = groups.map((group) => {
     const eventCount = events.filter((item) => item.groupId === group.id).length;
     const visibility = group.linkOnly ? '<span class="tag upcoming">CHỈ QUA LINK</span>' : '<span class="tag open">TRANG CHUNG</span>';
-    return `<tr><td><b>${safe(group.name)}</b><br><small>${safe(group.createdByEmail || "")}</small></td><td>Tối đa <b>${Number(group.maxRegistrations) || 1}</b> sự kiện/người</td><td>${eventCount}</td><td>${visibility}</td><td><button class="btn btn-small btn-soft" data-copy-group-link="${group.id}">Sao chép liên kết</button></td><td><button class="btn btn-small" data-edit-group="${group.id}">Sửa nhóm</button></td></tr>`;
+    return `<tr><td><b>${safe(group.name)}</b><br><small>Mã: ${safe(groupCode(group))}</small></td><td>Tối đa <b>${Number(group.maxRegistrations) || 1}</b> sự kiện/người</td><td>${eventCount}</td><td>${visibility}</td><td><button class="btn btn-small btn-soft" data-copy-group-link="${group.id}">Sao chép liên kết</button></td><td><button class="btn btn-small" data-edit-group="${group.id}">Sửa nhóm</button></td></tr>`;
   }).join("") || '<tr><td colspan="6" class="empty">Chưa có nhóm sự kiện.</td></tr>';
 
   const selectedFilter = $("#eventFilter").value;
@@ -123,6 +132,7 @@ function openGroup(group = null) {
   $("#groupEditId").value = group?.id || "";
   $("#groupDialogTitle").textContent = group ? "Chỉnh sửa nhóm sự kiện" : "Tạo nhóm sự kiện";
   $("#groupName").value = group?.name || "";
+  $("#groupShareCode").value = group ? groupCode(group) : "";
   $("#groupMaxRegistrations").value = group?.maxRegistrations || 2;
   $("#groupLinkOnly").checked = !!group?.linkOnly;
   $("#groupFormError").classList.add("hidden");
@@ -284,7 +294,9 @@ $("#eventForm").onsubmit = async (event) => {
       const name = $("#newGroupName").value.trim();
       const maxRegistrations = Number($("#newGroupMax").value || 2);
       if (!name || !Number.isInteger(maxRegistrations) || maxRegistrations < 1 || maxRegistrations > 20) throw Error("Tên nhóm và giới hạn từ 1 đến 20 là bắt buộc.");
-      const groupRef = await addDoc(collection(db, "eventGroups"), { name, maxRegistrations, linkOnly: false, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      const code = shareCode(name);
+      if (groups.some((item) => groupCode(item) === code)) throw Error(`Mã liên kết ${code} đã được một nhóm khác sử dụng.`);
+      const groupRef = await addDoc(collection(db, "eventGroups"), { name, shareCode: code, maxRegistrations, linkOnly: false, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
       selectedGroup = groupRef.id;
       group = { id: groupRef.id, name, maxRegistrations };
     } else if (selectedGroup) {
@@ -328,15 +340,18 @@ $("#groupForm").onsubmit = async (event) => {
   try {
     const id = $("#groupEditId").value;
     const name = $("#groupName").value.trim();
+    const code = shareCode($("#groupShareCode").value || name);
     const maxRegistrations = Number($("#groupMaxRegistrations").value);
     if (!name || !Number.isInteger(maxRegistrations) || maxRegistrations < 1 || maxRegistrations > 20) throw Error("Vui lòng nhập tên nhóm và giới hạn từ 1 đến 20.");
+    if (!code) throw Error("Mã liên kết nhóm không hợp lệ.");
+    if (groups.some((item) => item.id !== id && groupCode(item) === code)) throw Error(`Mã liên kết ${code} đã được một nhóm khác sử dụng.`);
     if (id) {
       const countsByUser = new Map();
       regs.filter((item) => item.groupId === id).forEach((item) => countsByUser.set(item.uid || item.email, (countsByUser.get(item.uid || item.email) || 0) + 1));
       const highestCurrentCount = Math.max(0, ...countsByUser.values());
       if (maxRegistrations < highestCurrentCount) throw Error(`Không thể giảm giới hạn xuống ${maxRegistrations}; hiện có người đã đăng ký ${highestCurrentCount} sự kiện trong nhóm.`);
     }
-    const data = { name, maxRegistrations, linkOnly: $("#groupLinkOnly").checked, updatedAt: serverTimestamp() };
+    const data = { name, shareCode: code, maxRegistrations, linkOnly: $("#groupLinkOnly").checked, updatedAt: serverTimestamp() };
     if (id) {
       await updateDoc(doc(db, "eventGroups", id), data);
       const groupedEvents = events.filter((item) => item.groupId === id);
@@ -409,7 +424,8 @@ document.addEventListener("click", async (event) => {
   if (button.dataset.closeGroup !== undefined) $("#groupDialog").close();
   if (button.dataset.editGroup) openGroup(groups.find((item) => item.id === button.dataset.editGroup));
   if (button.dataset.copyGroupLink) {
-    const link = groupShareUrl(button.dataset.copyGroupLink);
+    const selectedGroup = groups.find((item) => item.id === button.dataset.copyGroupLink);
+    const link = groupShareUrl(selectedGroup || { id: button.dataset.copyGroupLink });
     try {
       await navigator.clipboard.writeText(link);
       notice("Đã sao chép liên kết riêng của nhóm.", "success");
