@@ -12,6 +12,28 @@ provider.setCustomParameters({ prompt: "select_account" });
 const $ = (selector) => document.querySelector(selector);
 const safe = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
 const millis = (value) => value?.toDate ? value.toDate().getTime() : (value ? new Date(value).getTime() : null);
+const studentIdentifier = (email) => String(email || "").toLowerCase().endsWith(STUDENT_DOMAIN) ? String(email).split("@")[0].toUpperCase() : "";
+
+function sanitizeRichHtml(value) {
+  const template = document.createElement("template");
+  template.innerHTML = String(value || "");
+  const allowed = new Set(["P", "DIV", "BR", "B", "STRONG", "I", "EM", "U", "UL", "OL", "LI", "H2", "H3", "SPAN", "FONT", "IMG"]);
+  [...template.content.querySelectorAll("*")].forEach((node) => {
+    if (!allowed.has(node.tagName)) return node.replaceWith(...node.childNodes);
+    [...node.attributes].forEach((attribute) => {
+      const name = attribute.name.toLowerCase();
+      if (node.tagName === "IMG" && ["src", "alt"].includes(name)) return;
+      if (["style", "color", "size"].includes(name)) return;
+      node.removeAttribute(attribute.name);
+    });
+    if (node.tagName === "IMG") {
+      const src = node.getAttribute("src") || "";
+      if (!/^(data:image\/(png|jpeg|webp);base64,|https:\/\/)/i.test(src)) node.remove();
+      else { node.loading = "lazy"; node.alt ||= "Hình minh họa sự kiện"; }
+    }
+  });
+  return template.innerHTML;
+}
 
 let user = null;
 let profile = null;
@@ -89,6 +111,7 @@ function timingStatus(event, state) {
   if (state === "upcoming") return `Mở đăng ký lúc ${formatDateTime(event.openAt)} · Còn ${countdown(millis(event.openAt))}`;
   if (state === "open" || state === "full") return `Đóng đăng ký lúc ${formatDateTime(event.closeAt)} · Còn ${countdown(millis(event.closeAt))}`;
   if (state === "ended") return "Sự kiện đã kết thúc";
+  if (state === "hidden") return "Sự kiện đã được ẩn khỏi danh sách chung";
   return `Đã đóng đăng ký lúc ${formatDateTime(event.closeAt)}`;
 }
 
@@ -101,7 +124,7 @@ function facultyAllowed(event) {
 }
 
 function groupStatus(event) {
-  if (!event.groupId) return { text: "Không thuộc nhóm · Không giới hạn lượt", blocked: false };
+  if (!event.groupId) return { text: "Không giới hạn lượt", blocked: false };
   const stat = groupLimits.get(event.groupId);
   const used = stat?.count || 0;
   const max = Number(event.groupMaxRegistrations || stat?.maxRegistrations || 1);
@@ -109,12 +132,17 @@ function groupStatus(event) {
 }
 
 function render() {
-  const visible = events.filter((event) => eventState(event) !== "hidden" && facultyAllowed(event));
-  const list = visible.filter((event) => {
+  const candidates = events.filter((event) => facultyAllowed(event) && (filter === "mine" ? myRegs.has(event.id) : eventState(event) !== "hidden"));
+  const list = candidates.filter((event) => {
     const state = eventState(event);
-    if (filter === "mine") return myRegs.has(event.id);
+    if (filter === "mine") return true;
     if (filter === "all") return true;
     return ["upcoming", "open", "full"].includes(state);
+  }).sort((a, b) => {
+    const rank = { open: 0, full: 0, upcoming: 1, closed: 2, ended: 2, hidden: 3 };
+    const byState = (rank[eventState(a)] ?? 9) - (rank[eventState(b)] ?? 9);
+    if (byState) return byState;
+    return (millis(b.createdAt) || 0) - (millis(a.createdAt) || 0);
   });
   $("#eventSummary").textContent = `${list.length} sự kiện phù hợp với ${profile?.faculty || "khoa/đơn vị của bạn"}`;
   const grid = $("#eventGrid");
@@ -131,8 +159,9 @@ function render() {
     const percent = capacity ? Math.min(100, used / capacity * 100) : 0;
     const group = groupStatus(event);
     const disabled = state !== "open" || group.blocked;
-    const label = { upcoming: "SẮP MỞ", open: "ĐANG MỞ", full: "ĐÃ ĐỦ", closed: "ĐÃ ĐÓNG ĐĂNG KÝ", ended: "ĐÃ KẾT THÚC" }[state];
-    return `<article class="card event"><div class="event-top"><div><span class="tag ${state}">${label}</span>${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}<h3>${safe(event.title)}</h3></div></div><div class="meta"><span>◷ ${safe(formatDate(event))} · ${safe(event.startTime || "")}${event.endTime ? `–${safe(event.endTime)}` : ""}</span><span>⌖ ${safe(event.location || "Chưa cập nhật địa điểm")}</span><span class="countdown">${safe(timingStatus(event, state))}</span><span><b>${safe(group.text)}</b></span></div><div class="progress"><i style="width:${percent}%"></i></div><div class="capacity"><span>${used}/${capacity} người tham gia</span><b>Còn ${left} chỗ</b></div><div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${registered && event.allowCancellation ? `<button class="btn btn-danger" data-cancel="${event.id}">Hủy đăng ký</button>` : `<button class="btn btn-primary" data-register="${event.id}" ${disabled || registered ? "disabled" : ""}>${registered ? "Đã đăng ký" : group.blocked ? "Đã đạt giới hạn nhóm" : state === "upcoming" ? "Chưa đến giờ" : "Đăng ký"}</button>`}</div></article>`;
+    const label = { upcoming: "SẮP MỞ", open: "ĐANG MỞ", full: "ĐÃ ĐỦ", closed: "ĐÃ ĐÓNG ĐĂNG KÝ", ended: "ĐÃ KẾT THÚC", hidden: "ĐÃ ẨN" }[state];
+    const tagClass = state === "hidden" ? "closed" : state;
+    return `<article class="card event"><div class="event-top"><div><span class="tag ${tagClass}">${label}</span>${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}<h3>${safe(event.title)}</h3></div></div><div class="meta"><span>◷ ${safe(formatDate(event))} · ${safe(event.startTime || "")}${event.endTime ? `–${safe(event.endTime)}` : ""}</span><span>⌖ ${safe(event.location || "Chưa cập nhật địa điểm")}</span><span class="countdown">${safe(timingStatus(event, state))}</span><span><b>${safe(group.text)}</b></span></div><div class="progress"><i style="width:${percent}%"></i></div><div class="capacity"><span>${used}/${capacity} người tham gia</span><b>Còn ${left} chỗ</b></div><div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${registered && event.allowCancellation ? `<button class="btn btn-danger" data-cancel="${event.id}">Hủy đăng ký</button>` : `<button class="btn btn-primary" data-register="${event.id}" ${disabled || registered ? "disabled" : ""}>${registered ? "Đã đăng ký" : group.blocked ? "Đã đạt giới hạn nhóm" : state === "upcoming" ? "Chưa đến giờ" : "Đăng ký"}</button>`}</div></article>`;
   }).join("");
 }
 
@@ -140,11 +169,15 @@ function populateFacultyOptions() {
   const select = $("#profileFaculty");
   const values = [...new Set([...(settings.faculties || [DEFAULT_FACULTY]), profile?.faculty].filter(Boolean))];
   select.innerHTML = '<option value="">-- Chọn khoa/đơn vị --</option>' + values.map((name) => `<option value="${safe(name)}">${safe(name)}</option>`).join("");
-  select.value = profile?.faculty || "";
+  select.value = profile?.faculty || DEFAULT_FACULTY;
 }
 
 function showProfileForm(force = false) {
   $("#profileEmail").value = user?.email || "";
+  const automaticIdentifier = studentIdentifier(user?.email);
+  const emailIdentifier = String(user?.email || "").split("@")[0].toUpperCase();
+  $("#profileIdentifier").value = profile?.identifier || profile?.mssv || automaticIdentifier || emailIdentifier;
+  $("#profileIdentifier").readOnly = !!automaticIdentifier;
   $("#profileName").value = profile?.name || user?.displayName || "";
   $("#profilePhone").value = profile?.phone || "";
   populateFacultyOptions();
@@ -187,7 +220,7 @@ function loadData() {
     render();
   }, (error) => show(`Không thể tải giới hạn: ${error.message}`, "error")));
   unsubscribers.push(onSnapshot(collection(db, "events"), (snapshot) => {
-    events = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => `${a.date}${a.startTime}`.localeCompare(`${b.date}${b.startTime}`));
+    events = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
     render();
   }, (error) => show(`Không thể tải sự kiện: ${error.message}`, "error")));
 }
@@ -219,7 +252,7 @@ async function register(eventId) {
       }
       const now = Date.now();
       if (event.status !== "open" || (event.registeredCount || 0) >= event.capacity || now < (millis(event.openAt) ?? 0) || now > (millis(event.closeAt) ?? Infinity)) throw Error("Sự kiện đã đủ, chưa mở hoặc đã đóng.");
-      const identifier = user.email.split("@")[0].toUpperCase();
+      const identifier = profile.identifier || profile.mssv || user.email.split("@")[0].toUpperCase();
       transaction.update(eventRef, { registeredCount: (event.registeredCount || 0) + 1, updatedAt: serverTimestamp() });
       transaction.set(registrationRef, { uid: user.uid, email: user.email.toLowerCase(), identifier, mssv: identifier, participantType: profile.participantType, name: profile.name, phone: profile.phone, faculty: profile.faculty, eventId, eventTitle: event.title, eventDate: event.date, groupId: event.groupId || "", groupName: event.groupName || "", createdAt: serverTimestamp() });
       if (event.groupId) transaction.set(limitRef, { uid: user.uid, email: user.email.toLowerCase(), groupId: event.groupId, groupName: group.name, maxRegistrations: group.maxRegistrations, count: (current.count || 0) + 1, eventIds: [...(current.eventIds || []), eventId], updatedAt: serverTimestamp() });
@@ -266,7 +299,8 @@ function openDetail(id) {
   const state = eventState(chosen);
   const group = groupStatus(chosen);
   $("#detailTitle").textContent = chosen.title;
-  $("#detailBody").innerHTML = `<div class="meta"><span><b>Thời gian:</b> ${safe(formatDate(chosen))}, ${safe(chosen.startTime || "")}${chosen.endTime ? `–${safe(chosen.endTime)}` : ""}</span><span><b>Địa điểm:</b> ${safe(chosen.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(chosen, state))}</span><span><b>${safe(group.text)}</b></span></div><p>${safe(chosen.description || "Không có mô tả.")}</p><div class="notice">Còn ${Math.max(0, chosen.capacity - (chosen.registeredCount || 0))} chỗ.</div>`;
+  const description = chosen.descriptionHtml ? sanitizeRichHtml(chosen.descriptionHtml) : `<p>${safe(chosen.description || "Không có mô tả.")}</p>`;
+  $("#detailBody").innerHTML = `<div class="meta"><span><b>Thời gian:</b> ${safe(formatDate(chosen))}, ${safe(chosen.startTime || "")}${chosen.endTime ? `–${safe(chosen.endTime)}` : ""}</span><span><b>Địa điểm:</b> ${safe(chosen.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(chosen, state))}</span><span><b>${safe(group.text)}</b></span></div><div class="rich-content">${description}</div><div class="notice">Còn ${Math.max(0, chosen.capacity - (chosen.registeredCount || 0))} chỗ.</div>`;
   $("#confirmBtn").disabled = state !== "open" || group.blocked || myRegs.has(chosen.id);
   $("#detailDialog").showModal();
 }
@@ -277,8 +311,8 @@ $("#profileForm").onsubmit = async (event) => {
   button.disabled = true;
   try {
     const previous = profile;
-    const data = { uid: user.uid, email: user.email.toLowerCase(), participantType: participantType(user.email), name: $("#profileName").value.trim(), phone: $("#profilePhone").value.trim(), faculty: $("#profileFaculty").value, updatedAt: serverTimestamp() };
-    if (!data.name || !data.phone || !data.faculty) throw Error("Vui lòng nhập đầy đủ thông tin.");
+    const data = { uid: user.uid, email: user.email.toLowerCase(), participantType: participantType(user.email), identifier: $("#profileIdentifier").value.trim().toUpperCase(), mssv: $("#profileIdentifier").value.trim().toUpperCase(), name: $("#profileName").value.trim(), phone: $("#profilePhone").value.trim(), faculty: $("#profileFaculty").value, updatedAt: serverTimestamp() };
+    if (!data.identifier || !data.name || !data.phone || !data.faculty) throw Error("Vui lòng nhập đầy đủ thông tin.");
     if (!/^[0-9+().\s-]{8,20}$/.test(data.phone)) throw Error("Số điện thoại chưa đúng định dạng.");
     await setDoc(doc(db, "profiles", user.uid), previous ? data : { ...data, createdAt: serverTimestamp() }, { merge: true });
     profile = { ...previous, ...data };
