@@ -13,6 +13,7 @@ const $ = (selector) => document.querySelector(selector);
 const safe = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
 const millis = (value) => value?.toDate ? value.toDate().getTime() : (value ? new Date(value).getTime() : null);
 const studentIdentifier = (email) => String(email || "").toLowerCase().endsWith(STUDENT_DOMAIN) ? String(email).split("@")[0].toUpperCase() : "";
+const linkedGroupId = new URLSearchParams(window.location.search).get("e")?.trim() || "";
 
 function sanitizeRichHtml(value) {
   const template = document.createElement("template");
@@ -40,6 +41,8 @@ let profile = null;
 let events = [];
 let myRegs = new Map();
 let groupLimits = new Map();
+let groups = new Map();
+let groupsLoaded = false;
 let settings = { faculties: [DEFAULT_FACULTY] };
 let filter = "available";
 let chosen = null;
@@ -126,13 +129,28 @@ function facultyAllowed(event) {
 function groupStatus(event) {
   if (!event.groupId) return { text: "Không giới hạn lượt", blocked: false };
   const stat = groupLimits.get(event.groupId);
+  const groupInfo = groups.get(event.groupId);
   const used = stat?.count || 0;
-  const max = Number(event.groupMaxRegistrations || stat?.maxRegistrations || 1);
-  return { text: `Nhóm: ${event.groupName || "Chưa đặt tên"} · Bạn đã chọn ${used}/${max}`, blocked: used >= max && !myRegs.has(event.id) };
+  const max = Number(groupInfo?.maxRegistrations || event.groupMaxRegistrations || stat?.maxRegistrations || 1);
+  return { text: `Nhóm: ${groupInfo?.name || event.groupName || "Chưa đặt tên"} · Bạn đã chọn ${used}/${max}`, blocked: used >= max && !myRegs.has(event.id) };
 }
 
 function render() {
-  const candidates = events.filter((event) => facultyAllowed(event) && (filter === "mine" ? myRegs.has(event.id) : eventState(event) !== "hidden"));
+  const focusedGroup = linkedGroupId ? groups.get(linkedGroupId) : null;
+  $("#groupFocusPanel").classList.toggle("hidden", !linkedGroupId);
+  if (linkedGroupId) {
+    $("#groupFocusTitle").textContent = focusedGroup?.name || (groupsLoaded ? "Không tìm thấy nhóm sự kiện" : "Đang tải nhóm sự kiện…");
+    $("#groupFocusText").textContent = focusedGroup
+      ? `Trang này chỉ hiển thị các sự kiện thuộc nhóm này. Mỗi người được đăng ký tối đa ${focusedGroup.maxRegistrations} sự kiện.`
+      : groupsLoaded ? "Liên kết có thể không đúng hoặc nhóm đã ngừng sử dụng." : "Vui lòng chờ trong giây lát.";
+  }
+  const candidates = events.filter((event) => {
+    if (!facultyAllowed(event)) return false;
+    if (filter === "mine") return myRegs.has(event.id) && (!linkedGroupId || event.groupId === linkedGroupId);
+    if (eventState(event) === "hidden") return false;
+    if (linkedGroupId) return event.groupId === linkedGroupId;
+    return !groups.get(event.groupId)?.linkOnly;
+  });
   const list = candidates.filter((event) => {
     const state = eventState(event);
     if (filter === "mine") return true;
@@ -144,7 +162,9 @@ function render() {
     if (byState) return byState;
     return (millis(b.createdAt) || 0) - (millis(a.createdAt) || 0);
   });
-  $("#eventSummary").textContent = `${list.length} sự kiện phù hợp với ${profile?.faculty || "khoa/đơn vị của bạn"}`;
+  $("#eventSummary").textContent = linkedGroupId && focusedGroup
+    ? `${list.length} sự kiện trong nhóm ${focusedGroup.name}`
+    : `${list.length} sự kiện phù hợp với ${profile?.faculty || "khoa/đơn vị của bạn"}`;
   const grid = $("#eventGrid");
   if (!list.length) {
     grid.innerHTML = '<div class="card empty">Chưa có sự kiện phù hợp. Bạn có thể chọn “Tất cả” để xem sự kiện đã đóng hoặc đã kết thúc.</div>';
@@ -219,6 +239,11 @@ function loadData() {
     groupLimits = new Map(snapshot.docs.map((item) => [item.data().groupId, item.data()]));
     render();
   }, (error) => show(`Không thể tải giới hạn: ${error.message}`, "error")));
+  unsubscribers.push(onSnapshot(collection(db, "eventGroups"), (snapshot) => {
+    groups = new Map(snapshot.docs.map((item) => [item.id, { id: item.id, ...item.data() }]));
+    groupsLoaded = true;
+    render();
+  }, (error) => show(`Không thể tải nhóm sự kiện: ${error.message}`, "error")));
   unsubscribers.push(onSnapshot(collection(db, "events"), (snapshot) => {
     events = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
     render();
@@ -277,15 +302,20 @@ async function cancel(eventId) {
       if (!event.allowCancellation) throw Error("Sự kiện này không cho phép tự hủy đăng ký.");
       let limitRef = null;
       let current = null;
+      let currentGroup = null;
       if (event.groupId) {
         limitRef = doc(db, "registrationLimits", `${user.uid}_${event.groupId}`);
+        const groupRef = doc(db, "eventGroups", event.groupId);
         const limitSnapshot = await transaction.get(limitRef);
+        const groupSnapshot = await transaction.get(groupRef);
         if (!limitSnapshot.exists()) throw Error("Không tìm thấy hạn mức nhóm.");
+        if (!groupSnapshot.exists()) throw Error("Nhóm sự kiện không còn tồn tại.");
         current = limitSnapshot.data();
+        currentGroup = groupSnapshot.data();
       }
       transaction.update(eventRef, { registeredCount: Math.max(0, (event.registeredCount || 0) - 1), updatedAt: serverTimestamp() });
       transaction.delete(registrationRef);
-      if (limitRef) transaction.set(limitRef, { ...current, count: Math.max(0, current.count - 1), eventIds: (current.eventIds || []).filter((id) => id !== eventId), updatedAt: serverTimestamp() });
+      if (limitRef) transaction.set(limitRef, { ...current, groupName: currentGroup.name, maxRegistrations: currentGroup.maxRegistrations, count: Math.max(0, current.count - 1), eventIds: (current.eventIds || []).filter((id) => id !== eventId), updatedAt: serverTimestamp() });
     });
     show("Đã hủy đăng ký.", "success");
   } catch (error) {
