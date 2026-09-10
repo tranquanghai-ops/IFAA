@@ -329,3 +329,20 @@
   .confirm-actions{grid-template-columns:1fr}
   .confirm-actions .btn{width:100%}
 }
+
+
+/* V3.9: thông báo đăng nhập đồ họa và thùng rác */
+.login-graphic-notice{display:flex;align-items:flex-start;gap:12px;width:min(100%,540px);margin:4px auto 16px;padding:14px 16px;border:1px solid #f1b7b3;border-radius:16px;background:linear-gradient(135deg,#fff7f6,#fff);color:#7a271a;text-align:left;box-shadow:0 8px 24px rgba(180,35,24,.1)}
+.login-graphic-notice.hidden{display:none}
+.login-notice-icon{display:grid;place-items:center;flex:0 0 34px;width:34px;height:34px;border-radius:50%;background:#b42318;color:#fff;font-size:21px;font-weight:900}
+.login-graphic-notice b{display:block;margin:1px 0 3px;font-size:16px}
+.login-graphic-notice p{margin:0!important;color:#8d3328!important;font-size:14px;line-height:1.45}
+.btn-restore{border-color:#168454;background:#eefbf4;color:#12643f;font-weight:800}
+.btn-restore:hover{background:#dff7e9}
+.trash-table td{vertical-align:middle}
+.trash-table small{color:#667085}
+[data-pane-id="trash"] .toolbar p{max-width:720px}
+@media(max-width:760px){
+  .trash-table{min-width:760px}
+  .login-graphic-notice{padding:12px 13px}
+}
