@@ -192,3 +192,38 @@
   .admin-group-move{justify-content:flex-start;margin-top:8px}
   .admin-event-group-head{display:block}
 }
+
+
+/* V3.5: tiến độ và thao tác nhanh trên thẻ sự kiện Admin */
+.admin-event-top{align-items:flex-start}
+.admin-event-heading{flex:1;min-width:0}
+.admin-event-badges{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.admin-card-position{display:flex;align-items:center;gap:4px;flex:0 0 auto;padding:3px;border:1px solid #d9dfeb;border-radius:10px;background:#f7f8fb}
+.admin-card-position>span{padding:0 4px;color:var(--muted);font-size:10px;font-weight:850}
+.admin-card-position .btn{min-width:27px;padding:3px 6px;border-radius:7px;font-size:11px}
+.admin-registration-progress{margin:5px 0 10px;padding:8px 9px;border-radius:11px;background:#f7f8fa}
+.admin-registration-progress .capacity{margin:6px 0 0;font-size:12px}
+.admin-registration-progress .capacity-unlimited{margin:0}
+.external-registration-progress{color:var(--muted);font-size:12px;font-weight:700}
+.admin-event-card .countdown{color:#a71930;font-weight:800}
+.admin-event-card .progress{height:7px}
+.admin-event-card .progress i{transition:width .25s ease}
+.admin-event-card .full-seats{color:#b42318}
+.admin-event-card .admin-card-actions{grid-template-columns:repeat(2,minmax(0,1fr))}
+.admin-event-card .admin-card-actions .btn:disabled{opacity:.38;filter:grayscale(.35)}
+#quickRegistrationDialog{width:min(980px,calc(100vw - 24px))}
+.quick-registration-modal{min-height:380px}
+.quick-registration-modal .modal-head p{margin:3px 0 12px;color:var(--muted)}
+.quick-registration-table{min-width:720px}
+.quick-registration-table td,.quick-registration-table th{padding-top:9px;padding-bottom:9px}
+.admin-event-groups.view-list .admin-event-card .admin-registration-progress{margin:0}
+.admin-event-groups.view-list .admin-event-card .admin-card-actions{margin:0}
+@media(max-width:1200px){
+  .admin-event-groups.view-list .admin-event-card .admin-registration-progress{align-self:stretch}
+}
+@media(max-width:760px){
+  .admin-card-position{margin-left:auto}
+  .admin-event-top{display:flex}
+  .admin-event-card .admin-card-actions{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .quick-registration-modal{padding:14px}
+}
