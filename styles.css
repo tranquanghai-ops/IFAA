@@ -95,3 +95,19 @@
 .event-actions .btn-calendar{flex-basis:calc(50% - 4px)}
 .modal-actions .btn-calendar{margin-right:auto}
 @media(max-width:760px){.event-actions .btn{flex-basis:calc(50% - 4px)}.modal-actions{flex-wrap:wrap}.modal-actions .btn-calendar{order:-1;width:100%;margin-right:0}}
+
+/* V3.0: HOT/NEW, thẻ quản lý sự kiện, sắp xếp và phân quyền */
+.tag.hot{background:linear-gradient(135deg,#ffedd5,#fed7aa);color:#b93815;border:1px solid #fdba74}
+.tag.new{background:#eaf8f0;color:#087a43;border:1px solid #9bd4b5;letter-spacing:.06em}
+.hot-option{border-color:#fdba74;background:#fff7ed;color:#9a3412}
+.admin-event-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.admin-event-card{min-height:340px;margin:0;box-shadow:0 10px 28px rgba(24,33,58,.07)}
+.admin-event-card.event-ended,.admin-event-card.event-closed{background:#fff2f1;border-color:#f4aaa3}
+.admin-event-card.event-hidden{background:#f4f5f7;border-color:#cfd5dd}
+.admin-position-actions{display:flex;align-items:center;gap:7px;margin:4px 0 13px;padding:8px 10px;border-radius:11px;background:#f7f8fa}
+.admin-position-actions span{margin-right:auto;color:var(--muted);font-size:13px;font-weight:750}
+.admin-card-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+.admin-role-select{min-width:145px;border:1px solid #cfd5dd;border-radius:9px;padding:8px 10px;background:#fff;color:var(--ink);font-weight:750}
+.group-status-control{border:1px solid #f2cf78;background:#fff8e6;border-radius:12px;padding:12px}
+@media(max-width:920px){.admin-event-grid{grid-template-columns:1fr}}
+@media(max-width:760px){.admin-event-card{min-height:auto}.admin-position-actions{flex-wrap:wrap}.admin-position-actions span{width:100%}.admin-card-actions{grid-template-columns:1fr 1fr}}
