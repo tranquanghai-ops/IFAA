@@ -4,6 +4,7 @@ import { getFirestore, collection, doc, getDoc, setDoc, addDoc, updateDoc, delet
 import { firebaseConfig, OWNER_EMAIL } from "../firebase-config.mjs";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
+const EXTERNAL_CATEGORIES = new Set(["Sự kiện Trường", "Sự kiện Khoa khác"]);
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -156,6 +157,10 @@ function isNewEvent(event) {
   return event.showAsNew !== false && !!created && Date.now() - created >= 0 && Date.now() - created < 86400000;
 }
 
+function isExternalEvent(event) {
+  return event.externalRegistration === true || EXTERNAL_CATEGORIES.has(event.category);
+}
+
 function eventPosition(event) {
   const position = Number(event.sortOrder);
   return Number.isFinite(position) ? position : -(millis(event.createdAt) || 0);
@@ -202,7 +207,7 @@ function render() {
   $("#metricRegs").textContent = regs.length;
 
   const filteredEvents = (adminStatusFilter === "all" ? events : events.filter((event) => eventState(event) === adminStatusFilter))
-    .slice().sort((a, b) => eventPosition(a) - eventPosition(b));
+    .slice().sort((a, b) => Number(isExternalEvent(a)) - Number(isExternalEvent(b)) || eventPosition(a) - eventPosition(b));
   const groupedAdminEvents = new Map();
   filteredEvents.forEach((event) => {
     const key = event.groupId || "__ungrouped__";
@@ -213,13 +218,13 @@ function render() {
     const canManage = !isSubAdmin || event.createdByUid === user.uid;
     const [statusClass, statusText] = statusLabel(event);
     const state = eventState(event);
-    const orderedSiblings = events.filter((item) => (item.groupId || "__ungrouped__") === (event.groupId || "__ungrouped__")).sort((a, b) => eventPosition(a) - eventPosition(b));
+    const orderedSiblings = events.filter((item) => (item.groupId || "__ungrouped__") === (event.groupId || "__ungrouped__") && isExternalEvent(item) === isExternalEvent(event)).sort((a, b) => eventPosition(a) - eventPosition(b));
     const eventIndex = orderedSiblings.findIndex((item) => item.id === event.id);
     const hotTag = event.isHot ? '<span class="tag hot">🔥 HOT</span>' : "";
     const newTag = isNewEvent(event) ? '<span class="tag new">NEW</span>' : "";
     return `<article class="card event admin-event-card event-${state}">
       <div class="event-top"><div><span class="tag event-category">${safe(event.category || "Sự kiện Khoa")}</span><span class="tag ${statusClass}">${statusText}</span>${hotTag}${newTag}<h3>${safe(event.title)}</h3></div></div>
-      <div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span><b>Sức chứa:</b> ${event.registeredCount || 0}/${event.capacity}</span><span><b>Người tạo:</b> ${safe(event.createdByName || event.createdByEmail)}</span></div>
+      <div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span>${isExternalEvent(event) ? '<span><b>Đăng ký:</b> Liên kết bên ngoài</span>' : `<span><b>Sức chứa:</b> ${event.registeredCount || 0}/${event.capacity}</span>`}<span><b>Người tạo:</b> ${safe(event.createdByName || event.createdByEmail)}</span></div>
       <div class="admin-position-actions"><span>Vị trí ${eventIndex + 1}/${orderedSiblings.length}</span><button class="btn btn-small" data-move-event="${event.id}" data-direction="-1" ${eventIndex <= 0 ? "disabled" : ""}>↑ Lên</button><button class="btn btn-small" data-move-event="${event.id}" data-direction="1" ${eventIndex >= orderedSiblings.length - 1 ? "disabled" : ""}>↓ Xuống</button></div>
       <div class="event-actions admin-card-actions"><button class="btn" data-edit="${event.id}" ${canManage ? "" : "disabled"}>Sửa</button><button class="btn btn-soft" data-copy-event="${event.id}">Sao chép</button><button class="btn btn-calendar" data-calendar-event="${event.id}">＋ Google Lịch</button><button class="btn btn-danger" data-delete="${event.id}" ${canManage ? "" : "disabled"}>Xóa</button></div>
     </article>`;
@@ -410,6 +415,10 @@ function openEvent(event = null, copy = false) {
   $("#eventAllowCancellation").checked = !!event?.allowCancellation;
   $("#eventHot").checked = !!event?.isHot;
   $("#eventShowAsNew").checked = copy ? true : event ? event.showAsNew !== false : true;
+  $("#registrationUrl").value = event?.registrationUrl || "";
+  $("#autoCloseRegistration").checked = !!event?.autoCloseRegistration;
+  toggleExternalEventFields();
+  setAutoCloseState();
   refreshGroupOptions(event?.groupId || "");
   $("#groupId").disabled = !copy && !!event && (event.registeredCount || 0) > 0;
   $("#newGroupFields").classList.add("hidden");
@@ -433,6 +442,27 @@ $("#groupId").onchange = () => {
 
 $("#groupUnlimited").onchange = () => setLimitInputState($("#groupUnlimited"), $("#groupMaxRegistrations"), $("#groupLimitHelp"));
 $("#newGroupUnlimited").onchange = () => setLimitInputState($("#newGroupUnlimited"), $("#newGroupMax"));
+
+function toggleExternalEventFields() {
+  const external = EXTERNAL_CATEGORIES.has($("#category").value);
+  $("#externalRegistrationField").classList.toggle("hidden", !external);
+  $("#registrationUrl").required = external;
+  $("#capacity").disabled = external;
+  if (external && !Number($("#capacity").value)) $("#capacity").value = 1;
+}
+
+function setAutoCloseState() {
+  const automatic = $("#autoCloseRegistration").checked;
+  $("#closeRegistrationFields").classList.toggle("field-disabled", automatic);
+  $("#closeDate").disabled = automatic;
+  $("#closeTime").disabled = automatic;
+  $("#closeDate").required = !automatic;
+  $("#closeTime").required = !automatic;
+  $("#autoCloseHelp").textContent = automatic ? "Hệ thống tự đóng khi sự kiện bắt đầu; sự kiện cả ngày sẽ đóng lúc cuối ngày." : "Nhập thời gian đóng đăng ký.";
+}
+
+$("#category").onchange = toggleExternalEventFields;
+$("#autoCloseRegistration").onchange = setAutoCloseState;
 let descriptionRange = null;
 const descriptionEditor = $("#descriptionEditor");
 
@@ -504,7 +534,10 @@ $("#eventForm").onsubmit = async (event) => {
   const closeValue = dateTimeValue($("#closeDate").value, $("#closeTime").value.trim());
   data.openAt = openValue ? Timestamp.fromDate(openValue) : null;
   data.closeAt = closeValue ? Timestamp.fromDate(closeValue) : null;
-  data.capacity = Number($("#capacity").value);
+  data.autoCloseRegistration = $("#autoCloseRegistration").checked;
+  data.externalRegistration = EXTERNAL_CATEGORIES.has(data.category);
+  data.registrationUrl = $("#registrationUrl").value.trim();
+  data.capacity = data.externalRegistration ? 1 : Number($("#capacity").value);
   data.allowedFaculties = [...document.querySelectorAll(".event-faculty:checked")].map((input) => input.value);
   data.allowCancellation = $("#eventAllowCancellation").checked;
   data.isHot = $("#eventHot").checked;
@@ -513,11 +546,14 @@ $("#eventForm").onsubmit = async (event) => {
   try {
     if (!data.title || !data.category || !data.date || !data.location || !Number.isInteger(data.capacity) || data.capacity < 1) throw Error("Vui lòng nhập đầy đủ các trường bắt buộc.");
     if ((data.startTime && !validTime24(data.startTime)) || (data.endTime && !validTime24(data.endTime))) throw Error("Nếu nhập giờ sự kiện, vui lòng dùng định dạng 24 giờ HH:mm, ví dụ 08:30 hoặc 17:45.");
-    if (!data.openAt || !data.closeAt) throw Error("Vui lòng chọn ngày và nhập giờ mở, đóng đăng ký theo định dạng 24 giờ HH:mm.");
+    if (!data.openAt || (!data.autoCloseRegistration && !data.closeAt)) throw Error("Vui lòng chọn ngày và nhập giờ mở, đóng đăng ký theo định dạng 24 giờ HH:mm.");
+    if (data.externalRegistration && !/^https:\/\//i.test(data.registrationUrl)) throw Error("Sự kiện Trường/Khoa khác cần liên kết đăng ký bắt đầu bằng https://.");
+    if (!data.externalRegistration) data.registrationUrl = "";
     const eventStart = new Date(`${data.date}T${data.startTime || "23:59"}:00`).getTime();
     const eventEnd = new Date(`${data.date}T${data.endTime || data.startTime || "23:59"}:00`).getTime();
     const now = Date.now();
     if (!Number.isFinite(eventStart) || !Number.isFinite(eventEnd)) throw Error("Ngày hoặc giờ sự kiện không hợp lệ.");
+    if (data.autoCloseRegistration) data.closeAt = Timestamp.fromDate(new Date(eventStart));
     const warnings = [];
     if (data.endTime && !data.startTime) warnings.push("Đã nhập giờ kết thúc nhưng chưa nhập giờ bắt đầu; sự kiện vẫn được lưu là sự kiện cả ngày.");
     if (data.startTime && data.endTime && eventEnd <= eventStart) warnings.push("Giờ kết thúc sự kiện đang trước hoặc bằng giờ bắt đầu.");
@@ -672,7 +708,7 @@ async function moveGroup(groupId, direction) {
 async function moveEvent(eventId, direction) {
   const selected = events.find((item) => item.id === eventId);
   if (!selected) return;
-  const siblings = events.filter((item) => (item.groupId || "__ungrouped__") === (selected.groupId || "__ungrouped__")).sort((a, b) => eventPosition(a) - eventPosition(b));
+  const siblings = events.filter((item) => (item.groupId || "__ungrouped__") === (selected.groupId || "__ungrouped__") && isExternalEvent(item) === isExternalEvent(selected)).sort((a, b) => eventPosition(a) - eventPosition(b));
   const from = siblings.findIndex((item) => item.id === eventId);
   const to = from + direction;
   if (from < 0 || to < 0 || to >= siblings.length) return;
