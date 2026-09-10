@@ -516,21 +516,32 @@ function openDetail(id) {
   chosen = events.find((event) => event.id === id);
   if (!chosen) return;
   const state = eventState(chosen);
+  const external = isExternalEvent(chosen);
   const group = groupStatus(chosen);
   $("#detailTitle").textContent = chosen.title;
   const description = chosen.descriptionHtml ? sanitizeRichHtml(chosen.descriptionHtml) : `<p>${safe(chosen.description || "Không có mô tả.")}</p>`;
-  const groupLine = group.text ? `<span><b>${safe(group.text)}</b></span>` : "";
-  const detailLeft = Math.max(0, chosen.capacity - (chosen.registeredCount || 0));
-  const detailFullSeats = chosen.capacity > 0 && detailLeft === 0;
-  const detailLowSeats = chosen.capacity > 0 && detailLeft > 0 && detailLeft / chosen.capacity < 0.1;
-  $("#detailBody").innerHTML = `<div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(chosen))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(chosen.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(chosen, state))}</span>${groupLine}</div><div class="rich-content">${description}</div><div class="notice ${detailFullSeats ? "full-seats-notice" : detailLowSeats ? "low-seats-notice" : ""}">${detailFullSeats ? "Hết chỗ." : `Còn ${detailLeft} chỗ.`}</div>`;
+  const groupLine = !external && group.text ? `<span><b>${safe(group.text)}</b></span>` : "";
+  const detailLeft = chosen.unlimitedCapacity ? Infinity : Math.max(0, chosen.capacity - (chosen.registeredCount || 0));
+  const detailFullSeats = !chosen.unlimitedCapacity && chosen.capacity > 0 && detailLeft === 0;
+  const detailLowSeats = !chosen.unlimitedCapacity && chosen.capacity > 0 && detailLeft > 0 && detailLeft / chosen.capacity <= 0.2;
+  let availability = "";
+  if (external) availability = '<div class="notice external-registration-notice">Sự kiện này đăng ký tại trang của Trường/Khoa tổ chức.</div>';
+  else if (chosen.unlimitedCapacity && !chosen.hideRegistrationCount) availability = '<div class="notice">Không giới hạn số người tham gia.</div>';
+  else if (chosen.hideRegistrationCount) availability = detailFullSeats ? '<div class="notice full-seats-notice">Hết chỗ.</div>' : detailLowSeats ? '<div class="notice low-seats-notice">Sắp hết chỗ.</div>' : "";
+  else availability = `<div class="notice ${detailFullSeats ? "full-seats-notice" : detailLowSeats ? "low-seats-notice" : ""}">${detailFullSeats ? "Hết chỗ." : detailLowSeats ? "Sắp hết chỗ." : `Còn ${detailLeft} chỗ.`}</div>`;
+  $("#detailBody").innerHTML = `<div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(chosen))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(chosen.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(chosen, state))}</span>${groupLine}</div><div class="rich-content">${description}</div>${availability}`;
   const confirmButton = $("#confirmBtn");
-  confirmButton.disabled = state !== "open" || group.blocked || myRegs.has(chosen.id);
   const registrationExpired = ["closed", "ended"].includes(state);
-  confirmButton.classList.toggle("btn-full", detailFullSeats);
-  confirmButton.classList.toggle("btn-expired", registrationExpired && !detailFullSeats);
-  confirmButton.classList.toggle("btn-register", !detailFullSeats && !registrationExpired);
-  confirmButton.textContent = detailFullSeats ? "Đã đủ" : registrationExpired ? "Hết thời gian đăng ký" : "Xác nhận đăng ký";
+  confirmButton.classList.remove("btn-full", "btn-expired", "btn-register", "btn-external");
+  if (external) {
+    confirmButton.disabled = registrationExpired || !/^https:\/\//i.test(chosen.registrationUrl || "");
+    confirmButton.classList.add(registrationExpired ? "btn-expired" : "btn-external");
+    confirmButton.textContent = registrationExpired ? "Hết thời gian đăng ký" : "Đến trang đăng ký ↗";
+  } else {
+    confirmButton.disabled = state !== "open" || group.blocked || myRegs.has(chosen.id);
+    confirmButton.classList.add(detailFullSeats ? "btn-full" : registrationExpired ? "btn-expired" : "btn-register");
+    confirmButton.textContent = detailFullSeats ? "Đã đủ" : registrationExpired ? "Hết thời gian đăng ký" : "Xác nhận đăng ký";
+  }
   const calendarButton = $("#detailCalendarBtn");
   calendarButton.classList.toggle("hidden", !STUDENT_CALENDAR_ENABLED || !myRegs.has(chosen.id));
   calendarButton.dataset.calendar = chosen.id;
@@ -587,7 +598,7 @@ document.addEventListener("click", (event) => {
     render();
   }
 });
-$("#confirmBtn").onclick = async () => { if (chosen) { $("#detailDialog").close(); await register(chosen.id); } };
+$("#confirmBtn").onclick = async () => { if (chosen) { $("#detailDialog").close(); if (isExternalEvent(chosen)) { if (/^https:\/\//i.test(chosen.registrationUrl || "")) window.open(chosen.registrationUrl, "_blank", "noopener,noreferrer"); } else await register(chosen.id); } };
 setInterval(() => { if (user && profile) render(); }, 1000);
 
 onAuthStateChanged(auth, async (currentUser) => {
