@@ -325,6 +325,7 @@ function render() {
   }
 
   const accessibleEvents = events.filter((event) => {
+    if (event.deletedAt) return false;
     if (!facultyAllowed(event)) return false;
     if (filter === "mine") return myRegs.has(event.id) && (!linkedGroupId || event.groupId === focusedGroup?.id);
     if (eventState(event) === "hidden") return false;
@@ -469,6 +470,7 @@ async function register(eventId) {
       if (!eventSnapshot.exists()) throw Error("Sự kiện không tồn tại.");
       if (registrationSnapshot.exists()) throw Error("Bạn đã đăng ký sự kiện này.");
       const event = eventSnapshot.data();
+      if (event.deletedAt) throw Error("Sự kiện không còn khả dụng.");
       if (!allowedFaculties(event).includes(profile.faculty)) throw Error("Sự kiện không mở cho khoa/đơn vị của bạn.");
       let group = null;
       let current = null;
@@ -591,7 +593,7 @@ $("#profileForm").onsubmit = async (event) => {
 
 function showLoginNotice(message = "") {
   const target = $("#loginNotice");
-  target.textContent = message;
+  $("#loginNoticeText").textContent = message;
   target.classList.toggle("hidden", !message);
 }
 
