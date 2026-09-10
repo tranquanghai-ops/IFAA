@@ -4,6 +4,8 @@ import { getFirestore, collection, doc, getDoc, setDoc, onSnapshot, query, where
 import { firebaseConfig, STUDENT_DOMAIN } from "./firebase-config.mjs";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
+const DEFAULT_CATEGORY = "Sự kiện Khoa";
+const EVENT_CATEGORIES = ["Sự kiện Khoa", "Ngành Đồ họa", "Ngành Thiết kế công nghiệp", "Ngành Thiết kế nội thất", "Ngành Thiết kế thời trang", "Ngành Nghệ thuật số"];
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -59,6 +61,8 @@ let groups = new Map();
 let groupsLoaded = false;
 let settings = { faculties: [DEFAULT_FACULTY] };
 let filter = "available";
+let categoryFilter = "";
+let studentGroupFilter = "";
 let chosen = null;
 let unsubscribers = [];
 
@@ -165,6 +169,45 @@ function groupStatus(event) {
   return { text: `Giới hạn nhóm: Bạn đã đăng ký ${used}/${max} sự kiện`, blocked: used >= max && !myRegs.has(event.id) };
 }
 
+function eventCard(event) {
+  const state = eventState(event);
+  const registered = myRegs.has(event.id);
+  const used = event.registeredCount || 0;
+  const capacity = event.capacity || 0;
+  const left = Math.max(0, capacity - used);
+  const percent = capacity ? Math.min(100, used / capacity * 100) : 0;
+  const fullSeats = capacity > 0 && left === 0;
+  const lowSeats = capacity > 0 && left > 0 && left / capacity < 0.1;
+  const group = groupStatus(event);
+  const disabled = state !== "open" || group.blocked;
+  const label = { upcoming: "SẮP MỞ", open: "ĐANG MỞ", full: "ĐÃ ĐỦ", closed: "ĐÃ ĐÓNG ĐĂNG KÝ", ended: "ĐÃ KẾT THÚC", hidden: "ĐÃ ẨN" }[state];
+  const tagClass = state === "hidden" ? "closed" : state;
+  const groupLine = group.text ? `<span><b>${safe(group.text)}</b></span>` : "";
+  const category = event.category || DEFAULT_CATEGORY;
+  return `<article class="card event event-${state} ${registered ? "event-registered" : ""}"><div class="event-top"><div><span class="tag event-category">${safe(category)}</span><span class="tag ${tagClass}">${label}</span>${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}<h3>${safe(event.title)}</h3></div></div><div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(formatDate(event))} · ${safe(event.startTime || "")}${event.endTime ? `–${safe(event.endTime)}` : ""} · <b>${safe(dayPeriod(event.startTime))}</b></span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(event, state))}</span>${groupLine}</div><div class="progress"><i style="width:${percent}%"></i></div><div class="capacity"><span>${used}/${capacity} người tham gia</span><b class="${fullSeats ? "full-seats" : lowSeats ? "low-seats" : ""}">${fullSeats ? "Hết chỗ" : `Còn ${left} chỗ`}</b></div><div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${registered && event.allowCancellation ? `<button class="btn btn-danger" data-cancel="${event.id}">Hủy đăng ký</button>` : `<button class="btn ${state === "full" ? "btn-full" : "btn-register"}" data-register="${event.id}" ${disabled || registered ? "disabled" : ""}>${registered ? "Đã đăng ký" : state === "full" ? "Đã đủ" : group.blocked ? "Đã đạt giới hạn đăng ký" : state === "upcoming" ? "Chưa đến giờ" : "Đăng ký"}</button>`}</div></article>`;
+}
+
+function refreshStudentFilters(sourceEvents, focusedGroup) {
+  const categorySelect = $("#categoryFilter");
+  const currentCategory = categoryFilter;
+  const availableCategories = [...new Set(sourceEvents.map((event) => event.category || DEFAULT_CATEGORY))];
+  const orderedCategories = EVENT_CATEGORIES.filter((item) => availableCategories.includes(item)).concat(availableCategories.filter((item) => !EVENT_CATEGORIES.includes(item)).sort());
+  categorySelect.innerHTML = '<option value="">Tất cả dạng sự kiện</option>' + orderedCategories.map((item) => `<option value="${safe(item)}">${safe(item)}</option>`).join("");
+  categorySelect.value = orderedCategories.includes(currentCategory) ? currentCategory : "";
+  categoryFilter = categorySelect.value;
+
+  const groupSelect = $("#studentGroupFilter");
+  const currentGroup = focusedGroup?.id || studentGroupFilter;
+  const availableGroupIds = [...new Set(sourceEvents.map((event) => event.groupId).filter(Boolean))];
+  const availableGroups = availableGroupIds.map((id) => groups.get(id)).filter(Boolean);
+  const hasUngrouped = sourceEvents.some((event) => !event.groupId);
+  groupSelect.innerHTML = '<option value="">Tất cả nhóm sự kiện</option>' + availableGroups.map((group) => `<option value="${group.id}">${safe(group.name)}</option>`).join("") + (hasUngrouped ? '<option value="__ungrouped__">Không thuộc nhóm</option>' : "");
+  const validCurrentGroup = availableGroups.some((group) => group.id === currentGroup) || (hasUngrouped && currentGroup === "__ungrouped__");
+  groupSelect.value = validCurrentGroup ? currentGroup : "";
+  groupSelect.disabled = !!focusedGroup;
+  studentGroupFilter = groupSelect.value;
+}
+
 function render() {
   const focusedGroup = linkedGroupId ? [...groups.values()].find((group) => group.id === linkedGroupId || groupCode(group) === shareCode(linkedGroupId)) : null;
   $("#groupFocusPanel").classList.toggle("hidden", !linkedGroupId);
@@ -176,12 +219,21 @@ function render() {
         : `Trang này chỉ hiển thị các sự kiện thuộc nhóm này. Mỗi người được đăng ký tối đa ${focusedGroup.maxRegistrations} sự kiện.`
       : groupsLoaded ? "Liên kết có thể không đúng hoặc nhóm đã ngừng sử dụng." : "Vui lòng chờ trong giây lát.";
   }
-  const candidates = events.filter((event) => {
+
+  const accessibleEvents = events.filter((event) => {
     if (!facultyAllowed(event)) return false;
     if (filter === "mine") return myRegs.has(event.id) && (!linkedGroupId || event.groupId === focusedGroup?.id);
     if (eventState(event) === "hidden") return false;
     if (linkedGroupId) return event.groupId === focusedGroup?.id;
     return !groups.get(event.groupId)?.linkOnly;
+  });
+  refreshStudentFilters(accessibleEvents, focusedGroup);
+
+  const candidates = accessibleEvents.filter((event) => {
+    if (categoryFilter && (event.category || DEFAULT_CATEGORY) !== categoryFilter) return false;
+    if (studentGroupFilter === "__ungrouped__" && event.groupId) return false;
+    if (studentGroupFilter && studentGroupFilter !== "__ungrouped__" && event.groupId !== studentGroupFilter) return false;
+    return true;
   });
   const list = candidates.filter((event) => {
     const state = eventState(event);
@@ -194,29 +246,28 @@ function render() {
     if (byState) return byState;
     return (millis(b.createdAt) || 0) - (millis(a.createdAt) || 0);
   });
+
   $("#eventSummary").textContent = linkedGroupId && focusedGroup
     ? `${list.length} sự kiện trong nhóm ${focusedGroup.name}`
     : `${list.length} sự kiện phù hợp với ${profile?.faculty || "khoa/đơn vị của bạn"}`;
   const grid = $("#eventGrid");
   if (!list.length) {
-    grid.innerHTML = '<div class="card empty event-empty"><span class="empty-badge">DANH SÁCH TRỐNG</span><h3>Chưa có sự kiện trong mục này</h3><p>Chọn “Tất cả” để xem các sự kiện đã đóng hoặc đã kết thúc.</p></div>';
+    grid.innerHTML = '<div class="card empty event-empty"><span class="empty-badge">DANH SÁCH TRỐNG</span><h3>Chưa có sự kiện trong mục này</h3><p>Thử thay đổi dạng sự kiện, nhóm sự kiện hoặc chọn mục “Tất cả”.</p></div>';
     return;
   }
-  grid.innerHTML = list.map((event) => {
-    const state = eventState(event);
-    const registered = myRegs.has(event.id);
-    const used = event.registeredCount || 0;
-    const capacity = event.capacity || 0;
-    const left = Math.max(0, capacity - used);
-    const percent = capacity ? Math.min(100, used / capacity * 100) : 0;
-    const fullSeats = capacity > 0 && left === 0;
-    const lowSeats = capacity > 0 && left > 0 && left / capacity < 0.1;
-    const group = groupStatus(event);
-    const disabled = state !== "open" || group.blocked;
-    const label = { upcoming: "SẮP MỞ", open: "ĐANG MỞ", full: "ĐÃ ĐỦ", closed: "ĐÃ ĐÓNG ĐĂNG KÝ", ended: "ĐÃ KẾT THÚC", hidden: "ĐÃ ẨN" }[state];
-    const tagClass = state === "hidden" ? "closed" : state;
-    const groupLine = group.text ? `<span><b>${safe(group.text)}</b></span>` : "";
-    return `<article class="card event event-${state} ${registered ? "event-registered" : ""}"><div class="event-top"><div><span class="tag ${tagClass}">${label}</span>${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}<h3>${safe(event.title)}</h3></div></div><div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(formatDate(event))} · ${safe(event.startTime || "")}${event.endTime ? `–${safe(event.endTime)}` : ""} · <b>${safe(dayPeriod(event.startTime))}</b></span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(event, state))}</span>${groupLine}</div><div class="progress"><i style="width:${percent}%"></i></div><div class="capacity"><span>${used}/${capacity} người tham gia</span><b class="${fullSeats ? "full-seats" : lowSeats ? "low-seats" : ""}">${fullSeats ? "Hết chỗ" : `Còn ${left} chỗ`}</b></div><div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${registered && event.allowCancellation ? `<button class="btn btn-danger" data-cancel="${event.id}">Hủy đăng ký</button>` : `<button class="btn ${state === "full" ? "btn-full" : "btn-register"}" data-register="${event.id}" ${disabled || registered ? "disabled" : ""}>${registered ? "Đã đăng ký" : state === "full" ? "Đã đủ" : group.blocked ? "Đã đạt giới hạn đăng ký" : state === "upcoming" ? "Chưa đến giờ" : "Đăng ký"}</button>`}</div></article>`;
+
+  const grouped = new Map();
+  list.forEach((event) => {
+    const key = event.groupId || "__ungrouped__";
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(event);
+  });
+  let tone = 0;
+  grid.innerHTML = [...grouped.entries()].map(([groupId, items]) => {
+    if (groupId === "__ungrouped__") return `<div class="event-grid ungrouped-events">${items.map(eventCard).join("")}</div>`;
+    const group = groups.get(groupId);
+    const toneClass = `group-tone-${tone++ % 5}`;
+    return `<section class="event-group-block ${toneClass}"><div class="event-group-heading"><div><span class="event-group-kicker">NHÓM SỰ KIỆN</span><h3>${safe(group?.name || items[0]?.groupName || "Nhóm sự kiện")}</h3></div><span>${items.length} sự kiện</span></div><div class="event-grid">${items.map(eventCard).join("")}</div></section>`;
   }).join("");
 }
 
@@ -406,6 +457,8 @@ $("#profileForm").onsubmit = async (event) => {
 $("#loginBtn").onclick = async () => { try { await signInWithPopup(auth, provider); } catch { show("Không thể đăng nhập Google.", "error"); } };
 $("#logoutBtn").onclick = () => signOut(auth);
 $("#editProfileBtn").onclick = () => showProfileForm(true);
+$("#categoryFilter").onchange = (event) => { categoryFilter = event.target.value; render(); };
+$("#studentGroupFilter").onchange = (event) => { studentGroupFilter = event.target.value; render(); };
 document.addEventListener("click", (event) => {
   const button = event.target.closest("button");
   if (!button) return;
