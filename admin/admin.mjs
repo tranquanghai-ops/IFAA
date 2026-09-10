@@ -39,6 +39,65 @@ function groupShareUrl(group) {
   return url.toString();
 }
 
+function calendarStamp(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  const pad = (number) => String(number).padStart(2, "0");
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}T${pad(date.getHours())}${pad(date.getMinutes())}00`;
+}
+
+function calendarRange(event) {
+  const start = new Date(`${event.date}T${event.startTime || "08:00"}:00`);
+  let end = new Date(`${event.date}T${event.endTime || event.startTime || "09:00"}:00`);
+  if (!Number.isFinite(start.getTime())) return null;
+  if (!Number.isFinite(end.getTime()) || end <= start) end = new Date(start.getTime() + 3600000);
+  return { start, end, value: `${calendarStamp(start)}/${calendarStamp(end)}` };
+}
+
+function eventCalendarUrl(event) {
+  const range = calendarRange(event);
+  if (!range) return "";
+  const url = new URL("https://calendar.google.com/calendar/render");
+  url.searchParams.set("action", "TEMPLATE");
+  url.searchParams.set("text", event.title || "Sự kiện IFA+A");
+  url.searchParams.set("dates", range.value);
+  url.searchParams.set("ctz", "Asia/Ho_Chi_Minh");
+  url.searchParams.set("location", event.location || "");
+  url.searchParams.set("details", [event.description || "", "Thông tin từ hệ thống quản lý sự kiện IFA+A."].filter(Boolean).join("\n\n").slice(0, 1800));
+  return url.toString();
+}
+
+function openGoogleCalendar(event) {
+  const url = eventCalendarUrl(event);
+  if (!url) return notice("Ngày hoặc giờ sự kiện chưa hợp lệ.", "error");
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+function escapeIcs(value) {
+  return String(value || "").replace(/\\/g, "\\\\").replace(/\r?\n/g, "\\n").replace(/,/g, "\\,").replace(/;/g, "\\;");
+}
+
+function downloadGroupCalendar(groupId) {
+  const group = groups.find((item) => item.id === groupId);
+  const groupEvents = events.filter((item) => item.groupId === groupId && calendarRange(item)).sort((a, b) => `${a.date}T${a.startTime || ""}`.localeCompare(`${b.date}T${b.startTime || ""}`));
+  if (!group || !groupEvents.length) return notice("Nhóm này chưa có sự kiện hợp lệ để thêm vào lịch.", "error");
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  const blocks = groupEvents.map((item) => {
+    const range = calendarRange(item);
+    return ["BEGIN:VEVENT", `UID:${escapeIcs(item.id)}@ifaa`, `DTSTAMP:${stamp}`, `DTSTART;TZID=Asia/Ho_Chi_Minh:${calendarStamp(range.start)}`, `DTEND;TZID=Asia/Ho_Chi_Minh:${calendarStamp(range.end)}`, `SUMMARY:${escapeIcs(item.title)}`, `LOCATION:${escapeIcs(item.location)}`, `DESCRIPTION:${escapeIcs(item.description || "Sự kiện IFA+A")}`, "END:VEVENT"].join("\r\n");
+  });
+  const calendar = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//IFAA//Event Registration//VI", "CALSCALE:GREGORIAN", "METHOD:PUBLISH", ...blocks, "END:VCALENDAR", ""].join("\r\n");
+  const blob = new Blob(["\uFEFF", calendar], { type: "text/calendar;charset=utf-8" });
+  const href = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = href;
+  anchor.download = `IFAA_${shareCode(group.name) || "NHOM-SU-KIEN"}.ics`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(href), 1500);
+  notice(`Đã tạo tệp lịch gồm ${groupEvents.length} sự kiện. Mở tệp để nhập một lần vào Google Calendar.`, "success");
+}
+
 function notice(message, type = "") {
   const element = $("#adminNotice");
   element.textContent = message;
@@ -107,7 +166,7 @@ function render() {
     const reason = "Chỉ được xóa sự kiện do mình tạo";
     const [statusClass, statusText] = statusLabel(event);
     const state = eventState(event);
-    return `<tr class="${state === "ended" ? "admin-event-ended" : ""}"><td><b>${safe(event.title)}</b><br><small class="admin-event-category">${safe(event.category || "Sự kiện Khoa")}</small><br><small>${safe(event.location)}</small></td><td>${safe(event.date)}<br>${safe(event.startTime || "")}</td><td>${event.registeredCount || 0}/${event.capacity}</td><td>${safe(event.createdByName || event.createdByEmail)}</td><td><span class="tag ${statusClass}">${statusText}</span></td><td><div class="actions"><button class="btn btn-small" data-edit="${event.id}">Sửa</button><button class="btn btn-small btn-soft" data-copy-event="${event.id}">Sao chép</button><button class="btn btn-small btn-danger" data-delete="${event.id}" ${canDelete ? "" : `disabled title='${reason}'`}>Xóa</button></div></td></tr>`;
+    return `<tr class="${state === "ended" ? "admin-event-ended" : ""}"><td><b>${safe(event.title)}</b><br><small class="admin-event-category">${safe(event.category || "Sự kiện Khoa")}</small><br><small>${safe(event.location)}</small></td><td>${safe(event.date)}<br>${safe(event.startTime || "")}</td><td>${event.registeredCount || 0}/${event.capacity}</td><td>${safe(event.createdByName || event.createdByEmail)}</td><td><span class="tag ${statusClass}">${statusText}</span></td><td><div class="actions"><button class="btn btn-small" data-edit="${event.id}">Sửa</button><button class="btn btn-small btn-soft" data-copy-event="${event.id}">Sao chép</button><button class="btn btn-small btn-calendar" data-calendar-event="${event.id}">＋ Google Lịch</button><button class="btn btn-small btn-danger" data-delete="${event.id}" ${canDelete ? "" : `disabled title='${reason}'`}>Xóa</button></div></td></tr>`;
   };
   const groupedAdminEvents = new Map();
   filteredEvents.forEach((event) => {
@@ -128,7 +187,7 @@ function render() {
     const eventCount = events.filter((item) => item.groupId === group.id).length;
     const visibility = group.linkOnly ? '<span class="tag upcoming">CHỈ QUA LINK</span>' : '<span class="tag open">TRANG CHUNG</span>';
     const limit = group.unlimited ? '<b>Không giới hạn</b>' : `Tối đa <b>${Number(group.maxRegistrations) || 1}</b>/sự kiện`;
-    return `<tr><td><b>${safe(group.name)}</b><br><small>Mã: ${safe(groupCode(group))}</small></td><td>${limit}</td><td>${eventCount}</td><td>${visibility}</td><td><button class="btn btn-small btn-soft" data-copy-group-link="${group.id}">Sao chép liên kết</button></td><td><button class="btn btn-small" data-edit-group="${group.id}">Sửa nhóm</button></td></tr>`;
+    return `<tr><td><b>${safe(group.name)}</b><br><small>Mã: ${safe(groupCode(group))}</small></td><td>${limit}</td><td>${eventCount}</td><td>${visibility}</td><td><div class="actions"><button class="btn btn-small btn-soft" data-copy-group-link="${group.id}">Sao chép liên kết</button><button class="btn btn-small btn-calendar" data-calendar-group="${group.id}">＋ Lịch cả nhóm</button></div></td><td><button class="btn btn-small" data-edit-group="${group.id}">Sửa nhóm</button></td></tr>`;
   }).join("") || '<tr><td colspan="6" class="empty">Chưa có nhóm sự kiện.</td></tr>';
 
   const selectedFilter = $("#eventFilter").value;
@@ -558,6 +617,11 @@ document.addEventListener("click", async (event) => {
   if (button.id === "newGroupBtn") openGroup();
   if (button.dataset.closeGroup !== undefined) $("#groupDialog").close();
   if (button.dataset.editGroup) openGroup(groups.find((item) => item.id === button.dataset.editGroup));
+  if (button.dataset.calendarEvent) {
+    const selectedEvent = events.find((item) => item.id === button.dataset.calendarEvent);
+    if (selectedEvent) openGoogleCalendar(selectedEvent);
+  }
+  if (button.dataset.calendarGroup) downloadGroupCalendar(button.dataset.calendarGroup);
   if (button.dataset.copyGroupLink) {
     const selectedGroup = groups.find((item) => item.id === button.dataset.copyGroupLink);
     const link = groupShareUrl(selectedGroup || { id: button.dataset.copyGroupLink });
