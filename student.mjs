@@ -213,10 +213,13 @@ function countdown(target) {
 
 function timingStatus(event, state) {
   if (state === "upcoming") return `Mở đăng ký lúc ${formatDateTime(event.openAt)} · Còn ${countdown(millis(event.openAt))}`;
-  if (state === "open" || state === "full") return `Đóng đăng ký lúc ${formatDateTime(event.closeAt)} · Còn ${countdown(millis(event.closeAt))}`;
+  if (state === "open" || state === "full") {
+    if (!millis(event.closeAt)) return "Đang mở đăng ký · Admin sẽ đóng đăng ký";
+    return `Đóng đăng ký lúc ${formatDateTime(event.closeAt)} · Còn ${countdown(millis(event.closeAt))}`;
+  }
   if (state === "ended") return "Sự kiện đã kết thúc";
   if (state === "hidden") return "Sự kiện đã được ẩn khỏi danh sách chung";
-  return `Đã đóng đăng ký lúc ${formatDateTime(event.closeAt)}`;
+  return millis(event.closeAt) ? `Đã đóng đăng ký lúc ${formatDateTime(event.closeAt)}` : "Đăng ký đã được Admin đóng";
 }
 
 function allowedFaculties(event) {
