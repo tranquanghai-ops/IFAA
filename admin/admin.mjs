@@ -393,6 +393,7 @@ const dateTimeValue = (date, time) => date && validTime24(time) ? new Date(`${da
 function openEvent(event = null, copy = false) {
   $("#eventForm").reset();
   delete $("#saveEventBtn").dataset.warningSignature;
+  delete $("#saveEventBtn").dataset.immediateOpenBase;
   $("#saveEventBtn").textContent = "Lưu sự kiện";
   $("#descriptionEditor").innerHTML = event?.descriptionHtml || (event?.description ? `<p>${safe(event.description).replace(/\n/g, "<br>")}</p>` : "");
   $("#eventFormError").classList.add("hidden");
@@ -419,10 +420,13 @@ function openEvent(event = null, copy = false) {
   $("#hideRegistrationCount").checked = !!event?.hideRegistrationCount;
   if (event?.unlimitedCapacity) $("#capacity").value = "";
   $("#registrationUrl").value = event?.registrationUrl || "";
-  $("#autoCloseRegistration").checked = !!event?.autoCloseRegistration;
+  const storedCloseMode = event?.closeMode || (event ? "manual" : "after24");
+  const closeMode = copy ? (event?.closeMode || "manual") : storedCloseMode;
+  const closeModeInput = document.querySelector(`input[name="closeMode"][value="${closeMode}"]`) || document.querySelector('input[name="closeMode"][value="after24"]');
+  if (closeModeInput) closeModeInput.checked = true;
   toggleExternalEventFields();
   setCapacityState();
-  setAutoCloseState();
+  setCloseModeState();
   refreshGroupOptions(event?.groupId || "");
   $("#groupId").disabled = !copy && !!event && (event.registeredCount || 0) > 0;
   $("#newGroupFields").classList.add("hidden");
@@ -463,19 +467,31 @@ function setCapacityState() {
   $("#capacityHelp").textContent = external ? "Sự kiện này đăng ký ở trang bên ngoài." : unlimited ? "Đã tắt giới hạn số người đăng ký." : "Nhập số người tối đa được đăng ký.";
 }
 
-function setAutoCloseState() {
-  const automatic = $("#autoCloseRegistration").checked;
-  $("#closeRegistrationFields").classList.toggle("field-disabled", automatic);
-  $("#closeDate").disabled = automatic;
-  $("#closeTime").disabled = automatic;
-  $("#closeDate").required = !automatic;
-  $("#closeTime").required = !automatic;
-  $("#autoCloseHelp").textContent = automatic ? "Hệ thống tự đóng khi sự kiện bắt đầu; sự kiện cả ngày sẽ đóng lúc cuối ngày." : "Nhập thời gian đóng đăng ký.";
+function selectedCloseMode() {
+  return document.querySelector('input[name="closeMode"]:checked')?.value || "after24";
+}
+
+function setCloseModeState() {
+  const mode = selectedCloseMode();
+  const manual = mode === "manual";
+  $("#closeRegistrationFields").classList.toggle("hidden", !manual);
+  $("#closeDate").disabled = !manual;
+  $("#closeTime").disabled = !manual;
+  $("#closeDate").required = manual;
+  $("#closeTime").required = manual;
+  const help = {
+    after12: "Hệ thống sẽ đóng đăng ký sau 12 giờ tính từ lúc mở.",
+    after24: "Hệ thống sẽ đóng đăng ký sau 24 giờ tính từ lúc mở.",
+    endOfDay: "Hệ thống sẽ đóng lúc 23:59 của ngày diễn ra sự kiện.",
+    admin: "Đăng ký tiếp tục mở cho đến khi Admin chuyển trạng thái sang kết thúc.",
+    manual: "Nhập chính xác ngày và giờ đóng đăng ký."
+  };
+  $("#closeModeHelp").textContent = help[mode] || help.after24;
 }
 
 $("#category").onchange = () => { toggleExternalEventFields(); setCapacityState(); };
 $("#unlimitedCapacity").onchange = setCapacityState;
-$("#autoCloseRegistration").onchange = setAutoCloseState;
+document.querySelectorAll('input[name="closeMode"]').forEach((input) => input.addEventListener("change", setCloseModeState));
 let descriptionRange = null;
 const descriptionEditor = $("#descriptionEditor");
 
@@ -543,11 +559,14 @@ $("#eventForm").onsubmit = async (event) => {
   for (const key of ["title", "category", "date", "location", "startTime", "endTime", "status"]) data[key] = $("#" + key).value.trim();
   data.descriptionHtml = $("#descriptionEditor").innerHTML.trim();
   data.description = $("#descriptionEditor").innerText.trim();
-  const openValue = dateTimeValue($("#openDate").value, $("#openTime").value.trim());
-  const closeValue = dateTimeValue($("#closeDate").value, $("#closeTime").value.trim());
-  data.openAt = openValue ? Timestamp.fromDate(openValue) : null;
-  data.closeAt = closeValue ? Timestamp.fromDate(closeValue) : null;
-  data.autoCloseRegistration = $("#autoCloseRegistration").checked;
+  const openDateText = $("#openDate").value;
+  const openTimeText = $("#openTime").value.trim();
+  const closeDateText = $("#closeDate").value;
+  const closeTimeText = $("#closeTime").value.trim();
+  data.openAt = null;
+  data.closeAt = null;
+  data.closeMode = selectedCloseMode();
+  data.autoCloseRegistration = false;
   data.externalRegistration = EXTERNAL_CATEGORIES.has(data.category);
   data.registrationUrl = $("#registrationUrl").value.trim();
   data.unlimitedCapacity = !data.externalRegistration && $("#unlimitedCapacity").checked;
@@ -561,22 +580,36 @@ $("#eventForm").onsubmit = async (event) => {
   try {
     if (!data.title || !data.category || !data.date || !data.location || !Number.isInteger(data.capacity) || data.capacity < 1) throw Error("Vui lòng nhập đầy đủ các trường bắt buộc.");
     if ((data.startTime && !validTime24(data.startTime)) || (data.endTime && !validTime24(data.endTime))) throw Error("Nếu nhập giờ sự kiện, vui lòng dùng định dạng 24 giờ HH:mm, ví dụ 08:30 hoặc 17:45.");
-    if (!data.openAt || (!data.autoCloseRegistration && !data.closeAt)) throw Error("Vui lòng chọn ngày và nhập giờ mở, đóng đăng ký theo định dạng 24 giờ HH:mm.");
+    if ((openDateText && !openTimeText) || (!openDateText && openTimeText)) throw Error("Thời gian mở đăng ký: hãy nhập đủ ngày và giờ, hoặc để trống cả hai để mở ngay.");
+    if (openTimeText && !validTime24(openTimeText)) throw Error("Giờ mở đăng ký phải theo định dạng 24 giờ HH:mm.");
+    if (data.closeMode === "manual" && ((closeDateText && !closeTimeText) || (!closeDateText && closeTimeText))) throw Error("Thời gian đóng đăng ký: vui lòng nhập đủ ngày và giờ.");
+    if (data.closeMode === "manual" && (!closeDateText || !validTime24(closeTimeText))) throw Error("Vui lòng nhập ngày và giờ đóng đăng ký theo định dạng 24 giờ HH:mm.");
+    const openValue = openDateText && openTimeText ? dateTimeValue(openDateText, openTimeText) : null;
+    const manualCloseValue = data.closeMode === "manual" ? dateTimeValue(closeDateText, closeTimeText) : null;
+    if (openDateText && openTimeText && !openValue) throw Error("Ngày hoặc giờ mở đăng ký không hợp lệ.");
+    if (data.closeMode === "manual" && !manualCloseValue) throw Error("Ngày hoặc giờ đóng đăng ký không hợp lệ.");
+    data.openAt = openValue ? Timestamp.fromDate(openValue) : null;
     if (data.externalRegistration && !/^https:\/\//i.test(data.registrationUrl)) throw Error("Sự kiện Trường/Khoa khác cần liên kết đăng ký bắt đầu bằng https://.");
     if (!data.externalRegistration) data.registrationUrl = "";
     const eventStart = new Date(`${data.date}T${data.startTime || "23:59"}:00`).getTime();
     const eventEnd = new Date(`${data.date}T${data.endTime || data.startTime || "23:59"}:00`).getTime();
     const now = Date.now();
     if (!Number.isFinite(eventStart) || !Number.isFinite(eventEnd)) throw Error("Ngày hoặc giờ sự kiện không hợp lệ.");
-    if (data.autoCloseRegistration) data.closeAt = Timestamp.fromDate(new Date(eventStart));
+    const immediateOpenBase = data.openAt?.toMillis() ?? (Number(submit.dataset.immediateOpenBase) || Date.now());
+    if (!data.openAt) submit.dataset.immediateOpenBase = String(immediateOpenBase);
+    if (data.closeMode === "after12") data.closeAt = Timestamp.fromMillis(immediateOpenBase + 12 * 60 * 60 * 1000);
+    else if (data.closeMode === "after24") data.closeAt = Timestamp.fromMillis(immediateOpenBase + 24 * 60 * 60 * 1000);
+    else if (data.closeMode === "endOfDay") data.closeAt = Timestamp.fromDate(new Date(`${data.date}T23:59:00`));
+    else if (data.closeMode === "manual") data.closeAt = Timestamp.fromDate(manualCloseValue);
+    else data.closeAt = null;
     const warnings = [];
     if (data.endTime && !data.startTime) warnings.push("Đã nhập giờ kết thúc nhưng chưa nhập giờ bắt đầu; sự kiện vẫn được lưu là sự kiện cả ngày.");
     if (data.startTime && data.endTime && eventEnd <= eventStart) warnings.push("Giờ kết thúc sự kiện đang trước hoặc bằng giờ bắt đầu.");
     if (!id && eventStart <= now) warnings.push("Ngày và giờ bắt đầu sự kiện đã ở trong quá khứ.");
-    if (data.openAt.toMillis() >= data.closeAt.toMillis()) warnings.push("Thời gian đóng đăng ký đang trước hoặc bằng thời gian mở đăng ký.");
-    if (!id && data.closeAt.toMillis() <= now) warnings.push("Thời gian đóng đăng ký đã ở trong quá khứ.");
-    if (data.closeAt.toMillis() > eventStart) warnings.push("Thời gian đóng đăng ký đang sau giờ bắt đầu sự kiện.");
-    const warningSignature = [id, data.date, data.startTime, data.endTime, data.openAt.toMillis(), data.closeAt.toMillis(), ...warnings].join("|");
+    if (data.openAt && data.closeAt && data.openAt.toMillis() >= data.closeAt.toMillis()) warnings.push("Thời gian đóng đăng ký đang trước hoặc bằng thời gian mở đăng ký.");
+    if (!id && data.closeAt && data.closeAt.toMillis() <= now) warnings.push("Thời gian đóng đăng ký đã ở trong quá khứ.");
+    if (data.closeAt && data.closeMode !== "endOfDay" && data.closeAt.toMillis() > eventStart) warnings.push("Thời gian đóng đăng ký đang sau giờ bắt đầu sự kiện.");
+    const warningSignature = [id, data.date, data.startTime, data.endTime, data.openAt?.toMillis() || "immediate", data.closeAt?.toMillis() || "admin", data.closeMode, ...warnings].join("|");
     if (warnings.length && submit.dataset.warningSignature !== warningSignature) {
       error.innerHTML = `<b>Cảnh báo ngày giờ chưa hợp lý:</b><ul>${warnings.map((message) => `<li>${safe(message)}</li>`).join("")}</ul><b>Nếu thông tin này là chủ ý, bấm “Vẫn lưu sự kiện”.</b>`;
       error.className = "notice warning";
@@ -630,7 +663,7 @@ $("#eventForm").onsubmit = async (event) => {
         if (syncFields.includes("location")) sharedData.location = data.location;
         if (syncFields.includes("capacity")) sharedData.capacity = data.capacity;
         if (syncFields.includes("openAt")) sharedData.openAt = data.openAt;
-        if (syncFields.includes("closeAt")) sharedData.closeAt = data.closeAt;
+        if (syncFields.includes("closeAt")) Object.assign(sharedData, { closeAt: data.closeAt, closeMode: data.closeMode, autoCloseRegistration: false });
         await Promise.all(siblingEvents.map((item) => updateDoc(doc(db, "events", item.id), sharedData)));
       }
       $("#eventDialog").close();
@@ -651,6 +684,7 @@ $("#eventForm").onsubmit = async (event) => {
     if (!keepWarningAction) {
       submit.textContent = "Lưu sự kiện";
       delete submit.dataset.warningSignature;
+      delete submit.dataset.immediateOpenBase;
     }
   }
 };
