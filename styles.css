@@ -88,3 +88,10 @@
 .admin-event-group table{min-width:900px}
 .admin-group-ungrouped{--group-accent:#7a8494}
 @media(max-width:760px){.admin-event-group{padding:10px;border-left-width:5px}.admin-event-group-head{align-items:flex-start}.admin-event-group-head h3{font-size:18px}.batch-field-list{display:grid;grid-template-columns:1fr}}
+/* V2.2: tích hợp Google Calendar cho thành viên và quản trị */
+.btn-calendar{border-color:#b8cdf8;background:#eef4ff;color:#174ea6}
+.btn-calendar:hover{background:#e1ebff;border-color:#8eb0f2}
+.event-actions{flex-wrap:wrap}
+.event-actions .btn-calendar{flex-basis:calc(50% - 4px)}
+.modal-actions .btn-calendar{margin-right:auto}
+@media(max-width:760px){.event-actions .btn{flex-basis:calc(50% - 4px)}.modal-actions{flex-wrap:wrap}.modal-actions .btn-calendar{order:-1;width:100%;margin-right:0}}
