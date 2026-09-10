@@ -71,3 +71,20 @@
 .event-category{background:#edf0f5;color:#465166}
 .batch-group-option{display:flex;align-items:center;justify-content:space-between;gap:14px}.batch-group-option span{display:grid;gap:2px}.batch-group-option small{display:block;color:var(--muted);font-weight:500}.batch-group-option .btn.active{border-color:#087a43;background:#eaf8f0;color:#087a43}@media(max-width:760px){.batch-group-option{align-items:stretch;flex-direction:column}}
 @media(max-width:760px){.event-filter-panel{grid-template-columns:1fr;padding:13px}.event-group-block{padding:11px;border-left-width:5px}.event-group-heading{align-items:flex-start}.event-group-heading h3{font-size:18px}}
+
+/* V2.1: chọn từng trường đồng bộ và gom nhóm ở Admin */
+.batch-group-option{align-items:stretch;flex-direction:column}
+.batch-field-list{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.batch-field-list .check-chip{background:#fff;border-color:#cfd5dd;font-weight:750}
+.batch-field-list .check-chip:has(input:checked){background:#eaf8f0;border-color:#79c69b;color:#087a43}
+.admin-event-groups{display:grid;gap:20px;margin-top:14px}
+.admin-event-group{--group-accent:#3157c8;border:2px solid color-mix(in srgb,var(--group-accent) 35%,white);border-left:7px solid var(--group-accent);border-radius:20px;padding:15px;background:color-mix(in srgb,var(--group-accent) 5%,white);box-shadow:0 14px 36px rgba(24,33,58,.07)}
+.admin-event-group-head{display:flex;align-items:end;justify-content:space-between;gap:14px;padding:1px 3px 12px}
+.admin-event-group-head span{color:var(--group-accent);font-size:12px;font-weight:900;letter-spacing:.07em}
+.admin-event-group-head h3{margin:2px 0 0;font-size:21px}
+.admin-event-group-head small{color:var(--muted)}
+.admin-event-group-head>b{color:var(--muted);font-size:13px;white-space:nowrap}
+.admin-event-group .table-wrap{background:#fff;border-radius:13px}
+.admin-event-group table{min-width:900px}
+.admin-group-ungrouped{--group-accent:#7a8494}
+@media(max-width:760px){.admin-event-group{padding:10px;border-left-width:5px}.admin-event-group-head{align-items:flex-start}.admin-event-group-head h3{font-size:18px}.batch-field-list{display:grid;grid-template-columns:1fr}}
