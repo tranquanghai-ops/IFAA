@@ -159,6 +159,11 @@ function eventPosition(event) {
   return Number.isFinite(position) ? position : -(millis(event.createdAt) || 0);
 }
 
+function groupPosition(group) {
+  const position = Number(group?.sortOrder);
+  return Number.isFinite(position) ? position : -(millis(group?.createdAt) || 0);
+}
+
 function dayPeriod(time) {
   const hour = Number(String(time || "").slice(0, 2));
   if (!Number.isFinite(hour)) return "";
@@ -258,7 +263,7 @@ function refreshStudentFilters(sourceEvents, focusedGroup) {
   const groupSelect = $("#studentGroupFilter");
   const currentGroup = focusedGroup?.id || studentGroupFilter;
   const availableGroupIds = [...new Set(sourceEvents.map((event) => event.groupId).filter(Boolean))];
-  const availableGroups = availableGroupIds.map((id) => groups.get(id)).filter(Boolean);
+  const availableGroups = availableGroupIds.map((id) => groups.get(id)).filter(Boolean).sort((a, b) => groupPosition(a) - groupPosition(b));
   const hasUngrouped = sourceEvents.some((event) => !event.groupId);
   groupSelect.innerHTML = '<option value="">Tất cả nhóm sự kiện</option>' + availableGroups.map((group) => `<option value="${group.id}">${safe(group.name)}</option>`).join("") + (hasUngrouped ? '<option value="__ungrouped__">Không thuộc nhóm</option>' : "");
   const validCurrentGroup = availableGroups.some((group) => group.id === currentGroup) || (hasUngrouped && currentGroup === "__ungrouped__");
@@ -328,7 +333,11 @@ function render() {
     grouped.get(key).push(event);
   });
   let tone = 0;
-  grid.innerHTML = [...grouped.entries()].map(([groupId, items]) => {
+  grid.innerHTML = [...grouped.entries()].sort(([a], [b]) => {
+    if (a === "__ungrouped__") return 1;
+    if (b === "__ungrouped__") return -1;
+    return groupPosition(groups.get(a)) - groupPosition(groups.get(b));
+  }).map(([groupId, items]) => {
     if (groupId === "__ungrouped__") return `<div class="event-grid ungrouped-events">${items.map(eventCard).join("")}</div>`;
     const group = groups.get(groupId);
     const toneClass = `group-tone-${tone++ % 5}`;
