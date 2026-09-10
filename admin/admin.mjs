@@ -30,8 +30,9 @@ function confirmAction({ title, message, verification = "" }) {
     input.value = "";
     submit.disabled = Boolean(verification);
 
+    const normalizeVerification = (value) => String(value || "").trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/Đ/g, "D");
     const validate = () => {
-      submit.disabled = Boolean(verification) && input.value.trim().toUpperCase() !== verification.toUpperCase();
+      submit.disabled = Boolean(verification) && normalizeVerification(input.value) !== normalizeVerification(verification);
     };
     const finish = (approved) => {
       if (settled) return;
@@ -63,6 +64,8 @@ let isOwner = false;
 let currentRole = "admin";
 let isSubAdmin = false;
 let events = [];
+const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const purgingEventIds = new Set();
 let regs = [];
 let admins = [];
 let groups = [];
@@ -280,23 +283,26 @@ function statusLabel(event) {
 }
 
 function showPane(name) {
+  if (name === "trash" && !isOwner) name = "events";
   document.querySelectorAll(".nav-btn").forEach((item) => item.classList.toggle("active", item.dataset.pane === name));
   document.querySelectorAll(".pane").forEach((item) => item.classList.toggle("hidden", item.dataset.paneId !== name));
 }
 
 function render() {
-  const counts = events.reduce((result, item) => {
+  const activeEvents = events.filter((item) => !item.deletedAt);
+  const trashedEvents = events.filter((item) => item.deletedAt);
+  const counts = activeEvents.reduce((result, item) => {
     result[eventState(item)] += 1;
     return result;
   }, { upcoming: 0, open: 0, ended: 0, hidden: 0 });
-  $("#metricEvents").textContent = events.length;
+  $("#metricEvents").textContent = activeEvents.length;
   $("#metricUpcoming").textContent = counts.upcoming;
   $("#metricOpen").textContent = counts.open;
   $("#metricEnded").textContent = counts.ended;
   $("#metricHidden").textContent = counts.hidden;
-  $("#metricRegs").textContent = events.reduce((total, item) => total + Number(item.registeredCount || 0), 0);
+  $("#metricRegs").textContent = activeEvents.reduce((total, item) => total + Number(item.registeredCount || 0), 0);
 
-  const filteredEvents = (adminStatusFilter === "all" ? events.filter((event) => eventState(event) !== "hidden") : events.filter((event) => eventState(event) === adminStatusFilter))
+  const filteredEvents = (adminStatusFilter === "all" ? activeEvents.filter((event) => eventState(event) !== "hidden") : activeEvents.filter((event) => eventState(event) === adminStatusFilter))
     .slice().sort((a, b) => Number(isExternalEvent(a)) - Number(isExternalEvent(b)) || eventPosition(a) - eventPosition(b));
   const orderedGroups = groups.slice().sort((a, b) => groupPosition(a) - groupPosition(b));
   $("#eventRows").className = `admin-event-groups view-${adminEventView}`;
@@ -311,7 +317,7 @@ function render() {
     const canManage = !isSubAdmin || event.createdByUid === user.uid;
     const [statusClass, statusText] = statusLabel(event);
     const state = eventState(event);
-    const orderedSiblings = events.filter((item) => (item.groupId || "__ungrouped__") === (event.groupId || "__ungrouped__") && isExternalEvent(item) === isExternalEvent(event)).sort((a, b) => eventPosition(a) - eventPosition(b));
+    const orderedSiblings = activeEvents.filter((item) => (item.groupId || "__ungrouped__") === (event.groupId || "__ungrouped__") && isExternalEvent(item) === isExternalEvent(event)).sort((a, b) => eventPosition(a) - eventPosition(b));
     const eventIndex = orderedSiblings.findIndex((item) => item.id === event.id);
     const hotTag = event.isHot ? '<span class="tag hot">🔥 HOT</span>' : "";
     const newTag = isNewEvent(event) ? '<span class="tag new">NEW</span>' : "";
@@ -344,13 +350,13 @@ function render() {
     const limit = groupId === "__ungrouped__" ? "" : eventGroup?.unlimited ? "" : `Tối đa ${eventGroup?.maxRegistrations || items[0]?.groupMaxRegistrations || 1}/sự kiện`;
     const toneClass = groupId === "__ungrouped__" ? "admin-group-ungrouped" : `group-tone-${adminTone++ % 5}`;
     const groupIndex = orderedGroups.findIndex((item) => item.id === groupId);
-    const groupRegistrationCount = events.filter((item) => item.groupId === groupId).reduce((total, item) => total + Number(item.registeredCount || 0), 0);
+    const groupRegistrationCount = activeEvents.filter((item) => item.groupId === groupId).reduce((total, item) => total + Number(item.registeredCount || 0), 0);
     const groupMove = groupId === "__ungrouped__" ? `<b>${items.length} sự kiện</b>` : `<div class="admin-group-move"><b>${items.length} sự kiện · ${groupRegistrationCount} lượt đăng ký</b><button class="btn btn-small btn-download-list" data-export-group="${groupId}" ${groupRegistrationCount ? "" : "disabled"}><span class="sheet-icon" aria-hidden="true">▦</span> Tải danh sách nhóm</button><button class="btn btn-small" data-move-group="${groupId}" data-direction="-1" ${groupIndex <= 0 ? "disabled" : ""}>↑ Nhóm</button><button class="btn btn-small" data-move-group="${groupId}" data-direction="1" ${groupIndex < 0 || groupIndex >= orderedGroups.length - 1 ? "disabled" : ""}>↓ Nhóm</button></div>`;
     return `<section class="admin-event-group ${toneClass}"><div class="admin-event-group-head"><div><span>${groupId === "__ungrouped__" ? "SỰ KIỆN RIÊNG" : "NHÓM SỰ KIỆN"}</span><h3>${safe(title)}</h3>${limit ? `<small>${safe(limit)}</small>` : ""}</div>${groupMove}</div><div class="event-grid admin-event-grid">${items.map((item) => adminEventCard(item, items)).join("")}</div></section>`;
   }).join("") : '<div class="card empty">Không có sự kiện ở trạng thái này.</div>';
 
   $("#groupRows").innerHTML = orderedGroups.map((group, groupIndex) => {
-    const groupedItems = events.filter((item) => item.groupId === group.id);
+    const groupedItems = activeEvents.filter((item) => item.groupId === group.id);
     const eventCount = groupedItems.length;
     const groupRegisteredCount = groupedItems.reduce((total, item) => total + Number(item.registeredCount || 0), 0);
     const visibility = group.linkOnly ? '<span class="tag upcoming">CHỈ QUA LINK</span>' : '<span class="tag open">TRANG CHUNG</span>';
@@ -360,6 +366,16 @@ function render() {
     const groupState = hiddenCount === eventCount && eventCount ? "Đã ẩn toàn bộ" : endedCount === eventCount && eventCount ? "Đã kết thúc" : "Theo từng sự kiện";
     return `<tr><td><b>${safe(group.name)}</b><br><small>Mã: ${safe(groupCode(group))}</small></td><td>${limit}</td><td>${eventCount}<br><small>${groupState}</small></td><td>${visibility}</td><td><div class="actions"><button class="btn btn-small btn-soft" data-copy-group-link="${group.id}">Sao chép liên kết</button><button class="btn btn-small btn-calendar" data-calendar-group="${group.id}">＋ Lịch cả nhóm</button><button class="btn btn-small btn-download-list" data-export-group="${group.id}" ${groupRegisteredCount ? "" : "disabled"}><span class="sheet-icon" aria-hidden="true">▦</span> Tải danh sách nhóm</button></div></td><td><div class="actions"><button class="btn btn-small" data-move-group="${group.id}" data-direction="-1" ${groupIndex <= 0 ? "disabled" : ""}>↑</button><button class="btn btn-small" data-move-group="${group.id}" data-direction="1" ${groupIndex >= orderedGroups.length - 1 ? "disabled" : ""}>↓</button><button class="btn btn-small" data-edit-group="${group.id}">Sửa nhóm</button></div></td></tr>`;
   }).join("") || '<tr><td colspan="6" class="empty">Chưa có nhóm sự kiện.</td></tr>';
+
+  if ($("#trashRows")) {
+    $("#trashRows").innerHTML = isOwner && trashedEvents.length
+      ? trashedEvents.slice().sort((a, b) => (millis(b.deletedAt) || 0) - (millis(a.deletedAt) || 0)).map((item) => {
+          const deletedTime = millis(item.deletedAt);
+          const purgeTime = deletedTime ? deletedTime + TRASH_RETENTION_MS : 0;
+          return `<tr><td><b>${safe(item.title)}</b><br><small>${safe(item.groupName || "Không thuộc nhóm")}</small></td><td>${safe(item.date || "—")}</td><td>${deletedTime ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" }).format(new Date(deletedTime)) : "—"}<br><small>${safe(item.deletedByEmail || "")}</small></td><td><b>${purgeTime ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" }).format(new Date(purgeTime)) : "—"}</b></td><td>${Number(item.registeredCount || 0)}</td><td><div class="actions"><button class="btn btn-small btn-restore" data-restore-event="${item.id}">↶ Khôi phục</button><button class="btn btn-small btn-danger" data-purge-event="${item.id}">Xóa vĩnh viễn</button></div></td></tr>`;
+        }).join("")
+      : '<tr><td colspan="6" class="empty">Thùng rác đang trống.</td></tr>';
+  }
 
   refreshRegistrationFilters();
   renderRegs();
@@ -386,7 +402,7 @@ function refreshRegistrationFilters() {
   $("#groupFilter").innerHTML = '<option value="">Tất cả nhóm sự kiện</option>' + groups.slice().sort((a, b) => groupPosition(a) - groupPosition(b)).map((group) => `<option value="${group.id}">${safe(group.name)}</option>`).join("");
   if (groups.some((group) => group.id === selectedGroup)) $("#groupFilter").value = selectedGroup;
   const activeGroup = $("#groupFilter").value;
-  const availableEvents = events.filter((event) => !activeGroup || event.groupId === activeGroup).slice().sort((a, b) => eventPosition(a) - eventPosition(b));
+  const availableEvents = events.filter((event) => !event.deletedAt && (!activeGroup || event.groupId === activeGroup)).slice().sort((a, b) => eventPosition(a) - eventPosition(b));
   $("#eventFilter").innerHTML = '<option value="">— Chọn sự kiện để tải danh sách —</option>' + availableEvents.map((event) => `<option value="${event.id}">${safe(event.title)} · ${safe(event.date || "")}</option>`).join("");
   if (availableEvents.some((event) => event.id === selectedEvent)) $("#eventFilter").value = selectedEvent;
 }
@@ -642,6 +658,29 @@ function renderEventFaculties(selected = [DEFAULT_FACULTY]) {
   $("#eventFacultyList").innerHTML = faculties.map((faculty) => `<label class="check-chip"><input class="event-faculty" type="checkbox" value="${safe(faculty)}" ${selected.includes(faculty) ? "checked" : ""}> ${safe(faculty)}</label>`).join("");
 }
 
+async function permanentlyDeleteEvent(selected) {
+  if (!selected || !isOwner) throw Error("Chỉ Chủ sở hữu được xóa vĩnh viễn.");
+  const registrations = await fetchRegistrations("eventId", selected.id);
+  for (const registration of registrations) await removeRegistration(registration);
+  await deleteDoc(doc(db, "events", selected.id));
+}
+
+async function cleanupExpiredTrash() {
+  if (!isOwner) return;
+  const cutoff = Date.now() - TRASH_RETENTION_MS;
+  const expired = events.filter((item) => item.deletedAt && (millis(item.deletedAt) || Infinity) <= cutoff && !purgingEventIds.has(item.id));
+  for (const selected of expired) {
+    purgingEventIds.add(selected.id);
+    try {
+      await permanentlyDeleteEvent(selected);
+    } catch (error) {
+      console.warn("Không thể tự xóa sự kiện hết hạn trong thùng rác:", error);
+    } finally {
+      purgingEventIds.delete(selected.id);
+    }
+  }
+}
+
 function listen() {
   onSnapshot(doc(db, "settings", "main"), (snapshot) => {
     if (snapshot.exists()) settings = { ...settings, ...snapshot.data() };
@@ -664,6 +703,7 @@ function listen() {
   onSnapshot(eventsQuery, (snapshot) => {
     events = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
     render();
+    if (isOwner) void cleanupExpiredTrash();
   }, (error) => notice(error.message, "error"));
 
   // Danh sách đăng ký chỉ được truy vấn sau khi Admin chọn một sự kiện.
@@ -1054,7 +1094,7 @@ async function moveGroup(groupId, direction) {
 async function moveEvent(eventId, direction) {
   const selected = events.find((item) => item.id === eventId);
   if (!selected) return;
-  const siblings = events.filter((item) => (item.groupId || "__ungrouped__") === (selected.groupId || "__ungrouped__") && isExternalEvent(item) === isExternalEvent(selected)).sort((a, b) => eventPosition(a) - eventPosition(b));
+  const siblings = events.filter((item) => !item.deletedAt && (item.groupId || "__ungrouped__") === (selected.groupId || "__ungrouped__") && isExternalEvent(item) === isExternalEvent(selected)).sort((a, b) => eventPosition(a) - eventPosition(b));
   const from = siblings.findIndex((item) => item.id === eventId);
   const to = from + direction;
   if (from < 0 || to < 0 || to >= siblings.length) return;
@@ -1170,28 +1210,71 @@ document.addEventListener("click", async (event) => {
     if (selected) {
       const registeredCount = Number(selected.registeredCount || 0);
       const approved = await confirmAction({
-        title: "Xóa sự kiện?",
+        title: "Chuyển sự kiện vào thùng rác?",
         message: registeredCount
-          ? `Sự kiện “${selected.title}” đang có ${registeredCount} người đăng ký. Toàn bộ lượt đăng ký liên quan cũng sẽ bị xóa.`
-          : `Bạn sắp xóa sự kiện “${selected.title}”.`,
+          ? `Sự kiện “${selected.title}” có ${registeredCount} lượt đăng ký. Dữ liệu sẽ được giữ nguyên và có thể khôi phục trong 30 ngày.`
+          : `Sự kiện “${selected.title}” sẽ được giữ trong thùng rác 30 ngày trước khi xóa vĩnh viễn.`,
         verification: "XÓA"
       });
       if (!approved) return;
       button.disabled = true;
-      button.textContent = "Đang tải dữ liệu…";
+      button.textContent = "Đang chuyển…";
       try {
-        const registrations = await fetchRegistrations("eventId", selected.id);
-        for (let index = 0; index < registrations.length; index += 1) {
-          button.textContent = `Đang xóa ${index + 1}/${registrations.length}…`;
-          await removeRegistration(registrations[index]);
-        }
-        await deleteDoc(doc(db, "events", selected.id));
-        notice(registrations.length ? `Đã xóa sự kiện và ${registrations.length} lượt đăng ký liên quan.` : "Đã xóa sự kiện.", "success");
+        await updateDoc(doc(db, "events", selected.id), {
+          deletedAt: serverTimestamp(),
+          deletedByUid: user.uid,
+          deletedByEmail: user.email,
+          deletedPreviousStatus: selected.status || "open",
+          updatedAt: serverTimestamp()
+        });
+        notice("Đã chuyển sự kiện vào thùng rác. Danh sách đăng ký vẫn được giữ nguyên.", "success");
       } catch (error) {
         button.disabled = false;
         button.textContent = "Xóa";
-        notice(`Không thể hoàn tất xóa sự kiện: ${error.message}`, "error");
+        notice(`Không thể chuyển sự kiện vào thùng rác: ${error.message}`, "error");
       }
+    }
+  }
+  if (button.dataset.restoreEvent) {
+    if (!isOwner) return notice("Chỉ Chủ sở hữu được khôi phục sự kiện.", "error");
+    const selected = events.find((item) => item.id === button.dataset.restoreEvent && item.deletedAt);
+    if (!selected) return;
+    button.disabled = true;
+    try {
+      await updateDoc(doc(db, "events", selected.id), {
+        deletedAt: null,
+        deletedByUid: "",
+        deletedByEmail: "",
+        restoredAt: serverTimestamp(),
+        restoredByEmail: user.email,
+        status: selected.deletedPreviousStatus || selected.status || "open",
+        updatedAt: serverTimestamp()
+      });
+      notice(`Đã khôi phục sự kiện “${selected.title}”.`, "success");
+    } catch (error) {
+      button.disabled = false;
+      notice(error.message || "Không thể khôi phục sự kiện.", "error");
+    }
+  }
+  if (button.dataset.purgeEvent) {
+    if (!isOwner) return notice("Chỉ Chủ sở hữu được xóa vĩnh viễn.", "error");
+    const selected = events.find((item) => item.id === button.dataset.purgeEvent && item.deletedAt);
+    if (!selected) return;
+    const approved = await confirmAction({
+      title: "Xóa vĩnh viễn?",
+      message: `Sự kiện “${selected.title}” và toàn bộ lượt đăng ký liên quan sẽ bị xóa vĩnh viễn.`,
+      verification: "XÓA"
+    });
+    if (!approved) return;
+    button.disabled = true;
+    button.textContent = "Đang xóa…";
+    try {
+      await permanentlyDeleteEvent(selected);
+      notice("Đã xóa vĩnh viễn sự kiện và dữ liệu liên quan.", "success");
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = "Xóa vĩnh viễn";
+      notice(error.message || "Không thể xóa vĩnh viễn.", "error");
     }
   }
   if (button.dataset.deleteRegistration) {
@@ -1271,7 +1354,22 @@ $("#exportBtn").onclick = async () => {
   await downloadRegistrationExcel(eventId, eventId ? "" : groupId, $("#exportBtn"));
 };
 
-$("#loginBtn").onclick = () => signInWithPopup(auth, provider);
+function showAdminLoginNotice(message = "") {
+  const box = $("#adminLoginNotice");
+  const text = $("#adminLoginNoticeText");
+  if (!box || !text) return;
+  text.textContent = message;
+  box.classList.toggle("hidden", !message);
+}
+
+$("#loginBtn").onclick = async () => {
+  showAdminLoginNotice();
+  try {
+    await signInWithPopup(auth, provider);
+  } catch (error) {
+    if (error?.code !== "auth/popup-closed-by-user" && error?.code !== "auth/cancelled-popup-request") showAdminLoginNotice("Tài khoản chưa được cấp quyền quản trị IFA+A.");
+  }
+};
 $("#logoutBtn").onclick = () => signOut(auth);
 
 onAuthStateChanged(auth, async (currentUser) => {
@@ -1283,9 +1381,10 @@ onAuthStateChanged(auth, async (currentUser) => {
   const resolvedRole = currentUser.emailVerified ? await accessRole(currentUser) : "";
   if (!resolvedRole) {
     await signOut(auth);
-    alert("Tài khoản này chưa được cấp quyền Admin IFA+A.");
+    showAdminLoginNotice("Tài khoản chưa được cấp quyền quản trị IFA+A.");
     return;
   }
+  showAdminLoginNotice();
   user = currentUser;
   currentRole = resolvedRole;
   isOwner = currentRole === "owner";
@@ -1297,5 +1396,6 @@ onAuthStateChanged(auth, async (currentUser) => {
   $("#logoutBtn").classList.remove("hidden");
   $("#adminNav").classList.toggle("hidden", !isOwner);
   $("#settingsNav").classList.toggle("hidden", !isOwner);
+  $("#trashNav").classList.toggle("hidden", !isOwner);
   listen();
 });
