@@ -151,3 +151,14 @@
 .event-empty:before{content:"✦";display:grid;place-items:center;width:52px;height:52px;margin-bottom:8px;border-radius:50%;background:#eef2ff;color:#3157c8;font-size:24px}
 .event-empty h3{margin-top:4px}
 @media(max-width:760px){.field-label-row{align-items:flex-start;flex-direction:column}.auto-close-toggle{align-self:flex-start}}
+
+
+/* V3.3: lịch mở/đóng đăng ký linh hoạt */
+.registration-schedule-field{padding:13px;border:1px solid #d9dfeb;border-radius:13px;background:#fafbff}
+.close-mode-options{display:flex;flex-wrap:wrap;gap:8px;margin:2px 0 10px}
+.close-mode-chip{display:inline-flex!important;align-items:center;gap:7px;margin:0!important;padding:9px 12px;border:1px solid #cfd5dd;border-radius:11px;background:#fff;color:#344054;font-size:13px!important;font-weight:750;cursor:pointer;transition:border-color .16s ease,background .16s ease,color .16s ease}
+.close-mode-chip input{width:16px!important;height:16px;margin:0;accent-color:#1748c2}
+.close-mode-chip:has(input:checked){border-color:#6f98ef;background:#eaf2ff;color:#1748c2;box-shadow:0 0 0 2px rgba(23,72,194,.08)}
+#closeRegistrationFields{margin-top:10px}
+.registration-schedule-field>small{display:block;margin-top:7px;color:var(--muted)}
+@media(max-width:760px){.close-mode-options{display:grid;grid-template-columns:1fr}.close-mode-chip{width:100%}}
