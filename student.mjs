@@ -71,13 +71,15 @@ function openGoogleCalendar(event) {
 function sanitizeRichHtml(value) {
   const template = document.createElement("template");
   template.innerHTML = String(value || "");
-  const allowed = new Set(["P", "DIV", "BR", "B", "STRONG", "I", "EM", "U", "UL", "OL", "LI", "H2", "H3", "SPAN", "FONT", "IMG", "A"]);
+  const allowed = new Set(["P", "DIV", "BR", "B", "STRONG", "I", "EM", "U", "UL", "OL", "LI", "H2", "H3", "SPAN", "FONT", "IMG", "A", "TABLE", "THEAD", "TBODY", "TFOOT", "TR", "TH", "TD", "CAPTION", "COLGROUP", "COL"]);
   [...template.content.querySelectorAll("*")].forEach((node) => {
     if (!allowed.has(node.tagName)) return node.replaceWith(...node.childNodes);
     [...node.attributes].forEach((attribute) => {
       const name = attribute.name.toLowerCase();
       if (node.tagName === "IMG" && ["src", "alt"].includes(name)) return;
       if (node.tagName === "A" && ["href", "target", "rel"].includes(name)) return;
+      if (["TH", "TD"].includes(node.tagName) && ["colspan", "rowspan", "scope"].includes(name)) return;
+      if (["COL", "COLGROUP"].includes(node.tagName) && ["span", "width"].includes(name)) return;
       if (["style", "color", "size"].includes(name)) return;
       node.removeAttribute(attribute.name);
     });
@@ -301,6 +303,17 @@ function refreshStudentFilters(sourceEvents, focusedGroup) {
 
 function render() {
   const focusedGroup = linkedGroupId ? [...groups.values()].find((group) => group.id === linkedGroupId || groupCode(group) === shareCode(linkedGroupId)) : null;
+  const linkedMode = !!linkedGroupId;
+  $("#studentAdvancedFilters").classList.toggle("hidden", linkedMode);
+  const filterLabels = { available: "Sắp mở & đang mở", mine: linkedMode ? "Đã chọn" : "Đã đăng ký", ended: "Đã kết thúc", all: "Tất cả" };
+  document.querySelectorAll("#studentStatusFilters .filter").forEach((button) => {
+    const visible = !linkedMode || ["all", "mine"].includes(button.dataset.filter);
+    button.classList.toggle("hidden", !visible);
+    button.textContent = filterLabels[button.dataset.filter] || button.textContent;
+    button.style.order = linkedMode ? (button.dataset.filter === "all" ? "0" : "1") : "";
+  });
+  if (linkedMode && !["all", "mine"].includes(filter)) filter = "all";
+  document.querySelectorAll("#studentStatusFilters .filter").forEach((button) => button.classList.toggle("active", button.dataset.filter === filter));
   $("#groupFocusPanel").classList.toggle("hidden", !linkedGroupId);
   if (linkedGroupId) {
     $("#groupFocusTitle").textContent = focusedGroup?.name || (groupsLoaded ? "Không tìm thấy nhóm sự kiện" : "Đang tải nhóm sự kiện…");
