@@ -39,11 +39,12 @@
 
 <div class="pane hidden" data-pane-id="settings"><div class="toolbar"><div><h2>Thiết lập đăng ký</h2><p>Quản lý danh sách khoa/đơn vị được sử dụng.</p></div></div><form id="settingsForm" class="card form-grid"><div class="field"><label>Tên hệ thống</label><input value="IFA+A" disabled></div><div class="field span-2"><label>Thêm khoa/đơn vị</label><div class="inline-add"><input id="newFaculty" maxlength="160" placeholder="Nhập tên khoa/đơn vị"><button id="addFacultyBtn" class="btn" type="button">＋ Thêm</button></div><div id="facultySettingsList" class="check-list"></div><small>Mặc định hệ thống có Khoa Mỹ thuật Công nghiệp.</small></div><div><button class="btn btn-primary">Lưu thiết lập</button></div></form></div>
 </section></div>
-<footer class="foot">IFA+A Admin · V1.8</footer>
+<footer class="foot">IFA+A Admin · V2.0</footer>
 </main>
 
 <dialog id="eventDialog"><form id="eventForm" class="modal"><div class="modal-head"><h2 id="eventDialogTitle">Tạo sự kiện</h2><button type="button" class="btn btn-small" data-close>Đóng</button></div><input id="eventId" type="hidden"><div class="form-grid">
   <div class="field span-2"><label>Tên sự kiện</label><input id="title" maxlength="160" required></div>
+  <div class="field span-2"><label>Dạng sự kiện</label><select id="category" required><option value="Sự kiện Khoa">Sự kiện Khoa</option><option value="Ngành Đồ họa">Ngành Đồ họa</option><option value="Ngành Thiết kế công nghiệp">Ngành Thiết kế công nghiệp</option><option value="Ngành Thiết kế nội thất">Ngành Thiết kế nội thất</option><option value="Ngành Thiết kế thời trang">Ngành Thiết kế thời trang</option><option value="Ngành Nghệ thuật số">Ngành Nghệ thuật số</option></select></div>
   <div class="field span-2"><label>Mô tả</label><div class="rich-toolbar" role="toolbar" aria-label="Định dạng mô tả">
     <button type="button" class="btn btn-small" data-format="undo" title="Hoàn tác">↶</button><button type="button" class="btn btn-small" data-format="redo" title="Làm lại">↷</button>
     <button type="button" class="btn btn-small" data-format="bold"><b>B</b></button><button type="button" class="btn btn-small" data-format="italic"><i>I</i></button><button type="button" class="btn btn-small" data-format="underline"><u>U</u></button>
@@ -62,6 +63,7 @@
   <div class="field"><label>Sức chứa</label><input id="capacity" type="number" min="1" required></div><div class="field"><label>Hiển thị</label><select id="status"><option value="open">Hiển thị ở trang người tham gia</option><option value="hidden">Ẩn sự kiện</option><option value="closed">Kết thúc đăng ký thủ công</option></select></div>
   <div class="field"><label>Mở đăng ký lúc (24 giờ)</label><div class="datetime-24"><input id="openDate" type="date" aria-label="Ngày mở đăng ký" required><input id="openTime" class="time-24" type="text" inputmode="numeric" maxlength="5" placeholder="HH:mm" pattern="(?:[01][0-9]|2[0-3]):[0-5][0-9]" aria-label="Giờ mở đăng ký" required></div></div><div class="field"><label>Đóng đăng ký lúc (24 giờ)</label><div class="datetime-24"><input id="closeDate" type="date" aria-label="Ngày đóng đăng ký" required><input id="closeTime" class="time-24" type="text" inputmode="numeric" maxlength="5" placeholder="HH:mm" pattern="(?:[01][0-9]|2[0-3]):[0-5][0-9]" aria-label="Giờ đóng đăng ký" required></div></div>
   <label class="check span-2 event-option"><input id="eventAllowCancellation" type="checkbox"> Cho phép người tham gia tự hủy đăng ký sự kiện này</label>
+  <label id="applyGroupFieldsOption" class="check span-2 event-option batch-group-option hidden"><input id="applyGroupFields" type="checkbox"> <span><b>Áp dụng cho các sự kiện khác trong nhóm</b><small>Đồng bộ mô tả, địa điểm, sức chứa và thời gian mở/đóng đăng ký.</small></span></label>
 </div><div id="eventFormError" class="notice error hidden" role="alert"></div><div class="modal-actions"><button type="button" class="btn" data-close>Hủy</button><button id="saveEventBtn" class="btn btn-primary">Lưu sự kiện</button></div></form></dialog>
 
 <dialog id="groupDialog"><form id="groupForm" class="modal group-modal"><div class="modal-head"><h2 id="groupDialogTitle">Tạo nhóm sự kiện</h2><button type="button" class="btn btn-small" data-close-group>Đóng</button></div><input id="groupEditId" type="hidden"><div class="form-grid">
