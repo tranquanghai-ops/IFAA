@@ -15,6 +15,49 @@ const safe = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&"
 const ts = (value) => value?.toDate ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" }).format(value.toDate()) : "";
 const millis = (value) => value?.toDate ? value.toDate().getTime() : (value ? new Date(value).getTime() : null);
 
+function confirmAction({ title, message, verification = "" }) {
+  return new Promise((resolve) => {
+    const dialog = $("#confirmDialog");
+    const form = $("#confirmActionForm");
+    const field = $("#confirmVerificationField");
+    const input = $("#confirmVerificationInput");
+    const submit = $("#confirmActionSubmit");
+    let settled = false;
+
+    $("#confirmActionTitle").textContent = title;
+    $("#confirmActionMessage").textContent = message;
+    field.classList.toggle("hidden", !verification);
+    input.value = "";
+    submit.disabled = Boolean(verification);
+
+    const validate = () => {
+      submit.disabled = Boolean(verification) && input.value.trim().toUpperCase() !== verification.toUpperCase();
+    };
+    const finish = (approved) => {
+      if (settled) return;
+      settled = true;
+      input.removeEventListener("input", validate);
+      dialog.removeEventListener("cancel", cancel);
+      if (dialog.open) dialog.close();
+      resolve(approved);
+    };
+    const cancel = (event) => {
+      event.preventDefault();
+      finish(false);
+    };
+
+    input.addEventListener("input", validate);
+    dialog.addEventListener("cancel", cancel);
+    $("#confirmActionCancel").onclick = () => finish(false);
+    form.onsubmit = (event) => {
+      event.preventDefault();
+      if (!submit.disabled) finish(true);
+    };
+    dialog.showModal();
+    if (verification) setTimeout(() => input.focus(), 0);
+  });
+}
+
 let user = null;
 let isOwner = false;
 let currentRole = "admin";
@@ -1126,15 +1169,14 @@ document.addEventListener("click", async (event) => {
     const selected = events.find((item) => item.id === button.dataset.delete);
     if (selected) {
       const registeredCount = Number(selected.registeredCount || 0);
-      const warning = registeredCount
-        ? `Sự kiện “${selected.title}” đang có ${registeredCount} người đăng ký. Khi tiếp tục, toàn bộ lượt đăng ký của sự kiện này cũng sẽ bị xóa. Thao tác không thể hoàn tác.`
-        : `Xóa sự kiện “${selected.title}”? Thao tác không thể hoàn tác.`;
-      if (!confirm(warning)) return;
-      const verification = prompt('Để xác nhận xóa sự kiện, nhập chữ XÓA:');
-      if (String(verification || "").trim().toUpperCase() !== "XÓA") {
-        notice("Chưa nhập đúng chữ XÓA. Sự kiện chưa bị xóa.", "error");
-        return;
-      }
+      const approved = await confirmAction({
+        title: "Xóa sự kiện?",
+        message: registeredCount
+          ? `Sự kiện “${selected.title}” đang có ${registeredCount} người đăng ký. Toàn bộ lượt đăng ký liên quan cũng sẽ bị xóa.`
+          : `Bạn sắp xóa sự kiện “${selected.title}”.`,
+        verification: "XÓA"
+      });
+      if (!approved) return;
       button.disabled = true;
       button.textContent = "Đang tải dữ liệu…";
       try {
