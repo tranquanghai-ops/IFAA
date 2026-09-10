@@ -5,7 +5,8 @@ import { firebaseConfig, STUDENT_DOMAIN } from "./firebase-config.mjs";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
 const DEFAULT_CATEGORY = "Sự kiện Khoa";
-const EVENT_CATEGORIES = ["Sự kiện Khoa", "Ngành Đồ họa", "Ngành Thiết kế công nghiệp", "Ngành Thiết kế nội thất", "Ngành Thiết kế thời trang", "Ngành Nghệ thuật số"];
+const EVENT_CATEGORIES = ["Sự kiện Khoa", "Ngành Đồ họa", "Ngành Thiết kế công nghiệp", "Ngành Thiết kế nội thất", "Ngành Thiết kế thời trang", "Ngành Nghệ thuật số", "Sự kiện Trường", "Sự kiện Khoa khác"];
+const EXTERNAL_CATEGORIES = new Set(["Sự kiện Trường", "Sự kiện Khoa khác"]);
 const STUDENT_CALENDAR_ENABLED = false;
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -154,6 +155,10 @@ function isNewEvent(event) {
 }
 
 
+function isExternalEvent(event) {
+  return event.externalRegistration === true || EXTERNAL_CATEGORIES.has(event.category);
+}
+
 function eventPosition(event) {
   const position = Number(event.sortOrder);
   return Number.isFinite(position) ? position : -(millis(event.createdAt) || 0);
@@ -187,7 +192,7 @@ function eventState(event) {
   const close = millis(event.closeAt) ?? Infinity;
   if (now < open) return "upcoming";
   if (now > close) return "closed";
-  if ((event.registeredCount || 0) >= (event.capacity || 0)) return "full";
+  if (!event.unlimitedCapacity && (event.registeredCount || 0) >= (event.capacity || 0)) return "full";
   return "open";
 }
 
@@ -234,22 +239,41 @@ function groupStatus(event) {
 
 function eventCard(event) {
   const state = eventState(event);
+  const external = isExternalEvent(event);
   const registered = myRegs.has(event.id);
   const used = event.registeredCount || 0;
   const capacity = event.capacity || 0;
-  const left = Math.max(0, capacity - used);
-  const percent = capacity ? Math.min(100, used / capacity * 100) : 0;
-  const fullSeats = capacity > 0 && left === 0;
-  const lowSeats = capacity > 0 && left > 0 && left / capacity < 0.1;
+  const left = event.unlimitedCapacity ? Infinity : Math.max(0, capacity - used);
+  const percent = event.unlimitedCapacity ? 0 : capacity ? Math.min(100, used / capacity * 100) : 0;
+  const fullSeats = !event.unlimitedCapacity && capacity > 0 && left === 0;
+  const lowSeats = !event.unlimitedCapacity && capacity > 0 && left > 0 && left / capacity <= 0.2;
   const group = groupStatus(event);
-  const disabled = state !== "open" || group.blocked;
+  const disabled = external || state !== "open" || group.blocked;
   const label = { upcoming: "SẮP MỞ", open: "ĐANG MỞ", full: "ĐÃ ĐỦ", closed: "ĐÃ ĐÓNG ĐĂNG KÝ", ended: "ĐÃ KẾT THÚC", hidden: "ĐÃ ẨN" }[state];
   const tagClass = state === "hidden" ? "closed" : state;
-  const groupLine = group.text ? `<span><b>${safe(group.text)}</b></span>` : "";
+  const groupLine = !external && group.text ? `<span><b>${safe(group.text)}</b></span>` : "";
   const category = event.category || DEFAULT_CATEGORY;
   const hotTag = event.isHot ? '<span class="tag hot">🔥 HOT</span>' : "";
   const newTag = isNewEvent(event) ? '<span class="tag new">NEW</span>' : "";
-  return `<article class="card event event-${state} ${registered ? "event-registered" : ""}"><div class="event-top"><div><span class="tag event-category">${safe(category)}</span><span class="tag ${tagClass}">${label}</span>${hotTag}${newTag}${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}<h3>${safe(event.title)}</h3></div></div><div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(event, state))}</span>${groupLine}</div><div class="progress"><i style="width:${percent}%"></i></div><div class="capacity"><span>${used}/${capacity} người tham gia</span><b class="${fullSeats ? "full-seats" : lowSeats ? "low-seats" : ""}">${fullSeats ? "Hết chỗ" : `Còn ${left} chỗ`}</b></div><div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${STUDENT_CALENDAR_ENABLED && registered ? `<button class="btn btn-calendar" data-calendar="${event.id}">＋ Google Lịch</button>` : ""}${registered && event.allowCancellation ? `<button class="btn btn-danger" data-cancel="${event.id}">Hủy đăng ký</button>` : `<button class="btn ${state === "full" ? "btn-full" : ["closed", "ended"].includes(state) ? "btn-expired" : "btn-register"}" data-register="${event.id}" ${disabled || registered ? "disabled" : ""}>${registered ? "Đã đăng ký" : state === "full" ? "Đã đủ" : ["closed", "ended"].includes(state) ? "Hết thời gian đăng ký" : group.blocked ? "Đã đạt giới hạn đăng ký" : state === "upcoming" ? "Chưa đến giờ" : "Đăng ký"}</button>`}</div></article>`;
+  let capacityHtml = "";
+  if (!external && event.unlimitedCapacity) {
+    capacityHtml = event.hideRegistrationCount ? "" : '<div class="capacity capacity-unlimited"><span>Không giới hạn số người tham gia</span></div>';
+  } else if (!external && !event.hideRegistrationCount) {
+    capacityHtml = `<div class="progress"><i style="width:${percent}%"></i></div><div class="capacity"><span>${used}/${capacity} người tham gia</span><b class="${fullSeats ? "full-seats" : lowSeats ? "low-seats" : ""}">${fullSeats ? "Hết chỗ" : lowSeats ? "Sắp hết chỗ" : `Còn ${left} chỗ`}</b></div>`;
+  } else if (!external && event.hideRegistrationCount && (fullSeats || lowSeats)) {
+    capacityHtml = `<div class="capacity capacity-alert-only"><span></span><b class="${fullSeats ? "full-seats" : "low-seats"}">${fullSeats ? "Hết chỗ" : "Sắp hết chỗ"}</b></div>`;
+  }
+  let actionButton = "";
+  if (external) {
+    actionButton = ["closed", "ended"].includes(state)
+      ? '<button class="btn btn-expired" disabled>Hết thời gian đăng ký</button>'
+      : `<button class="btn btn-external" data-external-url="${safe(event.registrationUrl || "")}">Đến trang đăng ký ↗</button>`;
+  } else if (registered && event.allowCancellation) {
+    actionButton = `<button class="btn btn-danger" data-cancel="${event.id}">Hủy đăng ký</button>`;
+  } else {
+    actionButton = `<button class="btn ${state === "full" ? "btn-full" : ["closed", "ended"].includes(state) ? "btn-expired" : "btn-register"}" data-register="${event.id}" ${disabled || registered ? "disabled" : ""}>${registered ? "Đã đăng ký" : state === "full" ? "Đã đủ" : ["closed", "ended"].includes(state) ? "Hết thời gian đăng ký" : group.blocked ? "Đã đạt giới hạn đăng ký" : state === "upcoming" ? "Chưa đến giờ" : "Đăng ký"}</button>`;
+  }
+  return `<article class="card event event-${state} ${external ? "event-external" : ""} ${registered ? "event-registered" : ""}"><div class="event-top"><div><span class="tag event-category">${safe(category)}</span><span class="tag ${tagClass}">${label}</span>${hotTag}${newTag}${external ? '<span class="tag external">ĐĂNG KÝ BÊN NGOÀI</span>' : ""}${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}<h3>${safe(event.title)}</h3></div></div><div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(event, state))}</span>${groupLine}</div>${capacityHtml}<div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${STUDENT_CALENDAR_ENABLED && registered ? `<button class="btn btn-calendar" data-calendar="${event.id}">＋ Google Lịch</button>` : ""}${actionButton}</div></article>`;
 }
 function refreshStudentFilters(sourceEvents, focusedGroup) {
   const categorySelect = $("#categoryFilter");
@@ -308,6 +332,8 @@ function render() {
   }).sort((a, b) => {
     const sameGroup = (a.groupId || "__ungrouped__") === (b.groupId || "__ungrouped__");
     if (sameGroup) {
+      const byExternalType = Number(isExternalEvent(a)) - Number(isExternalEvent(b));
+      if (byExternalType) return byExternalType;
       const byPosition = eventPosition(a) - eventPosition(b);
       if (byPosition) return byPosition;
     }
@@ -322,7 +348,7 @@ function render() {
     : `${list.length} sự kiện phù hợp với ${profile?.faculty || "khoa/đơn vị của bạn"}`;
   const grid = $("#eventGrid");
   if (!list.length) {
-    grid.innerHTML = '<div class="card empty event-empty"><span class="empty-badge">DANH SÁCH TRỐNG</span><h3>Chưa có sự kiện trong mục này</h3><p>Thử thay đổi dạng sự kiện, nhóm sự kiện hoặc chọn mục “Tất cả”.</p></div>';
+    grid.innerHTML = '<div class="card empty event-empty"><h3>Hiện chưa có sự kiện phù hợp</h3><p>Các bạn vui lòng quay lại sau nhé!</p></div>';
     return;
   }
 
@@ -413,6 +439,8 @@ function loadData() {
 
 async function register(eventId) {
   if (!profile) return show("Vui lòng lưu thông tin người tham gia trước.", "error");
+  const selectedEvent = events.find((item) => item.id === eventId);
+  if (isExternalEvent(selectedEvent || {})) return show("Sự kiện này đăng ký tại trang bên ngoài.", "error");
   const eventRef = doc(db, "events", eventId);
   const registrationRef = doc(db, "registrations", `${user.uid}_${eventId}`);
   try {
@@ -542,6 +570,11 @@ document.addEventListener("click", (event) => {
   if (button.dataset.close !== undefined) $("#detailDialog").close();
   if (button.dataset.view) openDetail(button.dataset.view);
   if (button.dataset.register) openDetail(button.dataset.register);
+  if (button.dataset.externalUrl) {
+    const url = button.dataset.externalUrl;
+    if (/^https:\/\//i.test(url)) window.open(url, "_blank", "noopener,noreferrer");
+    else show("Liên kết đăng ký chưa hợp lệ.", "error");
+  }
   if (button.dataset.calendar) {
     const selectedEvent = events.find((item) => item.id === button.dataset.calendar);
     if (selectedEvent && myRegs.has(selectedEvent.id)) openGoogleCalendar(selectedEvent);
