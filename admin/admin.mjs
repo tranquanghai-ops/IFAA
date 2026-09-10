@@ -153,12 +153,17 @@ function eventSchedule(event) {
 
 function isNewEvent(event) {
   const created = millis(event.createdAt);
-  return !!created && Date.now() - created >= 0 && Date.now() - created < 86400000;
+  return event.showAsNew !== false && !!created && Date.now() - created >= 0 && Date.now() - created < 86400000;
 }
 
 function eventPosition(event) {
   const position = Number(event.sortOrder);
-  return Number.isFinite(position) ? position : (millis(event.createdAt) || Number.MAX_SAFE_INTEGER);
+  return Number.isFinite(position) ? position : -(millis(event.createdAt) || 0);
+}
+
+function groupPosition(group) {
+  const position = Number(group.sortOrder);
+  return Number.isFinite(position) ? position : -(millis(group.createdAt) || 0);
 }
 
 function eventState(event) {
@@ -220,7 +225,11 @@ function render() {
     </article>`;
   };
   let adminTone = 0;
-  $("#eventRows").innerHTML = filteredEvents.length ? [...groupedAdminEvents.entries()].map(([groupId, items]) => {
+  $("#eventRows").innerHTML = filteredEvents.length ? [...groupedAdminEvents.entries()].sort(([a], [b]) => {
+    if (a === "__ungrouped__") return 1;
+    if (b === "__ungrouped__") return -1;
+    return groupPosition(groups.find((item) => item.id === a) || {}) - groupPosition(groups.find((item) => item.id === b) || {});
+  }).map(([groupId, items]) => {
     const eventGroup = groups.find((item) => item.id === groupId);
     const title = groupId === "__ungrouped__" ? "Sự kiện không thuộc nhóm" : (eventGroup?.name || items[0]?.groupName || "Nhóm sự kiện");
     const limit = groupId === "__ungrouped__" ? "" : eventGroup?.unlimited ? "" : `Tối đa ${eventGroup?.maxRegistrations || items[0]?.groupMaxRegistrations || 1}/sự kiện`;
@@ -228,7 +237,8 @@ function render() {
     return `<section class="admin-event-group ${toneClass}"><div class="admin-event-group-head"><div><span>${groupId === "__ungrouped__" ? "SỰ KIỆN RIÊNG" : "NHÓM SỰ KIỆN"}</span><h3>${safe(title)}</h3>${limit ? `<small>${safe(limit)}</small>` : ""}</div><b>${items.length} sự kiện</b></div><div class="event-grid admin-event-grid">${items.map((item) => adminEventCard(item, items)).join("")}</div></section>`;
   }).join("") : '<div class="card empty">Không có sự kiện ở trạng thái này.</div>';
 
-  $("#groupRows").innerHTML = groups.map((group) => {
+  const orderedGroups = groups.slice().sort((a, b) => groupPosition(a) - groupPosition(b));
+  $("#groupRows").innerHTML = orderedGroups.map((group, groupIndex) => {
     const groupedItems = events.filter((item) => item.groupId === group.id);
     const eventCount = groupedItems.length;
     const visibility = group.linkOnly ? '<span class="tag upcoming">CHỈ QUA LINK</span>' : '<span class="tag open">TRANG CHUNG</span>';
@@ -236,7 +246,7 @@ function render() {
     const hiddenCount = groupedItems.filter((item) => eventState(item) === "hidden").length;
     const endedCount = groupedItems.filter((item) => eventState(item) === "ended").length;
     const groupState = hiddenCount === eventCount && eventCount ? "Đã ẩn toàn bộ" : endedCount === eventCount && eventCount ? "Đã kết thúc" : "Theo từng sự kiện";
-    return `<tr><td><b>${safe(group.name)}</b><br><small>Mã: ${safe(groupCode(group))}</small></td><td>${limit}</td><td>${eventCount}<br><small>${groupState}</small></td><td>${visibility}</td><td><div class="actions"><button class="btn btn-small btn-soft" data-copy-group-link="${group.id}">Sao chép liên kết</button><button class="btn btn-small btn-calendar" data-calendar-group="${group.id}">＋ Lịch cả nhóm</button></div></td><td><button class="btn btn-small" data-edit-group="${group.id}">Sửa nhóm</button></td></tr>`;
+    return `<tr><td><b>${safe(group.name)}</b><br><small>Mã: ${safe(groupCode(group))}</small></td><td>${limit}</td><td>${eventCount}<br><small>${groupState}</small></td><td>${visibility}</td><td><div class="actions"><button class="btn btn-small btn-soft" data-copy-group-link="${group.id}">Sao chép liên kết</button><button class="btn btn-small btn-calendar" data-calendar-group="${group.id}">＋ Lịch cả nhóm</button></div></td><td><div class="actions"><button class="btn btn-small" data-move-group="${group.id}" data-direction="-1" ${groupIndex <= 0 ? "disabled" : ""}>↑</button><button class="btn btn-small" data-move-group="${group.id}" data-direction="1" ${groupIndex >= orderedGroups.length - 1 ? "disabled" : ""}>↓</button><button class="btn btn-small" data-edit-group="${group.id}">Sửa nhóm</button></div></td></tr>`;
   }).join("") || '<tr><td colspan="6" class="empty">Chưa có nhóm sự kiện.</td></tr>';
 
   const selectedFilter = $("#eventFilter").value;
@@ -399,6 +409,7 @@ function openEvent(event = null, copy = false) {
   }
   $("#eventAllowCancellation").checked = !!event?.allowCancellation;
   $("#eventHot").checked = !!event?.isHot;
+  $("#eventShowAsNew").checked = event ? event.showAsNew !== false : true;
   refreshGroupOptions(event?.groupId || "");
   $("#groupId").disabled = !copy && !!event && (event.registeredCount || 0) > 0;
   $("#newGroupFields").classList.add("hidden");
@@ -497,6 +508,7 @@ $("#eventForm").onsubmit = async (event) => {
   data.allowedFaculties = [...document.querySelectorAll(".event-faculty:checked")].map((input) => input.value);
   data.allowCancellation = $("#eventAllowCancellation").checked;
   data.isHot = $("#eventHot").checked;
+  data.showAsNew = $("#eventShowAsNew").checked;
   data.updatedAt = serverTimestamp();
   try {
     if (!data.title || !data.category || !data.date || !data.location || !Number.isInteger(data.capacity) || data.capacity < 1) throw Error("Vui lòng nhập đầy đủ các trường bắt buộc.");
@@ -533,7 +545,9 @@ $("#eventForm").onsubmit = async (event) => {
       if (!name || (!unlimited && (!Number.isInteger(maxRegistrations) || maxRegistrations < 1 || maxRegistrations > 20))) throw Error("Tên nhóm và giới hạn từ 1 đến 20 là bắt buộc.");
       const code = shareCode(name);
       if (groups.some((item) => groupCode(item) === code)) throw Error(`Mã liên kết ${code} đã được một nhóm khác sử dụng.`);
-      const groupRef = await addDoc(collection(db, "eventGroups"), { name, shareCode: code, maxRegistrations: unlimited ? 2 : maxRegistrations, unlimited, linkOnly: false, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      const groupPositions = groups.map(groupPosition).filter(Number.isFinite);
+      const groupSortOrder = groupPositions.length ? Math.min(...groupPositions) - 1 : 0;
+      const groupRef = await addDoc(collection(db, "eventGroups"), { name, shareCode: code, sortOrder: groupSortOrder, maxRegistrations: unlimited ? 2 : maxRegistrations, unlimited, linkOnly: false, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
       selectedGroup = groupRef.id;
       group = { id: groupRef.id, name, maxRegistrations: unlimited ? 2 : maxRegistrations, unlimited };
     } else if (selectedGroup) {
@@ -572,7 +586,7 @@ $("#eventForm").onsubmit = async (event) => {
       notice(siblingEvents.length ? `Đã lưu và áp dụng ${syncFields.length} nội dung cho ${siblingEvents.length} sự kiện khác trong nhóm.` : "Đã lưu sự kiện.", "success");
     } else {
       const siblingPositions = events.filter((item) => (item.groupId || "") === data.groupId).map(eventPosition).filter(Number.isFinite);
-      const sortOrder = siblingPositions.length ? Math.max(...siblingPositions) + 1 : 0;
+      const sortOrder = siblingPositions.length ? Math.min(...siblingPositions) - 1 : 0;
       await addDoc(collection(db, "events"), { ...data, sortOrder, registeredCount: 0, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdByName: user.displayName || "", createdAt: serverTimestamp() });
       $("#eventDialog").close();
       notice("Đã lưu sự kiện.", "success");
@@ -622,7 +636,9 @@ $("#groupForm").onsubmit = async (event) => {
       await updateDoc(doc(db, "eventGroups", id), data);
       await Promise.all(groupedEvents.map((item) => updateDoc(doc(db, "events", item.id), { groupName: name, groupMaxRegistrations: effectiveMax, ...(bulkStatus ? { status: bulkStatus } : {}), updatedAt: serverTimestamp() })));
     } else {
-      await addDoc(collection(db, "eventGroups"), { ...data, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdAt: serverTimestamp() });
+      const groupPositions = groups.map(groupPosition).filter(Number.isFinite);
+      const sortOrder = groupPositions.length ? Math.min(...groupPositions) - 1 : 0;
+      await addDoc(collection(db, "eventGroups"), { ...data, sortOrder, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdAt: serverTimestamp() });
     }
     $("#groupDialog").close();
     notice(bulkStatus && groupedEvents.length ? `Đã cập nhật nhóm và ${statusNames[bulkStatus]} ${groupedEvents.length} sự kiện.` : id ? "Đã cập nhật nhóm sự kiện." : "Đã tạo nhóm sự kiện.", "success");
@@ -634,6 +650,24 @@ $("#groupForm").onsubmit = async (event) => {
     submit.textContent = "Lưu nhóm";
   }
 };
+
+async function moveGroup(groupId, direction) {
+  const ordered = groups.slice().sort((a, b) => groupPosition(a) - groupPosition(b));
+  const from = ordered.findIndex((item) => item.id === groupId);
+  const to = from + direction;
+  if (from < 0 || to < 0 || to >= ordered.length) return;
+  const selected = ordered[from];
+  const target = ordered[to];
+  try {
+    await Promise.all([
+      updateDoc(doc(db, "eventGroups", selected.id), { sortOrder: groupPosition(target), updatedAt: serverTimestamp() }),
+      updateDoc(doc(db, "eventGroups", target.id), { sortOrder: groupPosition(selected), updatedAt: serverTimestamp() })
+    ]);
+    notice("Đã cập nhật vị trí nhóm sự kiện.", "success");
+  } catch (error) {
+    notice(error.message || "Không thể thay đổi vị trí nhóm.", "error");
+  }
+}
 
 async function moveEvent(eventId, direction) {
   const selected = events.find((item) => item.id === eventId);
@@ -716,6 +750,7 @@ document.addEventListener("click", async (event) => {
     document.querySelectorAll(".admin-filter").forEach((item) => item.classList.toggle("active", item === button));
     render();
   }
+  if (button.dataset.moveGroup) await moveGroup(button.dataset.moveGroup, Number(button.dataset.direction));
   if (button.dataset.moveEvent) await moveEvent(button.dataset.moveEvent, Number(button.dataset.direction));
   if (button.dataset.newEvent !== undefined) openEvent();
   if (button.dataset.close !== undefined) $("#eventDialog").close();
