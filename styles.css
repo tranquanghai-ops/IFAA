@@ -132,3 +132,22 @@
 .admin-event-card .admin-card-actions .btn{padding:6px 7px;font-size:11px;border-radius:8px}
 @media(max-width:1250px){.admin-event-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:760px){.admin-event-grid{grid-template-columns:1fr}.admin-event-card{padding:11px}}
+
+/* V3.2: tự đóng, sự kiện ngoài hệ thống và sức chứa tùy chọn */
+.field-label-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:5px}
+.field-label-row>label{margin:0!important}
+.auto-close-toggle{display:inline-flex!important;align-items:center;gap:6px;margin:0!important;padding:4px 8px;border:1px solid #c9d5ff;border-radius:999px;background:#f3f6ff;color:#1748c2;font-size:12px!important;white-space:nowrap}
+.auto-close-toggle input{width:16px!important;height:16px;margin:0}
+.field-disabled{opacity:.55}
+.tag.external{background:#f2eaff;color:#6d28a8;border:1px solid #d8b4fe}
+.btn-external{border-color:#6d28d9;background:#6d28d9;color:#fff}
+.btn-external:hover{background:#5b21b6;border-color:#5b21b6}
+.event-external{border-color:#d8b4fe;background:#fcfaff}
+.external-event-section{--group-accent:#7c3aed}
+.external-registration-notice{background:#f5f0ff;color:#5b21b6;border:1px solid #ddd0ff}
+.capacity-unlimited{justify-content:flex-start;color:var(--green);font-weight:750}
+.capacity-alert-only{justify-content:flex-end}
+.event-empty{background:linear-gradient(145deg,#fff,#f7f9ff)!important}
+.event-empty:before{content:"✦";display:grid;place-items:center;width:52px;height:52px;margin-bottom:8px;border-radius:50%;background:#eef2ff;color:#3157c8;font-size:24px}
+.event-empty h3{margin-top:4px}
+@media(max-width:760px){.field-label-row{align-items:flex-start;flex-direction:column}.auto-close-toggle{align-self:flex-start}}
