@@ -18,9 +18,10 @@
   <section id="loginCard" class="card login-card">
     <div class="mark logo-mark" aria-label="Logo Khoa Mỹ thuật Công nghiệp">IFA</div>
     <h2>Đăng ký sự kiện</h2>
-    <p>Sinh viên, giảng viên TDTU và Admin đăng nhập để xem, đăng ký các sự kiện.</p>
+    <p>Sinh viên và giảng viên TDTU đăng nhập để xem, đăng ký các sự kiện.</p>
+    <div id="loginNotice" class="notice error login-notice hidden" role="alert"></div>
     <button id="loginBtn" class="btn btn-primary">Đăng nhập bằng Google</button>
-    <p class="helper-text">Chấp nhận email TDTU và tài khoản Google đã được cấp quyền Admin</p>
+    <p class="helper-text">Chỉ chấp nhận tài khoản TDTU.</p>
   </section>
 
   <div id="studentApp" class="hidden">
@@ -44,7 +45,7 @@
       <section id="eventGrid" class="event-list"></section>
     </div>
   </div>
-  <footer class="foot">IFA+A · Khoa Mỹ thuật Công nghiệp · V3.7<br>Built by: Trần Quang Hải</footer>
+  <footer class="foot">IFA+A · Khoa Mỹ thuật Công nghiệp · V3.8<br>Built by: Trần Quang Hải</footer>
 </main>
 
 <dialog id="detailDialog"><div class="modal"><div class="modal-head"><h2 id="detailTitle"></h2><button class="btn btn-small" data-close>Đóng</button></div><div id="detailBody"></div><div class="modal-actions"><button class="btn" data-close>Hủy</button><button id="detailCalendarBtn" class="btn btn-calendar hidden" type="button">＋ Thêm vào Google Lịch</button><button id="confirmBtn" class="btn btn-register">Xác nhận đăng ký</button></div></div></dialog>
