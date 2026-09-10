@@ -409,7 +409,7 @@ function openEvent(event = null, copy = false) {
   }
   $("#eventAllowCancellation").checked = !!event?.allowCancellation;
   $("#eventHot").checked = !!event?.isHot;
-  $("#eventShowAsNew").checked = event ? event.showAsNew !== false : true;
+  $("#eventShowAsNew").checked = copy ? true : event ? event.showAsNew !== false : true;
   refreshGroupOptions(event?.groupId || "");
   $("#groupId").disabled = !copy && !!event && (event.registeredCount || 0) > 0;
   $("#newGroupFields").classList.add("hidden");
