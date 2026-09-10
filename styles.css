@@ -306,3 +306,26 @@
   #studentStatusFilters{justify-content:flex-start}
   #studentStatusFilters .filter{min-width:112px}
 }
+
+
+/* V3.8: hộp xác nhận nội bộ và thông báo đăng nhập */
+.confirm-dialog{width:min(92vw,470px);max-width:470px;padding:0;border:0;border-radius:22px;background:transparent;overflow:visible}
+.confirm-dialog::backdrop{background:rgba(11,18,32,.62);backdrop-filter:blur(3px)}
+.confirm-modal{width:100%;display:grid;gap:16px;padding:24px;border:1px solid #ead5d9;border-radius:22px;background:#fff;box-shadow:0 24px 70px rgba(17,24,39,.28)}
+.confirm-icon{display:grid;place-items:center;width:48px;height:48px;border-radius:50%;background:#fff0f1;color:#b42318;font-size:26px;font-weight:900}
+.confirm-copy h2{margin:0 0 7px;color:#17213a;font-size:24px}
+.confirm-copy p{margin:0;color:#526078;line-height:1.55;overflow-wrap:anywhere}
+.confirm-modal .field{margin:0;padding:14px;border-radius:14px;background:#fff7f7}
+.confirm-modal .field input{text-transform:uppercase;background:#fff}
+.confirm-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:0}
+.btn-danger-solid{border-color:#b42318;background:#b42318;color:#fff}
+.btn-danger-solid:hover{border-color:#951d14;background:#951d14}
+.btn-danger-solid:disabled{border-color:#e6b8b4;background:#e6b8b4;color:#fff}
+.login-notice{width:min(100%,520px);margin:4px auto 14px;padding:11px 14px;text-align:center;font-weight:750}
+@media(max-width:560px){
+  .confirm-dialog{width:calc(100vw - 28px)}
+  .confirm-modal{padding:20px}
+  .confirm-copy h2{font-size:22px}
+  .confirm-actions{grid-template-columns:1fr}
+  .confirm-actions .btn{width:100%}
+}
