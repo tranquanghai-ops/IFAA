@@ -6,6 +6,7 @@ import { firebaseConfig, STUDENT_DOMAIN } from "./firebase-config.mjs";
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
 const DEFAULT_CATEGORY = "Sự kiện Khoa";
 const EVENT_CATEGORIES = ["Sự kiện Khoa", "Ngành Đồ họa", "Ngành Thiết kế công nghiệp", "Ngành Thiết kế nội thất", "Ngành Thiết kế thời trang", "Ngành Nghệ thuật số"];
+const STUDENT_CALENDAR_ENABLED = false;
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -243,7 +244,7 @@ function eventCard(event) {
   const category = event.category || DEFAULT_CATEGORY;
   const hotTag = event.isHot ? '<span class="tag hot">🔥 HOT</span>' : "";
   const newTag = isNewEvent(event) ? '<span class="tag new">NEW</span>' : "";
-  return `<article class="card event event-${state} ${registered ? "event-registered" : ""}"><div class="event-top"><div><span class="tag event-category">${safe(category)}</span><span class="tag ${tagClass}">${label}</span>${hotTag}${newTag}${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}<h3>${safe(event.title)}</h3></div></div><div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(event, state))}</span>${groupLine}</div><div class="progress"><i style="width:${percent}%"></i></div><div class="capacity"><span>${used}/${capacity} người tham gia</span><b class="${fullSeats ? "full-seats" : lowSeats ? "low-seats" : ""}">${fullSeats ? "Hết chỗ" : `Còn ${left} chỗ`}</b></div><div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${registered ? `<button class="btn btn-calendar" data-calendar="${event.id}">＋ Google Lịch</button>` : ""}${registered && event.allowCancellation ? `<button class="btn btn-danger" data-cancel="${event.id}">Hủy đăng ký</button>` : `<button class="btn ${state === "full" ? "btn-full" : "btn-register"}" data-register="${event.id}" ${disabled || registered ? "disabled" : ""}>${registered ? "Đã đăng ký" : state === "full" ? "Đã đủ" : group.blocked ? "Đã đạt giới hạn đăng ký" : state === "upcoming" ? "Chưa đến giờ" : "Đăng ký"}</button>`}</div></article>`;
+  return `<article class="card event event-${state} ${registered ? "event-registered" : ""}"><div class="event-top"><div><span class="tag event-category">${safe(category)}</span><span class="tag ${tagClass}">${label}</span>${hotTag}${newTag}${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}<h3>${safe(event.title)}</h3></div></div><div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(event, state))}</span>${groupLine}</div><div class="progress"><i style="width:${percent}%"></i></div><div class="capacity"><span>${used}/${capacity} người tham gia</span><b class="${fullSeats ? "full-seats" : lowSeats ? "low-seats" : ""}">${fullSeats ? "Hết chỗ" : `Còn ${left} chỗ`}</b></div><div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${STUDENT_CALENDAR_ENABLED && registered ? `<button class="btn btn-calendar" data-calendar="${event.id}">＋ Google Lịch</button>` : ""}${registered && event.allowCancellation ? `<button class="btn btn-danger" data-cancel="${event.id}">Hủy đăng ký</button>` : `<button class="btn ${state === "full" ? "btn-full" : "btn-register"}" data-register="${event.id}" ${disabled || registered ? "disabled" : ""}>${registered ? "Đã đăng ký" : state === "full" ? "Đã đủ" : group.blocked ? "Đã đạt giới hạn đăng ký" : state === "upcoming" ? "Chưa đến giờ" : "Đăng ký"}</button>`}</div></article>`;
 }
 function refreshStudentFilters(sourceEvents, focusedGroup) {
   const categorySelect = $("#categoryFilter");
@@ -492,7 +493,7 @@ function openDetail(id) {
   confirmButton.classList.toggle("btn-register", !detailFullSeats);
   confirmButton.textContent = detailFullSeats ? "Đã đủ" : "Xác nhận đăng ký";
   const calendarButton = $("#detailCalendarBtn");
-  calendarButton.classList.toggle("hidden", !myRegs.has(chosen.id));
+  calendarButton.classList.toggle("hidden", !STUDENT_CALENDAR_ENABLED || !myRegs.has(chosen.id));
   calendarButton.dataset.calendar = chosen.id;
   $("#detailDialog").showModal();
 }
