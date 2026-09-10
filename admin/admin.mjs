@@ -274,6 +274,9 @@ function openEvent(event = null, copy = false) {
   const canApplyToGroup = !copy && !!event?.id && !!event?.groupId;
   $("#applyGroupFieldsOption").classList.toggle("hidden", !canApplyToGroup);
   $("#applyGroupFields").checked = false;
+  $("#applyGroupFieldsBtn").setAttribute("aria-pressed", "false");
+  $("#applyGroupFieldsBtn").classList.remove("active");
+  $("#applyGroupFieldsBtn").textContent = "Áp dụng khi lưu cho cả nhóm";
   $("#eventDialog").showModal();
 }
 
@@ -287,6 +290,13 @@ $("#groupId").onchange = () => {
 
 $("#groupUnlimited").onchange = () => setLimitInputState($("#groupUnlimited"), $("#groupMaxRegistrations"), $("#groupLimitHelp"));
 $("#newGroupUnlimited").onchange = () => setLimitInputState($("#newGroupUnlimited"), $("#newGroupMax"));
+$("#applyGroupFieldsBtn").onclick = () => {
+  const checkbox = $("#applyGroupFields");
+  checkbox.checked = !checkbox.checked;
+  $("#applyGroupFieldsBtn").setAttribute("aria-pressed", String(checkbox.checked));
+  $("#applyGroupFieldsBtn").classList.toggle("active", checkbox.checked);
+  $("#applyGroupFieldsBtn").textContent = checkbox.checked ? "✓ Sẽ áp dụng khi lưu" : "Áp dụng khi lưu cho cả nhóm";
+};
 
 let descriptionRange = null;
 const descriptionEditor = $("#descriptionEditor");
