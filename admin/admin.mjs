@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
-import { getFirestore, collection, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp, Timestamp, runTransaction } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
+import { getFirestore, collection, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp, Timestamp, runTransaction } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
 import { firebaseConfig, OWNER_EMAIL } from "../firebase-config.mjs";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
@@ -16,6 +16,8 @@ const millis = (value) => value?.toDate ? value.toDate().getTime() : (value ? ne
 
 let user = null;
 let isOwner = false;
+let currentRole = "admin";
+let isSubAdmin = false;
 let events = [];
 let regs = [];
 let admins = [];
@@ -39,18 +41,25 @@ function groupShareUrl(group) {
   return url.toString();
 }
 
-function calendarStamp(value) {
+function calendarStamp(value, dateOnly = false) {
   const date = value instanceof Date ? value : new Date(value);
   const pad = (number) => String(number).padStart(2, "0");
-  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}T${pad(date.getHours())}${pad(date.getMinutes())}00`;
+  const day = `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`;
+  return dateOnly ? day : `${day}T${pad(date.getHours())}${pad(date.getMinutes())}00`;
 }
 
 function calendarRange(event) {
-  const start = new Date(`${event.date}T${event.startTime || "08:00"}:00`);
-  let end = new Date(`${event.date}T${event.endTime || event.startTime || "09:00"}:00`);
+  if (!event.startTime) {
+    const start = new Date(`${event.date}T00:00:00`);
+    if (!Number.isFinite(start.getTime())) return null;
+    const end = new Date(start.getTime() + 86400000);
+    return { start, end, allDay: true, value: `${calendarStamp(start, true)}/${calendarStamp(end, true)}` };
+  }
+  const start = new Date(`${event.date}T${event.startTime}:00`);
+  let end = new Date(`${event.date}T${event.endTime || event.startTime}:00`);
   if (!Number.isFinite(start.getTime())) return null;
   if (!Number.isFinite(end.getTime()) || end <= start) end = new Date(start.getTime() + 3600000);
-  return { start, end, value: `${calendarStamp(start)}/${calendarStamp(end)}` };
+  return { start, end, allDay: false, value: `${calendarStamp(start)}/${calendarStamp(end)}` };
 }
 
 function eventCalendarUrl(event) {
@@ -83,7 +92,9 @@ function downloadGroupCalendar(groupId) {
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
   const blocks = groupEvents.map((item) => {
     const range = calendarRange(item);
-    return ["BEGIN:VEVENT", `UID:${escapeIcs(item.id)}@ifaa`, `DTSTAMP:${stamp}`, `DTSTART;TZID=Asia/Ho_Chi_Minh:${calendarStamp(range.start)}`, `DTEND;TZID=Asia/Ho_Chi_Minh:${calendarStamp(range.end)}`, `SUMMARY:${escapeIcs(item.title)}`, `LOCATION:${escapeIcs(item.location)}`, `DESCRIPTION:${escapeIcs(item.description || "Sự kiện IFA+A")}`, "END:VEVENT"].join("\r\n");
+    const starts = range.allDay ? `DTSTART;VALUE=DATE:${calendarStamp(range.start, true)}` : `DTSTART;TZID=Asia/Ho_Chi_Minh:${calendarStamp(range.start)}`;
+    const ends = range.allDay ? `DTEND;VALUE=DATE:${calendarStamp(range.end, true)}` : `DTEND;TZID=Asia/Ho_Chi_Minh:${calendarStamp(range.end)}`;
+    return ["BEGIN:VEVENT", `UID:${escapeIcs(item.id)}@ifaa`, `DTSTAMP:${stamp}`, starts, ends, `SUMMARY:${escapeIcs(item.title)}`, `LOCATION:${escapeIcs(item.location)}`, `DESCRIPTION:${escapeIcs(item.description || "Sự kiện IFA+A")}`, "END:VEVENT"].join("\r\n");
   });
   const calendar = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//IFAA//Event Registration//VI", "CALSCALE:GREGORIAN", "METHOD:PUBLISH", ...blocks, "END:VCALENDAR", ""].join("\r\n");
   const blob = new Blob(["\uFEFF", calendar], { type: "text/calendar;charset=utf-8" });
@@ -106,9 +117,11 @@ function notice(message, type = "") {
   setTimeout(() => element.classList.add("hidden"), 5000);
 }
 
-async function hasAccess(currentUser) {
-  if (currentUser.email.toLowerCase() === OWNER_EMAIL) return true;
-  return (await getDoc(doc(db, "admins", currentUser.email.toLowerCase()))).exists();
+async function accessRole(currentUser) {
+  if (currentUser.email.toLowerCase() === OWNER_EMAIL) return "owner";
+  const snapshot = await getDoc(doc(db, "admins", currentUser.email.toLowerCase()));
+  if (!snapshot.exists()) return "";
+  return snapshot.data().role === "subadmin" ? "subadmin" : "admin";
 }
 
 function eventEnd(event) {
@@ -123,6 +136,29 @@ function dayPeriod(time) {
   if (hour >= 11 && hour < 13) return "Buổi trưa";
   if (hour >= 13 && hour < 18) return "Buổi chiều";
   return "Buổi tối";
+}
+
+function formatEventDate(event) {
+  try {
+    return new Intl.DateTimeFormat("vi-VN", { weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(`${event.date}T00:00:00`));
+  } catch {
+    return event.date || "";
+  }
+}
+
+function eventSchedule(event) {
+  if (!event.startTime) return `${formatEventDate(event)} · Cả ngày`;
+  return `${formatEventDate(event)} · ${event.startTime}${event.endTime ? `–${event.endTime}` : ""}${dayPeriod(event.startTime) ? ` · ${dayPeriod(event.startTime)}` : ""}`;
+}
+
+function isNewEvent(event) {
+  const created = millis(event.createdAt);
+  return !!created && Date.now() - created >= 0 && Date.now() - created < 86400000;
+}
+
+function eventPosition(event) {
+  const position = Number(event.sortOrder);
+  return Number.isFinite(position) ? position : (millis(event.createdAt) || Number.MAX_SAFE_INTEGER);
 }
 
 function eventState(event) {
@@ -160,34 +196,47 @@ function render() {
   $("#metricHidden").textContent = counts.hidden;
   $("#metricRegs").textContent = regs.length;
 
-  const filteredEvents = adminStatusFilter === "all" ? events : events.filter((event) => eventState(event) === adminStatusFilter);
-  const adminEventRow = (event) => {
-    const canDelete = isOwner || event.createdByUid === user.uid;
-    const reason = "Chỉ được xóa sự kiện do mình tạo";
-    const [statusClass, statusText] = statusLabel(event);
-    const state = eventState(event);
-    return `<tr class="${state === "ended" ? "admin-event-ended" : ""}"><td><b>${safe(event.title)}</b><br><small class="admin-event-category">${safe(event.category || "Sự kiện Khoa")}</small><br><small>${safe(event.location)}</small></td><td>${safe(event.date)}<br>${safe(event.startTime || "")}</td><td>${event.registeredCount || 0}/${event.capacity}</td><td>${safe(event.createdByName || event.createdByEmail)}</td><td><span class="tag ${statusClass}">${statusText}</span></td><td><div class="actions"><button class="btn btn-small" data-edit="${event.id}">Sửa</button><button class="btn btn-small btn-soft" data-copy-event="${event.id}">Sao chép</button><button class="btn btn-small btn-calendar" data-calendar-event="${event.id}">＋ Google Lịch</button><button class="btn btn-small btn-danger" data-delete="${event.id}" ${canDelete ? "" : `disabled title='${reason}'`}>Xóa</button></div></td></tr>`;
-  };
+  const filteredEvents = (adminStatusFilter === "all" ? events : events.filter((event) => eventState(event) === adminStatusFilter))
+    .slice().sort((a, b) => eventPosition(a) - eventPosition(b));
   const groupedAdminEvents = new Map();
   filteredEvents.forEach((event) => {
     const key = event.groupId || "__ungrouped__";
     if (!groupedAdminEvents.has(key)) groupedAdminEvents.set(key, []);
     groupedAdminEvents.get(key).push(event);
   });
+  const adminEventCard = (event, siblingItems) => {
+    const canManage = !isSubAdmin || event.createdByUid === user.uid;
+    const [statusClass, statusText] = statusLabel(event);
+    const state = eventState(event);
+    const orderedSiblings = events.filter((item) => (item.groupId || "__ungrouped__") === (event.groupId || "__ungrouped__")).sort((a, b) => eventPosition(a) - eventPosition(b));
+    const eventIndex = orderedSiblings.findIndex((item) => item.id === event.id);
+    const hotTag = event.isHot ? '<span class="tag hot">🔥 HOT</span>' : "";
+    const newTag = isNewEvent(event) ? '<span class="tag new">NEW</span>' : "";
+    return `<article class="card event admin-event-card event-${state}">
+      <div class="event-top"><div><span class="tag event-category">${safe(event.category || "Sự kiện Khoa")}</span><span class="tag ${statusClass}">${statusText}</span>${hotTag}${newTag}<h3>${safe(event.title)}</h3></div></div>
+      <div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span><b>Sức chứa:</b> ${event.registeredCount || 0}/${event.capacity}</span><span><b>Người tạo:</b> ${safe(event.createdByName || event.createdByEmail)}</span></div>
+      <div class="admin-position-actions"><span>Vị trí ${eventIndex + 1}/${orderedSiblings.length}</span><button class="btn btn-small" data-move-event="${event.id}" data-direction="-1" ${eventIndex <= 0 ? "disabled" : ""}>↑ Lên</button><button class="btn btn-small" data-move-event="${event.id}" data-direction="1" ${eventIndex >= orderedSiblings.length - 1 ? "disabled" : ""}>↓ Xuống</button></div>
+      <div class="event-actions admin-card-actions"><button class="btn" data-edit="${event.id}" ${canManage ? "" : "disabled"}>Sửa</button><button class="btn btn-soft" data-copy-event="${event.id}">Sao chép</button><button class="btn btn-calendar" data-calendar-event="${event.id}">＋ Google Lịch</button><button class="btn btn-danger" data-delete="${event.id}" ${canManage ? "" : "disabled"}>Xóa</button></div>
+    </article>`;
+  };
   let adminTone = 0;
   $("#eventRows").innerHTML = filteredEvents.length ? [...groupedAdminEvents.entries()].map(([groupId, items]) => {
     const eventGroup = groups.find((item) => item.id === groupId);
     const title = groupId === "__ungrouped__" ? "Sự kiện không thuộc nhóm" : (eventGroup?.name || items[0]?.groupName || "Nhóm sự kiện");
-    const limit = groupId === "__ungrouped__" ? "Không áp dụng giới hạn nhóm" : eventGroup?.unlimited ? "Không giới hạn lượt đăng ký" : `Tối đa ${eventGroup?.maxRegistrations || items[0]?.groupMaxRegistrations || 1}/sự kiện`;
+    const limit = groupId === "__ungrouped__" ? "" : eventGroup?.unlimited ? "" : `Tối đa ${eventGroup?.maxRegistrations || items[0]?.groupMaxRegistrations || 1}/sự kiện`;
     const toneClass = groupId === "__ungrouped__" ? "admin-group-ungrouped" : `group-tone-${adminTone++ % 5}`;
-    return `<section class="admin-event-group ${toneClass}"><div class="admin-event-group-head"><div><span>${groupId === "__ungrouped__" ? "KHÔNG NHÓM" : "NHÓM SỰ KIỆN"}</span><h3>${safe(title)}</h3><small>${safe(limit)}</small></div><b>${items.length} sự kiện</b></div><div class="table-wrap"><table><thead><tr><th>Sự kiện</th><th>Thời gian</th><th>Sức chứa</th><th>Người tạo</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>${items.map(adminEventRow).join("")}</tbody></table></div></section>`;
+    return `<section class="admin-event-group ${toneClass}"><div class="admin-event-group-head"><div><span>${groupId === "__ungrouped__" ? "SỰ KIỆN RIÊNG" : "NHÓM SỰ KIỆN"}</span><h3>${safe(title)}</h3>${limit ? `<small>${safe(limit)}</small>` : ""}</div><b>${items.length} sự kiện</b></div><div class="event-grid admin-event-grid">${items.map((item) => adminEventCard(item, items)).join("")}</div></section>`;
   }).join("") : '<div class="card empty">Không có sự kiện ở trạng thái này.</div>';
 
   $("#groupRows").innerHTML = groups.map((group) => {
-    const eventCount = events.filter((item) => item.groupId === group.id).length;
+    const groupedItems = events.filter((item) => item.groupId === group.id);
+    const eventCount = groupedItems.length;
     const visibility = group.linkOnly ? '<span class="tag upcoming">CHỈ QUA LINK</span>' : '<span class="tag open">TRANG CHUNG</span>';
     const limit = group.unlimited ? '<b>Không giới hạn</b>' : `Tối đa <b>${Number(group.maxRegistrations) || 1}</b>/sự kiện`;
-    return `<tr><td><b>${safe(group.name)}</b><br><small>Mã: ${safe(groupCode(group))}</small></td><td>${limit}</td><td>${eventCount}</td><td>${visibility}</td><td><div class="actions"><button class="btn btn-small btn-soft" data-copy-group-link="${group.id}">Sao chép liên kết</button><button class="btn btn-small btn-calendar" data-calendar-group="${group.id}">＋ Lịch cả nhóm</button></div></td><td><button class="btn btn-small" data-edit-group="${group.id}">Sửa nhóm</button></td></tr>`;
+    const hiddenCount = groupedItems.filter((item) => eventState(item) === "hidden").length;
+    const endedCount = groupedItems.filter((item) => eventState(item) === "ended").length;
+    const groupState = hiddenCount === eventCount && eventCount ? "Đã ẩn toàn bộ" : endedCount === eventCount && eventCount ? "Đã kết thúc" : "Theo từng sự kiện";
+    return `<tr><td><b>${safe(group.name)}</b><br><small>Mã: ${safe(groupCode(group))}</small></td><td>${limit}</td><td>${eventCount}<br><small>${groupState}</small></td><td>${visibility}</td><td><div class="actions"><button class="btn btn-small btn-soft" data-copy-group-link="${group.id}">Sao chép liên kết</button><button class="btn btn-small btn-calendar" data-calendar-group="${group.id}">＋ Lịch cả nhóm</button></div></td><td><button class="btn btn-small" data-edit-group="${group.id}">Sửa nhóm</button></td></tr>`;
   }).join("") || '<tr><td colspan="6" class="empty">Chưa có nhóm sự kiện.</td></tr>';
 
   const selectedFilter = $("#eventFilter").value;
@@ -197,7 +246,7 @@ function render() {
   $("#groupFilter").innerHTML = '<option value="">Tất cả nhóm</option>' + groups.map((group) => `<option value="${group.id}">${safe(group.name)}</option>`).join("");
   if (groups.some((group) => group.id === selectedGroup)) $("#groupFilter").value = selectedGroup;
   renderRegs();
-  if (isOwner) $("#adminRows").innerHTML = admins.map((admin) => `<tr><td>${safe(admin.name || "")}</td><td>${safe(admin.email)}</td><td>${ts(admin.addedAt)}</td><td><button class="btn btn-small btn-danger" data-remove-admin="${safe(admin.email)}">Xóa</button></td></tr>`).join("");
+  if (isOwner) $("#adminRows").innerHTML = admins.map((admin) => `<tr><td>${safe(admin.name || "")}</td><td>${safe(admin.email)}</td><td><select class="admin-role-select" data-admin-role="${safe(admin.email)}"><option value="admin" ${(admin.role || "admin") === "admin" ? "selected" : ""}>Admin</option><option value="subadmin" ${admin.role === "subadmin" ? "selected" : ""}>Sub-admin</option></select></td><td>${ts(admin.addedAt)}</td><td><button class="btn btn-small btn-danger" data-remove-admin="${safe(admin.email)}">Xóa</button></td></tr>`).join("");
 }
 
 function filteredRegistrations() {
@@ -261,6 +310,7 @@ function openGroup(group = null) {
   $("#groupUnlimited").checked = !!group?.unlimited;
   setLimitInputState($("#groupUnlimited"), $("#groupMaxRegistrations"), $("#groupLimitHelp"));
   $("#groupLinkOnly").checked = !!group?.linkOnly;
+  $("#groupBulkStatus").value = "";
   $("#groupFormError").classList.add("hidden");
   $("#groupDialog").showModal();
 }
@@ -281,19 +331,32 @@ function listen() {
     settings.faculties = [...new Set([DEFAULT_FACULTY, ...(settings.faculties || [])])];
     renderFacultySettings();
   }, (error) => notice(error.message, "error"));
-  onSnapshot(query(collection(db, "eventGroups"), orderBy("createdAt", "desc")), (snapshot) => {
-    groups = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+
+  const groupsQuery = isSubAdmin
+    ? query(collection(db, "eventGroups"), where("createdByUid", "==", user.uid))
+    : query(collection(db, "eventGroups"), orderBy("createdAt", "desc"));
+  onSnapshot(groupsQuery, (snapshot) => {
+    groups = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => (millis(b.createdAt) || 0) - (millis(a.createdAt) || 0));
     refreshGroupOptions($("#groupId").value);
     render();
   }, (error) => notice(error.message, "error"));
-  onSnapshot(query(collection(db, "events"), orderBy("createdAt", "desc")), (snapshot) => {
+
+  const eventsQuery = isSubAdmin
+    ? query(collection(db, "events"), where("createdByUid", "==", user.uid))
+    : query(collection(db, "events"), orderBy("createdAt", "desc"));
+  onSnapshot(eventsQuery, (snapshot) => {
     events = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
     render();
   }, (error) => notice(error.message, "error"));
-  onSnapshot(query(collection(db, "registrations"), orderBy("createdAt", "desc")), (snapshot) => {
-    regs = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+
+  const registrationsQuery = isSubAdmin
+    ? query(collection(db, "registrations"), where("eventCreatorUid", "==", user.uid))
+    : query(collection(db, "registrations"), orderBy("createdAt", "desc"));
+  onSnapshot(registrationsQuery, (snapshot) => {
+    regs = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => (millis(b.createdAt) || 0) - (millis(a.createdAt) || 0));
     render();
-  }, (error) => notice(error.message, "error"));
+  }, (error) => notice(isSubAdmin ? "Sub-admin chỉ xem được đăng ký mới thuộc sự kiện do mình tạo." : error.message, "error"));
+
   if (isOwner) onSnapshot(collection(db, "admins"), (snapshot) => {
     admins = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
     render();
@@ -335,6 +398,7 @@ function openEvent(event = null, copy = false) {
     $("#category").value = "Sự kiện Khoa";
   }
   $("#eventAllowCancellation").checked = !!event?.allowCancellation;
+  $("#eventHot").checked = !!event?.isHot;
   refreshGroupOptions(event?.groupId || "");
   $("#groupId").disabled = !copy && !!event && (event.registeredCount || 0) > 0;
   $("#newGroupFields").classList.add("hidden");
@@ -432,17 +496,19 @@ $("#eventForm").onsubmit = async (event) => {
   data.capacity = Number($("#capacity").value);
   data.allowedFaculties = [...document.querySelectorAll(".event-faculty:checked")].map((input) => input.value);
   data.allowCancellation = $("#eventAllowCancellation").checked;
+  data.isHot = $("#eventHot").checked;
   data.updatedAt = serverTimestamp();
   try {
-    if (!data.title || !data.category || !data.date || !data.location || !data.startTime || !Number.isInteger(data.capacity) || data.capacity < 1) throw Error("Vui lòng nhập đầy đủ các trường bắt buộc.");
-    if (!validTime24(data.startTime) || (data.endTime && !validTime24(data.endTime))) throw Error("Giờ sự kiện phải theo định dạng 24 giờ HH:mm, ví dụ 08:30 hoặc 17:45.");
+    if (!data.title || !data.category || !data.date || !data.location || !Number.isInteger(data.capacity) || data.capacity < 1) throw Error("Vui lòng nhập đầy đủ các trường bắt buộc.");
+    if ((data.startTime && !validTime24(data.startTime)) || (data.endTime && !validTime24(data.endTime))) throw Error("Nếu nhập giờ sự kiện, vui lòng dùng định dạng 24 giờ HH:mm, ví dụ 08:30 hoặc 17:45.");
     if (!data.openAt || !data.closeAt) throw Error("Vui lòng chọn ngày và nhập giờ mở, đóng đăng ký theo định dạng 24 giờ HH:mm.");
-    const eventStart = new Date(`${data.date}T${data.startTime}:00`).getTime();
-    const eventEnd = new Date(`${data.date}T${data.endTime || data.startTime}:00`).getTime();
+    const eventStart = new Date(`${data.date}T${data.startTime || "23:59"}:00`).getTime();
+    const eventEnd = new Date(`${data.date}T${data.endTime || data.startTime || "23:59"}:00`).getTime();
     const now = Date.now();
     if (!Number.isFinite(eventStart) || !Number.isFinite(eventEnd)) throw Error("Ngày hoặc giờ sự kiện không hợp lệ.");
     const warnings = [];
-    if (data.endTime && eventEnd <= eventStart) warnings.push("Giờ kết thúc sự kiện đang trước hoặc bằng giờ bắt đầu.");
+    if (data.endTime && !data.startTime) warnings.push("Đã nhập giờ kết thúc nhưng chưa nhập giờ bắt đầu; sự kiện vẫn được lưu là sự kiện cả ngày.");
+    if (data.startTime && data.endTime && eventEnd <= eventStart) warnings.push("Giờ kết thúc sự kiện đang trước hoặc bằng giờ bắt đầu.");
     if (!id && eventStart <= now) warnings.push("Ngày và giờ bắt đầu sự kiện đã ở trong quá khứ.");
     if (data.openAt.toMillis() >= data.closeAt.toMillis()) warnings.push("Thời gian đóng đăng ký đang trước hoặc bằng thời gian mở đăng ký.");
     if (!id && data.closeAt.toMillis() <= now) warnings.push("Thời gian đóng đăng ký đã ở trong quá khứ.");
@@ -505,7 +571,9 @@ $("#eventForm").onsubmit = async (event) => {
       $("#eventDialog").close();
       notice(siblingEvents.length ? `Đã lưu và áp dụng ${syncFields.length} nội dung cho ${siblingEvents.length} sự kiện khác trong nhóm.` : "Đã lưu sự kiện.", "success");
     } else {
-      await addDoc(collection(db, "events"), { ...data, registeredCount: 0, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdByName: user.displayName || "", createdAt: serverTimestamp() });
+      const siblingPositions = events.filter((item) => (item.groupId || "") === data.groupId).map(eventPosition).filter(Number.isFinite);
+      const sortOrder = siblingPositions.length ? Math.max(...siblingPositions) + 1 : 0;
+      await addDoc(collection(db, "events"), { ...data, sortOrder, registeredCount: 0, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdByName: user.displayName || "", createdAt: serverTimestamp() });
       $("#eventDialog").close();
       notice("Đã lưu sự kiện.", "success");
     }
@@ -535,6 +603,7 @@ $("#groupForm").onsubmit = async (event) => {
     const code = shareCode($("#groupShareCode").value || name);
     const unlimited = $("#groupUnlimited").checked;
     const maxRegistrations = Number($("#groupMaxRegistrations").value);
+    const bulkStatus = $("#groupBulkStatus").value;
     if (!name || (!unlimited && (!Number.isInteger(maxRegistrations) || maxRegistrations < 1 || maxRegistrations > 20))) throw Error("Vui lòng nhập tên nhóm và giới hạn từ 1 đến 20.");
     if (!code) throw Error("Mã liên kết nhóm không hợp lệ.");
     if (groups.some((item) => item.id !== id && groupCode(item) === code)) throw Error(`Mã liên kết ${code} đã được một nhóm khác sử dụng.`);
@@ -544,17 +613,19 @@ $("#groupForm").onsubmit = async (event) => {
       const highestCurrentCount = Math.max(0, ...countsByUser.values());
       if (maxRegistrations < highestCurrentCount) throw Error(`Không thể giảm giới hạn xuống ${maxRegistrations}; hiện có người đã đăng ký ${highestCurrentCount} sự kiện trong nhóm.`);
     }
+    const groupedEvents = id ? events.filter((item) => item.groupId === id) : [];
+    const statusNames = { closed: "kết thúc", hidden: "ẩn", open: "hiển thị lại" };
+    if (bulkStatus && groupedEvents.length && !confirm(`Áp dụng trạng thái “${statusNames[bulkStatus]}” cho toàn bộ ${groupedEvents.length} sự kiện trong nhóm này?`)) throw Error("Đã hủy thay đổi trạng thái nhóm.");
     const effectiveMax = unlimited ? (Number.isInteger(maxRegistrations) && maxRegistrations >= 1 ? maxRegistrations : 2) : maxRegistrations;
     const data = { name, shareCode: code, maxRegistrations: effectiveMax, unlimited, linkOnly: $("#groupLinkOnly").checked, updatedAt: serverTimestamp() };
     if (id) {
       await updateDoc(doc(db, "eventGroups", id), data);
-      const groupedEvents = events.filter((item) => item.groupId === id);
-      await Promise.all(groupedEvents.map((item) => updateDoc(doc(db, "events", item.id), { groupName: name, groupMaxRegistrations: effectiveMax, updatedAt: serverTimestamp() })));
+      await Promise.all(groupedEvents.map((item) => updateDoc(doc(db, "events", item.id), { groupName: name, groupMaxRegistrations: effectiveMax, ...(bulkStatus ? { status: bulkStatus } : {}), updatedAt: serverTimestamp() })));
     } else {
       await addDoc(collection(db, "eventGroups"), { ...data, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdAt: serverTimestamp() });
     }
     $("#groupDialog").close();
-    notice(id ? "Đã cập nhật nhóm sự kiện." : "Đã tạo nhóm sự kiện.", "success");
+    notice(bulkStatus && groupedEvents.length ? `Đã cập nhật nhóm và ${statusNames[bulkStatus]} ${groupedEvents.length} sự kiện.` : id ? "Đã cập nhật nhóm sự kiện." : "Đã tạo nhóm sự kiện.", "success");
   } catch (saveError) {
     error.textContent = saveError.message || "Không thể lưu nhóm sự kiện.";
     error.classList.remove("hidden");
@@ -563,6 +634,27 @@ $("#groupForm").onsubmit = async (event) => {
     submit.textContent = "Lưu nhóm";
   }
 };
+
+async function moveEvent(eventId, direction) {
+  const selected = events.find((item) => item.id === eventId);
+  if (!selected) return;
+  const siblings = events.filter((item) => (item.groupId || "__ungrouped__") === (selected.groupId || "__ungrouped__")).sort((a, b) => eventPosition(a) - eventPosition(b));
+  const from = siblings.findIndex((item) => item.id === eventId);
+  const to = from + direction;
+  if (from < 0 || to < 0 || to >= siblings.length) return;
+  const target = siblings[to];
+  const selectedPosition = eventPosition(selected);
+  const targetPosition = eventPosition(target);
+  try {
+    await Promise.all([
+      updateDoc(doc(db, "events", selected.id), { sortOrder: targetPosition, updatedAt: serverTimestamp() }),
+      updateDoc(doc(db, "events", target.id), { sortOrder: selectedPosition, updatedAt: serverTimestamp() })
+    ]);
+    notice("Đã cập nhật vị trí sự kiện.", "success");
+  } catch (error) {
+    notice(error.message || "Không thể thay đổi vị trí sự kiện.", "error");
+  }
+}
 
 $("#addFacultyBtn").onclick = () => {
   const name = $("#newFaculty").value.trim();
@@ -585,14 +677,28 @@ $("#settingsForm").onsubmit = async (event) => {
 $("#adminForm").onsubmit = async (event) => {
   event.preventDefault();
   const email = $("#adminEmail").value.trim().toLowerCase();
+  const role = $("#adminRole").value === "subadmin" ? "subadmin" : "admin";
   try {
-    await setDoc(doc(db, "admins", email), { email, name: $("#adminName").value.trim(), addedByUid: user.uid, addedAt: serverTimestamp() });
+    await setDoc(doc(db, "admins", email), { email, name: $("#adminName").value.trim(), role, addedByUid: user.uid, addedAt: serverTimestamp() });
     event.target.reset();
-    notice("Đã thêm Admin.", "success");
+    $("#adminRole").value = "admin";
+    notice(`Đã thêm ${role === "subadmin" ? "Sub-admin" : "Admin"}.`, "success");
   } catch (error) {
     notice(error.message, "error");
   }
 };
+
+document.addEventListener("change", async (event) => {
+  const select = event.target.closest("[data-admin-role]");
+  if (!select || !isOwner) return;
+  try {
+    await updateDoc(doc(db, "admins", select.dataset.adminRole), { role: select.value === "subadmin" ? "subadmin" : "admin", updatedAt: serverTimestamp() });
+    notice("Đã cập nhật quyền quản trị.", "success");
+  } catch (error) {
+    notice(error.message || "Không thể cập nhật quyền.", "error");
+    render();
+  }
+});
 
 document.addEventListener("click", async (event) => {
   const button = event.target.closest("button");
@@ -610,6 +716,7 @@ document.addEventListener("click", async (event) => {
     document.querySelectorAll(".admin-filter").forEach((item) => item.classList.toggle("active", item === button));
     render();
   }
+  if (button.dataset.moveEvent) await moveEvent(button.dataset.moveEvent, Number(button.dataset.direction));
   if (button.dataset.newEvent !== undefined) openEvent();
   if (button.dataset.close !== undefined) $("#eventDialog").close();
   if (button.dataset.edit) openEvent(events.find((item) => item.id === button.dataset.edit));
@@ -741,15 +848,18 @@ onAuthStateChanged(auth, async (currentUser) => {
     $("#adminApp").classList.add("hidden");
     return;
   }
-  if (!currentUser.emailVerified || !(await hasAccess(currentUser))) {
+  const resolvedRole = currentUser.emailVerified ? await accessRole(currentUser) : "";
+  if (!resolvedRole) {
     await signOut(auth);
     alert("Tài khoản này chưa được cấp quyền Admin IFA+A.");
     return;
   }
   user = currentUser;
-  isOwner = currentUser.email.toLowerCase() === OWNER_EMAIL;
+  currentRole = resolvedRole;
+  isOwner = currentRole === "owner";
+  isSubAdmin = currentRole === "subadmin";
   $("#accountEmail").textContent = currentUser.email;
-  $("#roleText").textContent = `Quyền hiện tại: ${isOwner ? "Chủ sở hữu" : "Admin"}`;
+  $("#roleText").textContent = `Quyền hiện tại: ${isOwner ? "Chủ sở hữu" : isSubAdmin ? "Sub-admin · chỉ quản lý sự kiện tự tạo" : "Admin"}`;
   $("#adminLogin").classList.add("hidden");
   $("#adminApp").classList.remove("hidden");
   $("#logoutBtn").classList.remove("hidden");
