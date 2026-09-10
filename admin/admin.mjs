@@ -103,13 +103,13 @@ function render() {
 
   const filteredEvents = adminStatusFilter === "all" ? events : events.filter((event) => eventState(event) === adminStatusFilter);
   $("#eventRows").innerHTML = filteredEvents.map((event) => {
-    const canDelete = (event.registeredCount || 0) === 0 && (isOwner || event.createdByUid === user.uid);
-    const reason = (event.registeredCount || 0) > 0 ? "Không thể xóa sự kiện đã có đăng ký" : "Chỉ xóa sự kiện do mình tạo";
+    const canDelete = isOwner || event.createdByUid === user.uid;
+    const reason = "Chỉ được xóa sự kiện do mình tạo";
     const [statusClass, statusText] = statusLabel(event);
     const state = eventState(event);
     const eventGroup = groups.find((item) => item.id === event.groupId);
     const groupText = event.groupId ? `${safe(event.groupName)}<br><small>${eventGroup?.unlimited ? "Không giới hạn lượt" : `Tối đa ${event.groupMaxRegistrations}/sự kiện`}</small>` : "";
-    return `<tr class="${state === "ended" ? "admin-event-ended" : ""}"><td><b>${safe(event.title)}</b><br><small>${safe(event.location)}</small></td><td>${groupText}</td><td>${safe(event.date)}<br>${safe(event.startTime || "")}</td><td>${event.registeredCount || 0}/${event.capacity}</td><td>${safe(event.createdByName || event.createdByEmail)}</td><td><span class="tag ${statusClass}">${statusText}</span></td><td><div class="actions"><button class="btn btn-small" data-edit="${event.id}">Sửa</button><button class="btn btn-small btn-soft" data-copy-event="${event.id}">Sao chép</button><button class="btn btn-small btn-danger" data-delete="${event.id}" ${canDelete ? "" : `disabled title='${reason}'`}>Xóa</button></div></td></tr>`;
+    return `<tr class="${state === "ended" ? "admin-event-ended" : ""}"><td><b>${safe(event.title)}</b><br><small class="admin-event-category">${safe(event.category || "Sự kiện Khoa")}</small><br><small>${safe(event.location)}</small></td><td>${groupText}</td><td>${safe(event.date)}<br>${safe(event.startTime || "")}</td><td>${event.registeredCount || 0}/${event.capacity}</td><td>${safe(event.createdByName || event.createdByEmail)}</td><td><span class="tag ${statusClass}">${statusText}</span></td><td><div class="actions"><button class="btn btn-small" data-edit="${event.id}">Sửa</button><button class="btn btn-small btn-soft" data-copy-event="${event.id}">Sao chép</button><button class="btn btn-small btn-danger" data-delete="${event.id}" ${canDelete ? "" : `disabled title='${reason}'`}>Xóa</button></div></td></tr>`;
   }).join("") || '<tr><td colspan="7" class="empty">Không có sự kiện ở trạng thái này.</td></tr>';
 
   $("#groupRows").innerHTML = groups.map((group) => {
@@ -249,7 +249,8 @@ function openEvent(event = null, copy = false) {
   $("#eventFormError").classList.add("hidden");
   $("#eventId").value = copy ? "" : (event?.id || "");
   $("#eventDialogTitle").textContent = copy ? "Sao chép sự kiện" : event ? "Chỉnh sửa sự kiện" : "Tạo sự kiện";
-  for (const key of ["title", "date", "location", "startTime", "endTime", "capacity", "status"]) if (event && $("#" + key)) $("#" + key).value = event[key] ?? "";
+  for (const key of ["title", "category", "date", "location", "startTime", "endTime", "capacity", "status"]) if (event && $("#" + key)) $("#" + key).value = event[key] ?? "";
+  if (!$("#category").value) $("#category").value = "Sự kiện Khoa";
   if (event?.status === "draft") $("#status").value = "hidden";
   if (event) {
     const opens = inputDateTimeParts(event.openAt);
@@ -260,6 +261,7 @@ function openEvent(event = null, copy = false) {
     $("#closeTime").value = closes.time;
   } else {
     $("#status").value = "open";
+    $("#category").value = "Sự kiện Khoa";
   }
   $("#eventAllowCancellation").checked = !!event?.allowCancellation;
   refreshGroupOptions(event?.groupId || "");
@@ -269,6 +271,9 @@ function openEvent(event = null, copy = false) {
   $("#newGroupUnlimited").checked = false;
   setLimitInputState($("#newGroupUnlimited"), $("#newGroupMax"));
   renderEventFaculties(event?.allowedFaculties?.length ? event.allowedFaculties : [DEFAULT_FACULTY]);
+  const canApplyToGroup = !copy && !!event?.id && !!event?.groupId;
+  $("#applyGroupFieldsOption").classList.toggle("hidden", !canApplyToGroup);
+  $("#applyGroupFields").checked = false;
   $("#eventDialog").showModal();
 }
 
@@ -347,7 +352,7 @@ $("#eventForm").onsubmit = async (event) => {
   error.classList.add("hidden");
   const id = $("#eventId").value;
   const data = {};
-  for (const key of ["title", "date", "location", "startTime", "endTime", "status"]) data[key] = $("#" + key).value.trim();
+  for (const key of ["title", "category", "date", "location", "startTime", "endTime", "status"]) data[key] = $("#" + key).value.trim();
   data.descriptionHtml = $("#descriptionEditor").innerHTML.trim();
   data.description = $("#descriptionEditor").innerText.trim();
   const openValue = dateTimeValue($("#openDate").value, $("#openTime").value.trim());
@@ -359,7 +364,7 @@ $("#eventForm").onsubmit = async (event) => {
   data.allowCancellation = $("#eventAllowCancellation").checked;
   data.updatedAt = serverTimestamp();
   try {
-    if (!data.title || !data.date || !data.location || !data.startTime || !Number.isInteger(data.capacity) || data.capacity < 1) throw Error("Vui lòng nhập đầy đủ các trường bắt buộc.");
+    if (!data.title || !data.category || !data.date || !data.location || !data.startTime || !Number.isInteger(data.capacity) || data.capacity < 1) throw Error("Vui lòng nhập đầy đủ các trường bắt buộc.");
     if (!validTime24(data.startTime) || (data.endTime && !validTime24(data.endTime))) throw Error("Giờ sự kiện phải theo định dạng 24 giờ HH:mm, ví dụ 08:30 hoặc 17:45.");
     if (!data.openAt || !data.closeAt) throw Error("Vui lòng chọn ngày và nhập giờ mở, đóng đăng ký theo định dạng 24 giờ HH:mm.");
     const eventStart = new Date(`${data.date}T${data.startTime}:00`).getTime();
@@ -407,12 +412,25 @@ $("#eventForm").onsubmit = async (event) => {
       if (!old) throw Error("Không tìm thấy sự kiện.");
       if (data.capacity < (old.registeredCount || 0)) throw Error("Sức chứa không thể nhỏ hơn số đã đăng ký.");
       if ((old.registeredCount || 0) > 0 && data.groupId !== (old.groupId || "")) throw Error("Không thể đổi nhóm khi sự kiện đã có người đăng ký.");
+      const applyToGroup = $("#applyGroupFields").checked && !!data.groupId;
+      const siblingEvents = applyToGroup ? events.filter((item) => item.groupId === data.groupId && item.id !== id) : [];
+      const invalidCapacityEvent = siblingEvents.find((item) => data.capacity < (item.registeredCount || 0));
+      if (invalidCapacityEvent) throw Error(`Không thể áp dụng sức chứa ${data.capacity}; sự kiện “${invalidCapacityEvent.title}” đã có ${invalidCapacityEvent.registeredCount || 0} người đăng ký.`);
+      if (applyToGroup && siblingEvents.length && !confirm(`Áp dụng mô tả, địa điểm, sức chứa và thời gian mở/đóng đăng ký cho ${siblingEvents.length} sự kiện khác trong nhóm “${data.groupName}”?`)) {
+        throw Error("Đã hủy thao tác áp dụng cho nhóm. Sự kiện chưa được lưu.");
+      }
       await updateDoc(doc(db, "events", id), data);
+      if (siblingEvents.length) {
+        const sharedData = { description: data.description, descriptionHtml: data.descriptionHtml, location: data.location, capacity: data.capacity, openAt: data.openAt, closeAt: data.closeAt, updatedAt: serverTimestamp() };
+        await Promise.all(siblingEvents.map((item) => updateDoc(doc(db, "events", item.id), sharedData)));
+      }
+      $("#eventDialog").close();
+      notice(siblingEvents.length ? `Đã lưu và cập nhật ${siblingEvents.length} sự kiện khác trong nhóm.` : "Đã lưu sự kiện.", "success");
     } else {
       await addDoc(collection(db, "events"), { ...data, registeredCount: 0, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdByName: user.displayName || "", createdAt: serverTimestamp() });
+      $("#eventDialog").close();
+      notice("Đã lưu sự kiện.", "success");
     }
-    $("#eventDialog").close();
-    notice("Đã lưu sự kiện.", "success");
   } catch (saveError) {
     error.textContent = saveError.message || "Không thể lưu sự kiện.";
     error.className = "notice error";
@@ -533,11 +551,32 @@ document.addEventListener("click", async (event) => {
   }
   if (button.dataset.delete) {
     const selected = events.find((item) => item.id === button.dataset.delete);
-    if (selected && confirm(`Xóa sự kiện “${selected.title}”?`)) try {
-      await deleteDoc(doc(db, "events", selected.id));
-      notice("Đã xóa sự kiện.", "success");
-    } catch (error) {
-      notice(error.message, "error");
+    if (selected) {
+      const registrations = regs.filter((item) => item.eventId === selected.id);
+      const warning = registrations.length
+        ? `Sự kiện “${selected.title}” đang có ${registrations.length} người đăng ký. Khi tiếp tục, toàn bộ lượt đăng ký của sự kiện này cũng sẽ bị xóa. Thao tác không thể hoàn tác.`
+        : `Xóa sự kiện “${selected.title}”? Thao tác không thể hoàn tác.`;
+      if (!confirm(warning)) return;
+      if (registrations.length) {
+        const verification = prompt(`Để xác nhận, nhập chính xác tên sự kiện:\n${selected.title}`);
+        if (verification !== selected.title) {
+          notice("Tên xác nhận không khớp. Sự kiện chưa bị xóa.", "error");
+          return;
+        }
+      }
+      button.disabled = true;
+      try {
+        for (let index = 0; index < registrations.length; index += 1) {
+          button.textContent = `Đang xóa ${index + 1}/${registrations.length}…`;
+          await removeRegistration(registrations[index]);
+        }
+        await deleteDoc(doc(db, "events", selected.id));
+        notice(registrations.length ? `Đã xóa sự kiện và ${registrations.length} lượt đăng ký liên quan.` : "Đã xóa sự kiện.", "success");
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = "Xóa";
+        notice(`Không thể hoàn tất xóa sự kiện: ${error.message}`, "error");
+      }
     }
   }
   if (button.dataset.deleteRegistration) {
