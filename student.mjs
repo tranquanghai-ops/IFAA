@@ -354,16 +354,19 @@ function render() {
 
   const grouped = new Map();
   list.forEach((event) => {
-    const key = event.groupId || "__ungrouped__";
+    const key = isExternalEvent(event) ? "__external__" : (event.groupId || "__ungrouped__");
     if (!grouped.has(key)) grouped.set(key, []);
     grouped.get(key).push(event);
   });
   let tone = 0;
   grid.innerHTML = [...grouped.entries()].sort(([a], [b]) => {
+    if (a === "__external__") return 1;
+    if (b === "__external__") return -1;
     if (a === "__ungrouped__") return 1;
     if (b === "__ungrouped__") return -1;
     return groupPosition(groups.get(a)) - groupPosition(groups.get(b));
   }).map(([groupId, items]) => {
+    if (groupId === "__external__") return `<section class="event-group-block external-event-section"><div class="event-group-heading"><div><span class="event-group-kicker">THÔNG TIN SỰ KIỆN</span><h3>Sự kiện Trường và Khoa khác</h3></div><span>${items.length} sự kiện</span></div><div class="event-grid">${items.map(eventCard).join("")}</div></section>`;
     if (groupId === "__ungrouped__") return `<div class="event-grid ungrouped-events">${items.map(eventCard).join("")}</div>`;
     const group = groups.get(groupId);
     const toneClass = `group-tone-${tone++ % 5}`;
