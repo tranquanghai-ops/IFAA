@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
-import { getFirestore, collection, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, serverTimestamp, Timestamp, runTransaction } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
+import { getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit, startAfter, serverTimestamp, Timestamp, runTransaction } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
 import { firebaseConfig, OWNER_EMAIL } from "../firebase-config.mjs";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
@@ -25,6 +25,14 @@ let admins = [];
 let groups = [];
 let settings = { faculties: [DEFAULT_FACULTY] };
 let adminStatusFilter = "all";
+let adminEventView = localStorage.getItem("ifaa-admin-event-view") === "list" ? "list" : "cards";
+const REGISTRATION_PAGE_SIZE = 20;
+let registrationPageIndex = 0;
+let registrationPageCursors = [null];
+let registrationHasNext = false;
+let registrationLoading = false;
+let registrationLoadedEventId = "";
+let registrationRequestId = 0;
 
 function shareCode(value) {
   return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/gi, "d").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60).toUpperCase();
@@ -204,10 +212,13 @@ function render() {
   $("#metricOpen").textContent = counts.open;
   $("#metricEnded").textContent = counts.ended;
   $("#metricHidden").textContent = counts.hidden;
-  $("#metricRegs").textContent = regs.length;
+  $("#metricRegs").textContent = events.reduce((total, item) => total + Number(item.registeredCount || 0), 0);
 
-  const filteredEvents = (adminStatusFilter === "all" ? events : events.filter((event) => eventState(event) === adminStatusFilter))
+  const filteredEvents = (adminStatusFilter === "all" ? events.filter((event) => eventState(event) !== "hidden") : events.filter((event) => eventState(event) === adminStatusFilter))
     .slice().sort((a, b) => Number(isExternalEvent(a)) - Number(isExternalEvent(b)) || eventPosition(a) - eventPosition(b));
+  const orderedGroups = groups.slice().sort((a, b) => groupPosition(a) - groupPosition(b));
+  $("#eventRows").className = `admin-event-groups view-${adminEventView}`;
+  document.querySelectorAll("[data-event-view]").forEach((button) => button.classList.toggle("active", button.dataset.eventView === adminEventView));
   const groupedAdminEvents = new Map();
   filteredEvents.forEach((event) => {
     const key = event.groupId || "__ungrouped__";
@@ -239,10 +250,11 @@ function render() {
     const title = groupId === "__ungrouped__" ? "Sự kiện không thuộc nhóm" : (eventGroup?.name || items[0]?.groupName || "Nhóm sự kiện");
     const limit = groupId === "__ungrouped__" ? "" : eventGroup?.unlimited ? "" : `Tối đa ${eventGroup?.maxRegistrations || items[0]?.groupMaxRegistrations || 1}/sự kiện`;
     const toneClass = groupId === "__ungrouped__" ? "admin-group-ungrouped" : `group-tone-${adminTone++ % 5}`;
-    return `<section class="admin-event-group ${toneClass}"><div class="admin-event-group-head"><div><span>${groupId === "__ungrouped__" ? "SỰ KIỆN RIÊNG" : "NHÓM SỰ KIỆN"}</span><h3>${safe(title)}</h3>${limit ? `<small>${safe(limit)}</small>` : ""}</div><b>${items.length} sự kiện</b></div><div class="event-grid admin-event-grid">${items.map((item) => adminEventCard(item, items)).join("")}</div></section>`;
+    const groupIndex = orderedGroups.findIndex((item) => item.id === groupId);
+    const groupMove = groupId === "__ungrouped__" ? `<b>${items.length} sự kiện</b>` : `<div class="admin-group-move"><b>${items.length} sự kiện</b><button class="btn btn-small" data-move-group="${groupId}" data-direction="-1" ${groupIndex <= 0 ? "disabled" : ""}>↑ Nhóm</button><button class="btn btn-small" data-move-group="${groupId}" data-direction="1" ${groupIndex < 0 || groupIndex >= orderedGroups.length - 1 ? "disabled" : ""}>↓ Nhóm</button></div>`;
+    return `<section class="admin-event-group ${toneClass}"><div class="admin-event-group-head"><div><span>${groupId === "__ungrouped__" ? "SỰ KIỆN RIÊNG" : "NHÓM SỰ KIỆN"}</span><h3>${safe(title)}</h3>${limit ? `<small>${safe(limit)}</small>` : ""}</div>${groupMove}</div><div class="event-grid admin-event-grid">${items.map((item) => adminEventCard(item, items)).join("")}</div></section>`;
   }).join("") : '<div class="card empty">Không có sự kiện ở trạng thái này.</div>';
 
-  const orderedGroups = groups.slice().sort((a, b) => groupPosition(a) - groupPosition(b));
   $("#groupRows").innerHTML = orderedGroups.map((group, groupIndex) => {
     const groupedItems = events.filter((item) => item.groupId === group.id);
     const eventCount = groupedItems.length;
@@ -254,29 +266,105 @@ function render() {
     return `<tr><td><b>${safe(group.name)}</b><br><small>Mã: ${safe(groupCode(group))}</small></td><td>${limit}</td><td>${eventCount}<br><small>${groupState}</small></td><td>${visibility}</td><td><div class="actions"><button class="btn btn-small btn-soft" data-copy-group-link="${group.id}">Sao chép liên kết</button><button class="btn btn-small btn-calendar" data-calendar-group="${group.id}">＋ Lịch cả nhóm</button></div></td><td><div class="actions"><button class="btn btn-small" data-move-group="${group.id}" data-direction="-1" ${groupIndex <= 0 ? "disabled" : ""}>↑</button><button class="btn btn-small" data-move-group="${group.id}" data-direction="1" ${groupIndex >= orderedGroups.length - 1 ? "disabled" : ""}>↓</button><button class="btn btn-small" data-edit-group="${group.id}">Sửa nhóm</button></div></td></tr>`;
   }).join("") || '<tr><td colspan="6" class="empty">Chưa có nhóm sự kiện.</td></tr>';
 
-  const selectedFilter = $("#eventFilter").value;
-  $("#eventFilter").innerHTML = '<option value="">Tất cả sự kiện</option>' + events.map((event) => `<option value="${event.id}">${safe(event.title)}</option>`).join("");
-  if (events.some((event) => event.id === selectedFilter)) $("#eventFilter").value = selectedFilter;
-  const selectedGroup = $("#groupFilter").value;
-  $("#groupFilter").innerHTML = '<option value="">Tất cả nhóm</option>' + groups.map((group) => `<option value="${group.id}">${safe(group.name)}</option>`).join("");
-  if (groups.some((group) => group.id === selectedGroup)) $("#groupFilter").value = selectedGroup;
+  refreshRegistrationFilters();
   renderRegs();
   if (isOwner) $("#adminRows").innerHTML = admins.map((admin) => `<tr><td>${safe(admin.name || "")}</td><td>${safe(admin.email)}</td><td><select class="admin-role-select" data-admin-role="${safe(admin.email)}"><option value="admin" ${(admin.role || "admin") === "admin" ? "selected" : ""}>Admin</option><option value="subadmin" ${admin.role === "subadmin" ? "selected" : ""}>Sub-admin</option></select></td><td>${ts(admin.addedAt)}</td><td><button class="btn btn-small btn-danger" data-remove-admin="${safe(admin.email)}">Xóa</button></td></tr>`).join("");
 }
 
+function refreshRegistrationFilters() {
+  const selectedGroup = $("#groupFilter").value;
+  const selectedEvent = $("#eventFilter").value;
+  $("#groupFilter").innerHTML = '<option value="">Tất cả nhóm sự kiện</option>' + groups.slice().sort((a, b) => groupPosition(a) - groupPosition(b)).map((group) => `<option value="${group.id}">${safe(group.name)}</option>`).join("");
+  if (groups.some((group) => group.id === selectedGroup)) $("#groupFilter").value = selectedGroup;
+  const activeGroup = $("#groupFilter").value;
+  const availableEvents = events.filter((event) => !activeGroup || event.groupId === activeGroup).slice().sort((a, b) => eventPosition(a) - eventPosition(b));
+  $("#eventFilter").innerHTML = '<option value="">— Chọn sự kiện để tải danh sách —</option>' + availableEvents.map((event) => `<option value="${event.id}">${safe(event.title)} · ${safe(event.date || "")}</option>`).join("");
+  if (availableEvents.some((event) => event.id === selectedEvent)) $("#eventFilter").value = selectedEvent;
+}
+
 function filteredRegistrations() {
+  return registrationLoadedEventId === $("#eventFilter").value ? regs : [];
+}
+
+function resetRegistrationPage() {
+  regs = [];
+  registrationPageIndex = 0;
+  registrationPageCursors = [null];
+  registrationHasNext = false;
+  registrationLoadedEventId = "";
+}
+
+async function loadRegistrationPage(direction = 0) {
   const eventId = $("#eventFilter").value;
-  const groupId = $("#groupFilter").value;
-  if (eventId) return regs.filter((registration) => registration.eventId === eventId);
-  if (groupId) return regs.filter((registration) => registration.groupId === groupId);
-  return regs;
+  if (!eventId) {
+    resetRegistrationPage();
+    renderRegs();
+    return;
+  }
+  let targetPage = direction === 0 ? 0 : registrationPageIndex + direction;
+  if (targetPage < 0 || (direction > 0 && !registrationHasNext)) return;
+  if (direction === 0) {
+    registrationPageCursors = [null];
+    registrationPageIndex = 0;
+  }
+  const cursor = registrationPageCursors[targetPage];
+  if (targetPage > 0 && !cursor) return;
+  const requestId = ++registrationRequestId;
+  registrationLoading = true;
+  renderRegs();
+  try {
+    const clauses = [where("eventId", "==", eventId)];
+    if (cursor) clauses.push(startAfter(cursor));
+    clauses.push(limit(REGISTRATION_PAGE_SIZE + 1));
+    const snapshot = await getDocs(query(collection(db, "registrations"), ...clauses));
+    if (requestId !== registrationRequestId || $("#eventFilter").value !== eventId) return;
+    const visibleDocs = snapshot.docs.slice(0, REGISTRATION_PAGE_SIZE);
+    regs = visibleDocs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => (millis(b.createdAt) || 0) - (millis(a.createdAt) || 0));
+    registrationPageIndex = targetPage;
+    registrationHasNext = snapshot.docs.length > REGISTRATION_PAGE_SIZE;
+    registrationLoadedEventId = eventId;
+    if (registrationHasNext && visibleDocs.length) registrationPageCursors[targetPage + 1] = visibleDocs[visibleDocs.length - 1];
+  } catch (error) {
+    if (requestId === registrationRequestId) {
+      resetRegistrationPage();
+      notice(error.message || "Không thể tải danh sách đăng ký.", "error");
+    }
+  } finally {
+    if (requestId === registrationRequestId) {
+      registrationLoading = false;
+      renderRegs();
+    }
+  }
 }
 
 function renderRegs() {
-  const list = filteredRegistrations();
   const eventId = $("#eventFilter").value;
-  $("#resetEventBtn").disabled = !eventId || !list.length;
-  $("#regRows").innerHTML = list.map((registration, index) => `<tr><td class="col-stt">${index + 1}</td><td class="col-identifier"><b>${safe(registration.identifier || registration.mssv)}</b></td><td>${safe(registration.name)}</td><td>${safe(registration.phone)}</td><td>${safe(registration.faculty)}</td><td>${safe(registration.participantType || "Sinh viên")}</td><td>${safe(registration.eventTitle)}</td><td>${ts(registration.createdAt)}</td><td><button class="btn btn-small btn-danger" data-delete-registration="${registration.id}">Xóa</button></td></tr>`).join("") || '<tr><td colspan="9" class="empty">Không có dữ liệu đăng ký.</td></tr>';
+  const list = filteredRegistrations();
+  const selectedEvent = events.find((item) => item.id === eventId);
+  $("#resetEventBtn").disabled = !eventId || Number(selectedEvent?.registeredCount || 0) < 1;
+  $("#exportBtn").disabled = !eventId && !$("#groupFilter").value;
+  $("#registrationPagination").classList.toggle("hidden", !eventId || registrationLoading || (!list.length && !registrationHasNext));
+  $("#registrationPrev").disabled = registrationPageIndex <= 0 || registrationLoading;
+  $("#registrationNext").disabled = !registrationHasNext || registrationLoading;
+  $("#registrationPageText").textContent = `Trang ${registrationPageIndex + 1}`;
+  if (!eventId) {
+    $("#registrationLoadHint").textContent = "Danh sách chưa được tải để tiết kiệm lượt đọc dữ liệu.";
+    $("#regRows").innerHTML = '<tr><td colspan="9" class="empty">Vui lòng chọn một sự kiện để xem danh sách đăng ký.</td></tr>';
+    return;
+  }
+  if (registrationLoading) {
+    $("#registrationLoadHint").textContent = "Đang tải tối đa 20 lượt đăng ký…";
+    $("#regRows").innerHTML = '<tr><td colspan="9" class="empty">Đang tải danh sách đăng ký…</td></tr>';
+    return;
+  }
+  $("#registrationLoadHint").textContent = list.length ? `Đang hiển thị ${list.length} người ở trang ${registrationPageIndex + 1}.` : "Sự kiện này chưa có người đăng ký.";
+  $("#regRows").innerHTML = list.map((registration, index) => `<tr><td class="col-stt">${registrationPageIndex * REGISTRATION_PAGE_SIZE + index + 1}</td><td class="col-identifier"><b>${safe(registration.identifier || registration.mssv)}</b></td><td>${safe(registration.name)}</td><td>${safe(registration.phone)}</td><td>${safe(registration.faculty)}</td><td>${safe(registration.participantType || "Sinh viên")}</td><td>${safe(registration.eventTitle)}</td><td>${ts(registration.createdAt)}</td><td><button class="btn btn-small btn-danger" data-delete-registration="${registration.id}">Xóa</button></td></tr>`).join("") || '<tr><td colspan="9" class="empty">Sự kiện này chưa có người đăng ký.</td></tr>';
+}
+
+async function fetchRegistrations(field, value) {
+  if (!value) return [];
+  const snapshot = await getDocs(query(collection(db, "registrations"), where(field, "==", value)));
+  return snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => (millis(b.createdAt) || 0) - (millis(a.createdAt) || 0));
 }
 
 async function removeRegistration(registration) {
@@ -364,13 +452,7 @@ function listen() {
     render();
   }, (error) => notice(error.message, "error"));
 
-  const registrationsQuery = isSubAdmin
-    ? query(collection(db, "registrations"), where("eventCreatorUid", "==", user.uid))
-    : query(collection(db, "registrations"), orderBy("createdAt", "desc"));
-  onSnapshot(registrationsQuery, (snapshot) => {
-    regs = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => (millis(b.createdAt) || 0) - (millis(a.createdAt) || 0));
-    render();
-  }, (error) => notice(isSubAdmin ? "Sub-admin chỉ xem được đăng ký mới thuộc sự kiện do mình tạo." : error.message, "error"));
+  // Danh sách đăng ký chỉ được truy vấn sau khi Admin chọn một sự kiện.
 
   if (isOwner) onSnapshot(collection(db, "admins"), (snapshot) => {
     admins = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
@@ -707,8 +789,9 @@ $("#groupForm").onsubmit = async (event) => {
     if (!code) throw Error("Mã liên kết nhóm không hợp lệ.");
     if (groups.some((item) => item.id !== id && groupCode(item) === code)) throw Error(`Mã liên kết ${code} đã được một nhóm khác sử dụng.`);
     if (id && !unlimited) {
+      const groupRegistrations = await fetchRegistrations("groupId", id);
       const countsByUser = new Map();
-      regs.filter((item) => item.groupId === id).forEach((item) => countsByUser.set(item.uid || item.email, (countsByUser.get(item.uid || item.email) || 0) + 1));
+      groupRegistrations.forEach((item) => countsByUser.set(item.uid || item.email, (countsByUser.get(item.uid || item.email) || 0) + 1));
       const highestCurrentCount = Math.max(0, ...countsByUser.values());
       if (maxRegistrations < highestCurrentCount) throw Error(`Không thể giảm giới hạn xuống ${maxRegistrations}; hiện có người đã đăng ký ${highestCurrentCount} sự kiện trong nhóm.`);
     }
@@ -835,6 +918,11 @@ document.addEventListener("click", async (event) => {
     document.querySelectorAll(".admin-filter").forEach((item) => item.classList.toggle("active", item === button));
     render();
   }
+  if (button.dataset.eventView) {
+    adminEventView = button.dataset.eventView === "list" ? "list" : "cards";
+    localStorage.setItem("ifaa-admin-event-view", adminEventView);
+    render();
+  }
   if (button.dataset.moveGroup) await moveGroup(button.dataset.moveGroup, Number(button.dataset.direction));
   if (button.dataset.moveEvent) await moveEvent(button.dataset.moveEvent, Number(button.dataset.direction));
   if (button.dataset.newEvent !== undefined) openEvent();
@@ -862,9 +950,9 @@ document.addEventListener("click", async (event) => {
   if (button.dataset.delete) {
     const selected = events.find((item) => item.id === button.dataset.delete);
     if (selected) {
-      const registrations = regs.filter((item) => item.eventId === selected.id);
-      const warning = registrations.length
-        ? `Sự kiện “${selected.title}” đang có ${registrations.length} người đăng ký. Khi tiếp tục, toàn bộ lượt đăng ký của sự kiện này cũng sẽ bị xóa. Thao tác không thể hoàn tác.`
+      const registeredCount = Number(selected.registeredCount || 0);
+      const warning = registeredCount
+        ? `Sự kiện “${selected.title}” đang có ${registeredCount} người đăng ký. Khi tiếp tục, toàn bộ lượt đăng ký của sự kiện này cũng sẽ bị xóa. Thao tác không thể hoàn tác.`
         : `Xóa sự kiện “${selected.title}”? Thao tác không thể hoàn tác.`;
       if (!confirm(warning)) return;
       const verification = prompt('Để xác nhận xóa sự kiện, nhập chữ XÓA:');
@@ -873,7 +961,9 @@ document.addEventListener("click", async (event) => {
         return;
       }
       button.disabled = true;
+      button.textContent = "Đang tải dữ liệu…";
       try {
+        const registrations = await fetchRegistrations("eventId", selected.id);
         for (let index = 0; index < registrations.length; index += 1) {
           button.textContent = `Đang xóa ${index + 1}/${registrations.length}…`;
           await removeRegistration(registrations[index]);
@@ -892,6 +982,7 @@ document.addEventListener("click", async (event) => {
     if (registration && confirm(`Xóa đăng ký của ${registration.name || registration.email} khỏi sự kiện “${registration.eventTitle}”?`)) try {
       button.disabled = true;
       await removeRegistration(registration);
+      await loadRegistrationPage(0);
       notice("Đã xóa thành viên khỏi sự kiện.", "success");
     } catch (error) {
       button.disabled = false;
@@ -910,26 +1001,38 @@ document.addEventListener("click", async (event) => {
   }
 });
 
-$("#eventFilter").onchange = () => {
-  if ($("#eventFilter").value) $("#groupFilter").value = "";
-  renderRegs();
+$("#eventFilter").onchange = async () => {
+  resetRegistrationPage();
+  await loadRegistrationPage(0);
 };
 $("#groupFilter").onchange = () => {
-  if ($("#groupFilter").value) $("#eventFilter").value = "";
+  $("#eventFilter").value = "";
+  resetRegistrationPage();
+  refreshRegistrationFilters();
   renderRegs();
 };
+$("#registrationPrev").onclick = () => loadRegistrationPage(-1);
+$("#registrationNext").onclick = () => loadRegistrationPage(1);
+
 $("#resetEventBtn").onclick = async () => {
   const eventId = $("#eventFilter").value;
   const selectedEvent = events.find((item) => item.id === eventId);
-  const list = regs.filter((registration) => registration.eventId === eventId);
-  if (!selectedEvent || !list.length || !confirm(`Xóa toàn bộ ${list.length} lượt đăng ký của sự kiện “${selectedEvent.title}”? Thao tác này không thể hoàn tác.`)) return;
+  if (!selectedEvent) return;
   const button = $("#resetEventBtn");
   button.disabled = true;
+  button.textContent = "Đang kiểm tra…";
   try {
+    const list = await fetchRegistrations("eventId", eventId);
+    if (!list.length) {
+      notice("Sự kiện này không có dữ liệu đăng ký.", "success");
+      return;
+    }
+    if (!confirm(`Xóa toàn bộ ${list.length} lượt đăng ký của sự kiện “${selectedEvent.title}”? Thao tác này không thể hoàn tác.`)) return;
     for (let index = 0; index < list.length; index += 1) {
       button.textContent = `Đang xóa ${index + 1}/${list.length}…`;
       await removeRegistration(list[index]);
     }
+    await loadRegistrationPage(0);
     notice(`Đã xóa toàn bộ ${list.length} lượt đăng ký.`, "success");
   } catch (error) {
     notice(`Đã dừng khi gặp lỗi: ${error.message}`, "error");
@@ -938,25 +1041,41 @@ $("#resetEventBtn").onclick = async () => {
     renderRegs();
   }
 };
-$("#exportBtn").onclick = () => {
+
+$("#exportBtn").onclick = async () => {
   const filter = $("#eventFilter").value;
   const groupFilter = $("#groupFilter").value;
-  const list = filteredRegistrations();
-  const rows = list.map((registration, index) => {
-    const selectedRegistrationEvent = events.find((event) => event.id === registration.eventId);
-    const row = { STT: index + 1, "MSSV/Mã số": registration.identifier || registration.mssv, "Họ tên": registration.name, "Số điện thoại": registration.phone, "Khoa/Đơn vị": registration.faculty, "Đối tượng": registration.participantType || "Sinh viên", Email: registration.email, "Sự kiện": registration.eventTitle, "Ngày sự kiện": registration.eventDate, "Giờ bắt đầu": selectedRegistrationEvent?.startTime || "", "Giờ kết thúc": selectedRegistrationEvent?.endTime || "", "Buổi": dayPeriod(selectedRegistrationEvent?.startTime), "Thời gian đăng ký": ts(registration.createdAt) };
-    if (!groupFilter) row["Nhóm sự kiện"] = registration.groupName || "Không nhóm";
-    return row;
-  });
-  const selectedEvent = events.find((event) => event.id === filter);
-  const selectedGroup = groups.find((group) => group.id === groupFilter);
-  const exportName = selectedEvent?.title || (selectedGroup ? `Nhom_${selectedGroup.name}` : "Tat_ca_su_kien");
-  const cleanName = exportName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 70) || "Su_kien";
-  const workbook = XLSX.utils.book_new();
-  const worksheet = XLSX.utils.json_to_sheet(rows);
-  worksheet["!cols"] = [{ wch: 6 }, { wch: 15 }, { wch: 24 }, { wch: 16 }, { wch: 28 }, { wch: 14 }, { wch: 32 }, { wch: 14 }, { wch: 13 }, { wch: 13 }, { wch: 14 }, { wch: 20 }];
-  XLSX.utils.book_append_sheet(workbook, worksheet, (selectedEvent?.title || selectedGroup?.name || "Đăng ký").slice(0, 31));
-  XLSX.writeFile(workbook, `IFAA_${cleanName}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  if (!filter && !groupFilter) {
+    notice("Vui lòng chọn một sự kiện hoặc nhóm sự kiện trước khi xuất Excel.", "error");
+    return;
+  }
+  const button = $("#exportBtn");
+  button.disabled = true;
+  button.textContent = "Đang tải dữ liệu…";
+  try {
+    const list = filter ? await fetchRegistrations("eventId", filter) : await fetchRegistrations("groupId", groupFilter);
+    const rows = list.map((registration, index) => {
+      const selectedRegistrationEvent = events.find((event) => event.id === registration.eventId);
+      const row = { STT: index + 1, "MSSV/Mã số": registration.identifier || registration.mssv, "Họ tên": registration.name, "Số điện thoại": registration.phone, "Khoa/Đơn vị": registration.faculty, "Đối tượng": registration.participantType || "Sinh viên", Email: registration.email, "Sự kiện": registration.eventTitle, "Ngày sự kiện": registration.eventDate, "Giờ bắt đầu": selectedRegistrationEvent?.startTime || "", "Giờ kết thúc": selectedRegistrationEvent?.endTime || "", "Buổi": dayPeriod(selectedRegistrationEvent?.startTime), "Thời gian đăng ký": ts(registration.createdAt) };
+      if (!groupFilter) row["Nhóm sự kiện"] = registration.groupName || "Không nhóm";
+      return row;
+    });
+    const selectedEvent = events.find((event) => event.id === filter);
+    const selectedGroup = groups.find((group) => group.id === groupFilter);
+    const exportName = selectedEvent?.title || (selectedGroup ? `Nhom_${selectedGroup.name}` : "Danh_sach_dang_ky");
+    const cleanName = exportName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 70) || "Su_kien";
+    const workbook = XLSX.utils.book_new();
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    worksheet["!cols"] = [{ wch: 6 }, { wch: 15 }, { wch: 24 }, { wch: 16 }, { wch: 28 }, { wch: 14 }, { wch: 32 }, { wch: 14 }, { wch: 13 }, { wch: 13 }, { wch: 14 }, { wch: 20 }];
+    XLSX.utils.book_append_sheet(workbook, worksheet, (selectedEvent?.title || selectedGroup?.name || "Đăng ký").slice(0, 31));
+    XLSX.writeFile(workbook, `IFAA_${cleanName}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    notice(`Đã xuất ${list.length} lượt đăng ký.`, "success");
+  } catch (error) {
+    notice(error.message || "Không thể xuất dữ liệu.", "error");
+  } finally {
+    button.textContent = "↓ Xuất Excel";
+    renderRegs();
+  }
 };
 
 $("#loginBtn").onclick = () => signInWithPopup(auth, provider);
