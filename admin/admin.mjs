@@ -102,15 +102,27 @@ function render() {
   $("#metricRegs").textContent = regs.length;
 
   const filteredEvents = adminStatusFilter === "all" ? events : events.filter((event) => eventState(event) === adminStatusFilter);
-  $("#eventRows").innerHTML = filteredEvents.map((event) => {
+  const adminEventRow = (event) => {
     const canDelete = isOwner || event.createdByUid === user.uid;
     const reason = "Chỉ được xóa sự kiện do mình tạo";
     const [statusClass, statusText] = statusLabel(event);
     const state = eventState(event);
-    const eventGroup = groups.find((item) => item.id === event.groupId);
-    const groupText = event.groupId ? `${safe(event.groupName)}<br><small>${eventGroup?.unlimited ? "Không giới hạn lượt" : `Tối đa ${event.groupMaxRegistrations}/sự kiện`}</small>` : "";
-    return `<tr class="${state === "ended" ? "admin-event-ended" : ""}"><td><b>${safe(event.title)}</b><br><small class="admin-event-category">${safe(event.category || "Sự kiện Khoa")}</small><br><small>${safe(event.location)}</small></td><td>${groupText}</td><td>${safe(event.date)}<br>${safe(event.startTime || "")}</td><td>${event.registeredCount || 0}/${event.capacity}</td><td>${safe(event.createdByName || event.createdByEmail)}</td><td><span class="tag ${statusClass}">${statusText}</span></td><td><div class="actions"><button class="btn btn-small" data-edit="${event.id}">Sửa</button><button class="btn btn-small btn-soft" data-copy-event="${event.id}">Sao chép</button><button class="btn btn-small btn-danger" data-delete="${event.id}" ${canDelete ? "" : `disabled title='${reason}'`}>Xóa</button></div></td></tr>`;
-  }).join("") || '<tr><td colspan="7" class="empty">Không có sự kiện ở trạng thái này.</td></tr>';
+    return `<tr class="${state === "ended" ? "admin-event-ended" : ""}"><td><b>${safe(event.title)}</b><br><small class="admin-event-category">${safe(event.category || "Sự kiện Khoa")}</small><br><small>${safe(event.location)}</small></td><td>${safe(event.date)}<br>${safe(event.startTime || "")}</td><td>${event.registeredCount || 0}/${event.capacity}</td><td>${safe(event.createdByName || event.createdByEmail)}</td><td><span class="tag ${statusClass}">${statusText}</span></td><td><div class="actions"><button class="btn btn-small" data-edit="${event.id}">Sửa</button><button class="btn btn-small btn-soft" data-copy-event="${event.id}">Sao chép</button><button class="btn btn-small btn-danger" data-delete="${event.id}" ${canDelete ? "" : `disabled title='${reason}'`}>Xóa</button></div></td></tr>`;
+  };
+  const groupedAdminEvents = new Map();
+  filteredEvents.forEach((event) => {
+    const key = event.groupId || "__ungrouped__";
+    if (!groupedAdminEvents.has(key)) groupedAdminEvents.set(key, []);
+    groupedAdminEvents.get(key).push(event);
+  });
+  let adminTone = 0;
+  $("#eventRows").innerHTML = filteredEvents.length ? [...groupedAdminEvents.entries()].map(([groupId, items]) => {
+    const eventGroup = groups.find((item) => item.id === groupId);
+    const title = groupId === "__ungrouped__" ? "Sự kiện không thuộc nhóm" : (eventGroup?.name || items[0]?.groupName || "Nhóm sự kiện");
+    const limit = groupId === "__ungrouped__" ? "Không áp dụng giới hạn nhóm" : eventGroup?.unlimited ? "Không giới hạn lượt đăng ký" : `Tối đa ${eventGroup?.maxRegistrations || items[0]?.groupMaxRegistrations || 1}/sự kiện`;
+    const toneClass = groupId === "__ungrouped__" ? "admin-group-ungrouped" : `group-tone-${adminTone++ % 5}`;
+    return `<section class="admin-event-group ${toneClass}"><div class="admin-event-group-head"><div><span>${groupId === "__ungrouped__" ? "KHÔNG NHÓM" : "NHÓM SỰ KIỆN"}</span><h3>${safe(title)}</h3><small>${safe(limit)}</small></div><b>${items.length} sự kiện</b></div><div class="table-wrap"><table><thead><tr><th>Sự kiện</th><th>Thời gian</th><th>Sức chứa</th><th>Người tạo</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>${items.map(adminEventRow).join("")}</tbody></table></div></section>`;
+  }).join("") : '<div class="card empty">Không có sự kiện ở trạng thái này.</div>';
 
   $("#groupRows").innerHTML = groups.map((group) => {
     const eventCount = events.filter((item) => item.groupId === group.id).length;
@@ -273,10 +285,7 @@ function openEvent(event = null, copy = false) {
   renderEventFaculties(event?.allowedFaculties?.length ? event.allowedFaculties : [DEFAULT_FACULTY]);
   const canApplyToGroup = !copy && !!event?.id && !!event?.groupId;
   $("#applyGroupFieldsOption").classList.toggle("hidden", !canApplyToGroup);
-  $("#applyGroupFields").checked = false;
-  $("#applyGroupFieldsBtn").setAttribute("aria-pressed", "false");
-  $("#applyGroupFieldsBtn").classList.remove("active");
-  $("#applyGroupFieldsBtn").textContent = "Áp dụng khi lưu cho cả nhóm";
+  document.querySelectorAll(".group-sync-field").forEach((input) => { input.checked = false; });
   $("#eventDialog").showModal();
 }
 
@@ -290,14 +299,6 @@ $("#groupId").onchange = () => {
 
 $("#groupUnlimited").onchange = () => setLimitInputState($("#groupUnlimited"), $("#groupMaxRegistrations"), $("#groupLimitHelp"));
 $("#newGroupUnlimited").onchange = () => setLimitInputState($("#newGroupUnlimited"), $("#newGroupMax"));
-$("#applyGroupFieldsBtn").onclick = () => {
-  const checkbox = $("#applyGroupFields");
-  checkbox.checked = !checkbox.checked;
-  $("#applyGroupFieldsBtn").setAttribute("aria-pressed", String(checkbox.checked));
-  $("#applyGroupFieldsBtn").classList.toggle("active", checkbox.checked);
-  $("#applyGroupFieldsBtn").textContent = checkbox.checked ? "✓ Sẽ áp dụng khi lưu" : "Áp dụng khi lưu cho cả nhóm";
-};
-
 let descriptionRange = null;
 const descriptionEditor = $("#descriptionEditor");
 
@@ -422,20 +423,28 @@ $("#eventForm").onsubmit = async (event) => {
       if (!old) throw Error("Không tìm thấy sự kiện.");
       if (data.capacity < (old.registeredCount || 0)) throw Error("Sức chứa không thể nhỏ hơn số đã đăng ký.");
       if ((old.registeredCount || 0) > 0 && data.groupId !== (old.groupId || "")) throw Error("Không thể đổi nhóm khi sự kiện đã có người đăng ký.");
-      const applyToGroup = $("#applyGroupFields").checked && !!data.groupId;
-      const siblingEvents = applyToGroup ? events.filter((item) => item.groupId === data.groupId && item.id !== id) : [];
-      const invalidCapacityEvent = siblingEvents.find((item) => data.capacity < (item.registeredCount || 0));
-      if (invalidCapacityEvent) throw Error(`Không thể áp dụng sức chứa ${data.capacity}; sự kiện “${invalidCapacityEvent.title}” đã có ${invalidCapacityEvent.registeredCount || 0} người đăng ký.`);
-      if (applyToGroup && siblingEvents.length && !confirm(`Áp dụng mô tả, địa điểm, sức chứa và thời gian mở/đóng đăng ký cho ${siblingEvents.length} sự kiện khác trong nhóm “${data.groupName}”?`)) {
+      const syncFields = [...document.querySelectorAll(".group-sync-field:checked")].map((input) => input.value);
+      const siblingEvents = syncFields.length && data.groupId ? events.filter((item) => item.groupId === data.groupId && item.id !== id) : [];
+      if (syncFields.includes("capacity")) {
+        const invalidCapacityEvent = siblingEvents.find((item) => data.capacity < (item.registeredCount || 0));
+        if (invalidCapacityEvent) throw Error(`Không thể áp dụng sức chứa ${data.capacity}; sự kiện “${invalidCapacityEvent.title}” đã có ${invalidCapacityEvent.registeredCount || 0} người đăng ký.`);
+      }
+      const syncLabels = { description: "Mô tả", location: "Địa điểm", capacity: "Sức chứa", openAt: "Thời gian mở đăng ký", closeAt: "Thời gian đóng đăng ký" };
+      if (siblingEvents.length && !confirm(`Áp dụng ${syncFields.map((field) => syncLabels[field]).join(", ")} cho ${siblingEvents.length} sự kiện khác trong nhóm “${data.groupName}”?`)) {
         throw Error("Đã hủy thao tác áp dụng cho nhóm. Sự kiện chưa được lưu.");
       }
       await updateDoc(doc(db, "events", id), data);
       if (siblingEvents.length) {
-        const sharedData = { description: data.description, descriptionHtml: data.descriptionHtml, location: data.location, capacity: data.capacity, openAt: data.openAt, closeAt: data.closeAt, updatedAt: serverTimestamp() };
+        const sharedData = { updatedAt: serverTimestamp() };
+        if (syncFields.includes("description")) Object.assign(sharedData, { description: data.description, descriptionHtml: data.descriptionHtml });
+        if (syncFields.includes("location")) sharedData.location = data.location;
+        if (syncFields.includes("capacity")) sharedData.capacity = data.capacity;
+        if (syncFields.includes("openAt")) sharedData.openAt = data.openAt;
+        if (syncFields.includes("closeAt")) sharedData.closeAt = data.closeAt;
         await Promise.all(siblingEvents.map((item) => updateDoc(doc(db, "events", item.id), sharedData)));
       }
       $("#eventDialog").close();
-      notice(siblingEvents.length ? `Đã lưu và cập nhật ${siblingEvents.length} sự kiện khác trong nhóm.` : "Đã lưu sự kiện.", "success");
+      notice(siblingEvents.length ? `Đã lưu và áp dụng ${syncFields.length} nội dung cho ${siblingEvents.length} sự kiện khác trong nhóm.` : "Đã lưu sự kiện.", "success");
     } else {
       await addDoc(collection(db, "events"), { ...data, registeredCount: 0, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdByName: user.displayName || "", createdAt: serverTimestamp() });
       $("#eventDialog").close();
@@ -567,12 +576,10 @@ document.addEventListener("click", async (event) => {
         ? `Sự kiện “${selected.title}” đang có ${registrations.length} người đăng ký. Khi tiếp tục, toàn bộ lượt đăng ký của sự kiện này cũng sẽ bị xóa. Thao tác không thể hoàn tác.`
         : `Xóa sự kiện “${selected.title}”? Thao tác không thể hoàn tác.`;
       if (!confirm(warning)) return;
-      if (registrations.length) {
-        const verification = prompt(`Để xác nhận, nhập chính xác tên sự kiện:\n${selected.title}`);
-        if (verification !== selected.title) {
-          notice("Tên xác nhận không khớp. Sự kiện chưa bị xóa.", "error");
-          return;
-        }
+      const verification = prompt('Để xác nhận xóa sự kiện, nhập chữ XÓA:');
+      if (String(verification || "").trim().toUpperCase() !== "XÓA") {
+        notice("Chưa nhập đúng chữ XÓA. Sự kiện chưa bị xóa.", "error");
+        return;
       }
       button.disabled = true;
       try {
