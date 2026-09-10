@@ -287,3 +287,22 @@
   .registration-pagination{position:sticky;left:0;width:100%;gap:7px}
   .registration-pagination .btn{flex:1;padding:8px 6px;font-size:12px}
 }
+
+
+/* V3.7: nút tải danh sách và bảng mô tả nhất quán */
+.btn-download-list{display:inline-flex;align-items:center;justify-content:center;gap:7px;border-color:#137a43;background:#18864b;color:#fff;box-shadow:0 5px 14px rgba(19,122,67,.18)}
+.btn-download-list:hover{border-color:#0f6637;background:#0f713e}
+.btn-download-list:disabled{border-color:#98c9ad;background:#98c9ad;color:#f8fffb;box-shadow:none}
+.sheet-icon{display:inline-grid;place-items:center;width:18px;height:20px;border:1.5px solid currentColor;border-radius:3px;font-size:13px;font-weight:900;line-height:1}
+.rich-editor,.rich-content{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.rich-editor table,.rich-content table{width:max-content;min-width:100%;max-width:none;border-collapse:collapse;table-layout:auto;font:inherit;color:inherit;background:#fff}
+.rich-editor th,.rich-editor td,.rich-content th,.rich-content td{min-width:130px;border:1px solid #344054;padding:8px 10px;vertical-align:top;text-align:inherit;white-space:normal;overflow-wrap:break-word}
+.rich-editor th,.rich-content th{font-weight:850;background:#f6f7f9}
+.rich-editor caption,.rich-content caption{padding:7px;font-weight:800;text-align:left}
+@media(max-width:760px){
+  .btn-download-list{white-space:normal}
+  .rich-editor table,.rich-content table{font-size:15px}
+  .rich-editor th,.rich-editor td,.rich-content th,.rich-content td{min-width:120px;padding:7px 8px}
+  #studentStatusFilters{justify-content:flex-start}
+  #studentStatusFilters .filter{min-width:112px}
+}
