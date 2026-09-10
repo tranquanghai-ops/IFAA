@@ -33,3 +33,26 @@
 .registration-table .col-stt{width:52px;min-width:52px;max-width:52px;text-align:center;padding-left:6px;padding-right:6px}
 .registration-table .col-identifier{width:118px;min-width:118px;max-width:118px;white-space:nowrap;padding-left:8px;padding-right:8px}
 @media (prefers-reduced-motion:reduce){.capacity .low-seats,.low-seats-notice{animation:none}}
+
+
+/* V1.8: không gian desktop rộng, tài khoản nổi bật và trạng thái trống */
+.btn-account{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:9px 15px;border-radius:12px;font-weight:800;transition:transform .18s ease,box-shadow .18s ease}
+.btn-account-edit{color:#1748c2;background:#eaf2ff;border-color:#b9cdfc;box-shadow:0 6px 16px rgba(31,78,216,.12)}
+.btn-account-logout{color:#fff;background:#a71930;border-color:#a71930;box-shadow:0 7px 18px rgba(167,25,48,.22)}
+.btn-account-edit:hover,.btn-account-logout:hover{transform:translateY(-2px);box-shadow:0 10px 22px rgba(23,33,58,.16)}
+.event-grid>.event-empty{grid-column:1/-1;width:100%;min-height:220px;margin:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:42px 28px;text-align:center;border:1px dashed #bdc7d6;background:linear-gradient(145deg,#fff,#f8faff);box-shadow:0 12px 34px rgba(24,33,58,.06)}
+.event-empty .empty-badge{display:inline-flex;border-radius:999px;padding:6px 11px;background:#eef2ff;color:#293db3;font-size:12px;font-weight:850;letter-spacing:.05em}
+.event-empty h3{margin:13px 0 4px;font-size:22px;color:var(--ink)}
+.event-empty p{max-width:620px;margin:0;color:var(--muted);font-size:15px}
+@media(min-width:1100px){
+  .shell{max-width:1560px;padding:28px 38px}
+  .admin-layout{grid-template-columns:260px minmax(0,1fr);gap:26px}
+  #eventDialog{width:min(1180px,calc(100vw - 64px))}
+  #groupDialog{width:min(780px,calc(100vw - 64px))}
+  #detailDialog{width:min(1080px,calc(100vw - 64px))}
+}
+@media(max-width:760px){
+  .btn-account{min-height:36px;padding:7px 11px}
+  .event-grid>.event-empty{min-height:180px;padding:30px 18px}
+  .event-empty h3{font-size:19px}
+}
