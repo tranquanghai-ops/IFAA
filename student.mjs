@@ -300,11 +300,14 @@ function render() {
     if (filter === "ended") return state === "ended";
     return ["upcoming", "open", "full"].includes(state);
   }).sort((a, b) => {
+    const sameGroup = (a.groupId || "__ungrouped__") === (b.groupId || "__ungrouped__");
+    if (sameGroup) {
+      const byPosition = eventPosition(a) - eventPosition(b);
+      if (byPosition) return byPosition;
+    }
     const rank = { open: 0, full: 0, upcoming: 1, closed: 2, ended: 2, hidden: 3 };
     const byState = (rank[eventState(a)] ?? 9) - (rank[eventState(b)] ?? 9);
     if (byState) return byState;
-    const byPosition = eventPosition(a) - eventPosition(b);
-    if (byPosition) return byPosition;
     return (millis(b.createdAt) || 0) - (millis(a.createdAt) || 0);
   });
 
