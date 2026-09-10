@@ -199,7 +199,7 @@ function render() {
     : `${list.length} sự kiện phù hợp với ${profile?.faculty || "khoa/đơn vị của bạn"}`;
   const grid = $("#eventGrid");
   if (!list.length) {
-    grid.innerHTML = '<div class="card empty">Chưa có sự kiện phù hợp. Bạn có thể chọn “Tất cả” để xem sự kiện đã đóng hoặc đã kết thúc.</div>';
+    grid.innerHTML = '<div class="card empty event-empty"><span class="empty-badge">DANH SÁCH TRỐNG</span><h3>Chưa có sự kiện trong mục này</h3><p>Chọn “Tất cả” để xem các sự kiện đã đóng hoặc đã kết thúc.</p></div>';
     return;
   }
   grid.innerHTML = list.map((event) => {
