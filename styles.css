@@ -162,3 +162,33 @@
 #closeRegistrationFields{margin-top:10px}
 .registration-schedule-field>small{display:block;margin-top:7px;color:var(--muted)}
 @media(max-width:760px){.close-mode-options{display:grid;grid-template-columns:1fr}.close-mode-chip{width:100%}}
+
+
+/* V3.4: hai chế độ xem Admin, di chuyển nhóm và phân trang đăng ký */
+.view-switch{display:inline-flex;gap:4px;padding:3px;border:1px solid #d8dee9;border-radius:11px;background:#f5f7fa}
+.view-switch .btn{border:0;box-shadow:none;background:transparent}
+.view-switch .btn.active{background:#17213a;color:#fff;box-shadow:0 3px 9px rgba(23,33,58,.18)}
+.admin-group-move{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap}
+.admin-group-move .btn{padding:5px 8px;font-size:11px}
+.admin-group-move>b{margin-right:4px}
+.admin-event-groups.view-list .admin-event-grid{grid-template-columns:1fr}
+.admin-event-groups.view-list .admin-event-card{display:grid;grid-template-columns:minmax(250px,1.15fr) minmax(300px,1fr) minmax(150px,.5fr) minmax(190px,.65fr);align-items:center;gap:12px;min-height:0;padding:10px 12px}
+.admin-event-groups.view-list .admin-event-card .event-top h3{margin-bottom:0}
+.admin-event-groups.view-list .admin-event-card .meta{margin:0}
+.admin-event-groups.view-list .admin-event-card .admin-position-actions{margin:0}
+.admin-event-groups.view-list .admin-event-card .admin-card-actions{margin:0}
+.registration-load-hint{display:block;margin-top:11px;color:var(--muted)}
+.registration-pagination{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:12px;padding:10px;border:1px solid var(--line);border-radius:12px;background:#fff}
+.registration-pagination span{min-width:72px;text-align:center;font-weight:800;color:var(--ink)}
+@media(max-width:1200px){
+  .admin-event-groups.view-list .admin-event-card{grid-template-columns:minmax(230px,1fr) minmax(260px,1fr)}
+  .admin-event-groups.view-list .admin-event-card .admin-position-actions,.admin-event-groups.view-list .admin-event-card .admin-card-actions{align-self:stretch}
+}
+@media(max-width:760px){
+  .admin-event-toolbar{width:100%;justify-content:space-between}
+  .view-switch{order:2;width:100%}
+  .view-switch .btn{flex:1}
+  .admin-event-groups.view-list .admin-event-card{display:block}
+  .admin-group-move{justify-content:flex-start;margin-top:8px}
+  .admin-event-group-head{display:block}
+}
