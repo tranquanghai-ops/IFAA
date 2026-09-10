@@ -227,3 +227,63 @@
   .admin-event-card .admin-card-actions{grid-template-columns:repeat(2,minmax(0,1fr))}
   .quick-registration-modal{padding:14px}
 }
+
+
+/* V3.6: Admin vừa màn hình điện thoại, giữ chữ dễ đọc */
+.admin-layout>section,.pane{min-width:0}
+@media(max-width:760px){
+  html,body{width:100%;max-width:100%;overflow-x:hidden}
+  body{font-size:16px}
+  .shell{width:100%;max-width:100%;padding:8px 10px}
+  .topbar{width:100%;margin-bottom:12px}
+  .brand{min-width:0;max-width:100%}
+  .brand>div:last-child{min-width:0}
+  .brand h1{font-size:21px;line-height:1.2}
+  .account{width:100%;justify-content:flex-start;gap:7px}
+  #adminApp,.admin-layout,.admin-layout>section,.pane,.admin-event-groups,.admin-event-group,.admin-event-grid,.admin-event-card{width:100%;max-width:100%;min-width:0}
+  .admin-layout{display:block}
+  .sidebar{position:static;width:100%;max-width:100%;margin-bottom:12px}
+  .sidebar .card{width:100%;max-width:100%;margin:0;overflow-x:auto;overscroll-behavior-inline:contain;-webkit-overflow-scrolling:touch}
+  .nav-btn{flex:0 0 auto;font-size:14px}
+  .toolbar{display:grid;grid-template-columns:minmax(0,1fr);align-items:stretch;gap:9px;margin-bottom:10px}
+  .toolbar h2{margin-bottom:2px}
+  .toolbar p{margin-top:0}
+  .toolbar>.actions,.admin-event-toolbar{display:flex;width:100%;max-width:100%;gap:7px}
+  .toolbar>.actions>.btn{flex:1;white-space:normal}
+  .toolbar>.btn-primary{width:100%}
+  .admin-filters{display:flex;max-width:100%;overflow-x:auto;flex-wrap:nowrap;padding:2px 0 7px;overscroll-behavior-inline:contain;-webkit-overflow-scrolling:touch}
+  .admin-filters .btn{flex:0 0 auto;white-space:nowrap}
+  .metric-grid,.dashboard-metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .metric{min-width:0;padding:11px}
+  .metric span{font-size:13px}
+  .metric b{font-size:25px}
+  .card{max-width:100%;padding:13px;border-radius:14px}
+  .admin-event-group{overflow:hidden;padding:9px 8px;border-left-width:5px}
+  .admin-event-group-head{display:grid;grid-template-columns:minmax(0,1fr);gap:8px}
+  .admin-event-group-head h3{font-size:18px;line-height:1.3;overflow-wrap:anywhere}
+  .admin-group-move{width:100%;justify-content:flex-start}
+  .admin-group-move>b{width:100%;white-space:normal}
+  .admin-group-move .btn{flex:1;min-width:94px;white-space:normal}
+  .admin-event-grid{display:grid;grid-template-columns:minmax(0,1fr)}
+  .admin-event-card{overflow:hidden;padding:12px}
+  .admin-event-card h3{font-size:18px;line-height:1.3;overflow-wrap:anywhere}
+  .admin-event-card .meta,.admin-event-card .event-schedule,.admin-event-card .event-location{font-size:14px;line-height:1.45;overflow-wrap:anywhere}
+  .admin-event-card .admin-card-actions{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+  .admin-event-card .admin-card-actions .btn{min-width:0;padding:8px 6px;font-size:12.5px;white-space:normal}
+  .admin-card-position{max-width:92px}
+  .admin-card-position>span{font-size:10px}
+  .admin-registration-progress{width:100%}
+  .table-wrap{display:block;width:100%;max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain;-webkit-overflow-scrolling:touch}
+  .table-wrap table{width:max-content;min-width:720px}
+  .form-grid{grid-template-columns:minmax(0,1fr)}
+  .field input,.field select,.field textarea{min-width:0;font-size:16px}
+  .datetime-24{grid-template-columns:minmax(0,1fr)}
+  dialog,#eventDialog,#groupDialog,#quickRegistrationDialog{width:calc(100vw - 12px);max-width:calc(100vw - 12px);margin:auto}
+  .modal{width:100%;max-width:100%;padding:14px}
+  .modal-head{align-items:flex-start}
+  .modal-head h2{font-size:21px;line-height:1.25}
+  .rich-toolbar{max-width:100%}
+  .rich-toolbar select{max-width:100%;min-width:0}
+  .registration-pagination{position:sticky;left:0;width:100%;gap:7px}
+  .registration-pagination .btn{flex:1;padding:8px 6px;font-size:12px}
+}
