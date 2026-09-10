@@ -150,13 +150,13 @@ function eventSchedule(event) {
 
 function isNewEvent(event) {
   const created = millis(event.createdAt);
-  return !!created && Date.now() - created >= 0 && Date.now() - created < 86400000;
+  return event.showAsNew !== false && !!created && Date.now() - created >= 0 && Date.now() - created < 86400000;
 }
 
 
 function eventPosition(event) {
   const position = Number(event.sortOrder);
-  return Number.isFinite(position) ? position : (millis(event.createdAt) || Number.MAX_SAFE_INTEGER);
+  return Number.isFinite(position) ? position : -(millis(event.createdAt) || 0);
 }
 
 function dayPeriod(time) {
@@ -244,7 +244,7 @@ function eventCard(event) {
   const category = event.category || DEFAULT_CATEGORY;
   const hotTag = event.isHot ? '<span class="tag hot">🔥 HOT</span>' : "";
   const newTag = isNewEvent(event) ? '<span class="tag new">NEW</span>' : "";
-  return `<article class="card event event-${state} ${registered ? "event-registered" : ""}"><div class="event-top"><div><span class="tag event-category">${safe(category)}</span><span class="tag ${tagClass}">${label}</span>${hotTag}${newTag}${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}<h3>${safe(event.title)}</h3></div></div><div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(event, state))}</span>${groupLine}</div><div class="progress"><i style="width:${percent}%"></i></div><div class="capacity"><span>${used}/${capacity} người tham gia</span><b class="${fullSeats ? "full-seats" : lowSeats ? "low-seats" : ""}">${fullSeats ? "Hết chỗ" : `Còn ${left} chỗ`}</b></div><div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${STUDENT_CALENDAR_ENABLED && registered ? `<button class="btn btn-calendar" data-calendar="${event.id}">＋ Google Lịch</button>` : ""}${registered && event.allowCancellation ? `<button class="btn btn-danger" data-cancel="${event.id}">Hủy đăng ký</button>` : `<button class="btn ${state === "full" ? "btn-full" : "btn-register"}" data-register="${event.id}" ${disabled || registered ? "disabled" : ""}>${registered ? "Đã đăng ký" : state === "full" ? "Đã đủ" : group.blocked ? "Đã đạt giới hạn đăng ký" : state === "upcoming" ? "Chưa đến giờ" : "Đăng ký"}</button>`}</div></article>`;
+  return `<article class="card event event-${state} ${registered ? "event-registered" : ""}"><div class="event-top"><div><span class="tag event-category">${safe(category)}</span><span class="tag ${tagClass}">${label}</span>${hotTag}${newTag}${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}<h3>${safe(event.title)}</h3></div></div><div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(event, state))}</span>${groupLine}</div><div class="progress"><i style="width:${percent}%"></i></div><div class="capacity"><span>${used}/${capacity} người tham gia</span><b class="${fullSeats ? "full-seats" : lowSeats ? "low-seats" : ""}">${fullSeats ? "Hết chỗ" : `Còn ${left} chỗ`}</b></div><div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${STUDENT_CALENDAR_ENABLED && registered ? `<button class="btn btn-calendar" data-calendar="${event.id}">＋ Google Lịch</button>` : ""}${registered && event.allowCancellation ? `<button class="btn btn-danger" data-cancel="${event.id}">Hủy đăng ký</button>` : `<button class="btn ${state === "full" ? "btn-full" : ["closed", "ended"].includes(state) ? "btn-expired" : "btn-register"}" data-register="${event.id}" ${disabled || registered ? "disabled" : ""}>${registered ? "Đã đăng ký" : state === "full" ? "Đã đủ" : ["closed", "ended"].includes(state) ? "Hết thời gian đăng ký" : group.blocked ? "Đã đạt giới hạn đăng ký" : state === "upcoming" ? "Chưa đến giờ" : "Đăng ký"}</button>`}</div></article>`;
 }
 function refreshStudentFilters(sourceEvents, focusedGroup) {
   const categorySelect = $("#categoryFilter");
@@ -489,9 +489,11 @@ function openDetail(id) {
   $("#detailBody").innerHTML = `<div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(chosen))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(chosen.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(chosen, state))}</span>${groupLine}</div><div class="rich-content">${description}</div><div class="notice ${detailFullSeats ? "full-seats-notice" : detailLowSeats ? "low-seats-notice" : ""}">${detailFullSeats ? "Hết chỗ." : `Còn ${detailLeft} chỗ.`}</div>`;
   const confirmButton = $("#confirmBtn");
   confirmButton.disabled = state !== "open" || group.blocked || myRegs.has(chosen.id);
+  const registrationExpired = ["closed", "ended"].includes(state);
   confirmButton.classList.toggle("btn-full", detailFullSeats);
-  confirmButton.classList.toggle("btn-register", !detailFullSeats);
-  confirmButton.textContent = detailFullSeats ? "Đã đủ" : "Xác nhận đăng ký";
+  confirmButton.classList.toggle("btn-expired", registrationExpired && !detailFullSeats);
+  confirmButton.classList.toggle("btn-register", !detailFullSeats && !registrationExpired);
+  confirmButton.textContent = detailFullSeats ? "Đã đủ" : registrationExpired ? "Hết thời gian đăng ký" : "Xác nhận đăng ký";
   const calendarButton = $("#detailCalendarBtn");
   calendarButton.classList.toggle("hidden", !STUDENT_CALENDAR_ENABLED || !myRegs.has(chosen.id));
   calendarButton.dataset.calendar = chosen.id;
