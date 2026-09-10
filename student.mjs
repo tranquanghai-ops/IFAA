@@ -589,7 +589,22 @@ $("#profileForm").onsubmit = async (event) => {
   }
 };
 
-$("#loginBtn").onclick = async () => { try { await signInWithPopup(auth, provider); } catch { show("Không thể đăng nhập Google.", "error"); } };
+function showLoginNotice(message = "") {
+  const target = $("#loginNotice");
+  target.textContent = message;
+  target.classList.toggle("hidden", !message);
+}
+
+$("#loginBtn").onclick = async () => {
+  showLoginNotice();
+  try {
+    await signInWithPopup(auth, provider);
+  } catch (error) {
+    if (error?.code !== "auth/popup-closed-by-user" && error?.code !== "auth/cancelled-popup-request") {
+      showLoginNotice("Không thể đăng nhập. Vui lòng thử lại.");
+    }
+  }
+};
 $("#logoutBtn").onclick = () => signOut(auth);
 $("#editProfileBtn").onclick = () => showProfileForm(true);
 $("#categoryFilter").onchange = (event) => { categoryFilter = event.target.value; render(); };
@@ -633,9 +648,10 @@ onAuthStateChanged(auth, async (currentUser) => {
   }
   if (!currentUser.emailVerified || !(await participantAccess(currentUser))) {
     await signOut(auth);
-    alert("Chỉ chấp nhận email TDTU hoặc tài khoản Google đã được cấp quyền Admin.");
+    showLoginNotice("Chỉ chấp nhận tài khoản TDTU.");
     return;
   }
+  showLoginNotice();
   user = currentUser;
   $("#accountEmail").textContent = `${currentUser.email} · ${participantType(currentUser.email)}`;
   $("#loginCard").classList.add("hidden");
