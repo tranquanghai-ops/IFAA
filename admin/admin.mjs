@@ -287,7 +287,7 @@ function render() {
       <div class="event-top admin-event-top"><div class="admin-event-heading"><div class="admin-event-badges"><span class="tag event-category">${safe(event.category || "Sự kiện Khoa")}</span><span class="tag ${statusClass}">${statusText}</span>${hotTag}${newTag}</div><h3>${safe(event.title)}</h3></div><div class="admin-card-position"><span>${eventIndex + 1}/${orderedSiblings.length}</span><button class="btn btn-small" title="Đưa sự kiện lên" aria-label="Đưa sự kiện lên" data-move-event="${event.id}" data-direction="-1" ${eventIndex <= 0 ? "disabled" : ""}>↑</button><button class="btn btn-small" title="Đưa sự kiện xuống" aria-label="Đưa sự kiện xuống" data-move-event="${event.id}" data-direction="1" ${eventIndex >= orderedSiblings.length - 1 ? "disabled" : ""}>↓</button></div></div>
       <div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown" data-admin-timing="${event.id}" data-admin-state="${state}">${safe(adminTimingStatus(event))}</span><span><b>Người tạo:</b> ${safe(event.createdByName || event.createdByEmail)}</span></div>
       ${registrationProgress}
-      <div class="event-actions admin-card-actions"><button class="btn" data-edit="${event.id}" ${canManage ? "" : "disabled"}>Sửa</button><button class="btn btn-soft" data-copy-event="${event.id}">Sao chép</button><button class="btn btn-soft" data-quick-registrations="${event.id}" ${hasRegistrations ? "" : "disabled"}>Xem danh sách</button><button class="btn btn-primary" data-export-event="${event.id}" ${hasRegistrations ? "" : "disabled"}>↓ Tải danh sách</button><button class="btn btn-calendar" data-calendar-event="${event.id}">＋ Google Lịch</button><button class="btn btn-danger" data-delete="${event.id}" ${canManage ? "" : "disabled"}>Xóa</button></div>
+      <div class="event-actions admin-card-actions"><button class="btn" data-edit="${event.id}" ${canManage ? "" : "disabled"}>Sửa</button><button class="btn btn-soft" data-copy-event="${event.id}">Sao chép</button><button class="btn btn-soft" data-quick-registrations="${event.id}" ${hasRegistrations ? "" : "disabled"}>Xem danh sách</button><button class="btn btn-download-list" data-export-event="${event.id}" ${hasRegistrations ? "" : "disabled"}><span class="sheet-icon" aria-hidden="true">▦</span> Tải danh sách</button><button class="btn btn-calendar" data-calendar-event="${event.id}">＋ Google Lịch</button><button class="btn btn-danger" data-delete="${event.id}" ${canManage ? "" : "disabled"}>Xóa</button></div>
     </article>`;
   };
   let adminTone = 0;
@@ -302,7 +302,7 @@ function render() {
     const toneClass = groupId === "__ungrouped__" ? "admin-group-ungrouped" : `group-tone-${adminTone++ % 5}`;
     const groupIndex = orderedGroups.findIndex((item) => item.id === groupId);
     const groupRegistrationCount = events.filter((item) => item.groupId === groupId).reduce((total, item) => total + Number(item.registeredCount || 0), 0);
-    const groupMove = groupId === "__ungrouped__" ? `<b>${items.length} sự kiện</b>` : `<div class="admin-group-move"><b>${items.length} sự kiện · ${groupRegistrationCount} lượt đăng ký</b><button class="btn btn-small btn-primary" data-export-group="${groupId}" ${groupRegistrationCount ? "" : "disabled"}>↓ Tải danh sách nhóm</button><button class="btn btn-small" data-move-group="${groupId}" data-direction="-1" ${groupIndex <= 0 ? "disabled" : ""}>↑ Nhóm</button><button class="btn btn-small" data-move-group="${groupId}" data-direction="1" ${groupIndex < 0 || groupIndex >= orderedGroups.length - 1 ? "disabled" : ""}>↓ Nhóm</button></div>`;
+    const groupMove = groupId === "__ungrouped__" ? `<b>${items.length} sự kiện</b>` : `<div class="admin-group-move"><b>${items.length} sự kiện · ${groupRegistrationCount} lượt đăng ký</b><button class="btn btn-small btn-download-list" data-export-group="${groupId}" ${groupRegistrationCount ? "" : "disabled"}><span class="sheet-icon" aria-hidden="true">▦</span> Tải danh sách nhóm</button><button class="btn btn-small" data-move-group="${groupId}" data-direction="-1" ${groupIndex <= 0 ? "disabled" : ""}>↑ Nhóm</button><button class="btn btn-small" data-move-group="${groupId}" data-direction="1" ${groupIndex < 0 || groupIndex >= orderedGroups.length - 1 ? "disabled" : ""}>↓ Nhóm</button></div>`;
     return `<section class="admin-event-group ${toneClass}"><div class="admin-event-group-head"><div><span>${groupId === "__ungrouped__" ? "SỰ KIỆN RIÊNG" : "NHÓM SỰ KIỆN"}</span><h3>${safe(title)}</h3>${limit ? `<small>${safe(limit)}</small>` : ""}</div>${groupMove}</div><div class="event-grid admin-event-grid">${items.map((item) => adminEventCard(item, items)).join("")}</div></section>`;
   }).join("") : '<div class="card empty">Không có sự kiện ở trạng thái này.</div>';
 
@@ -315,7 +315,7 @@ function render() {
     const hiddenCount = groupedItems.filter((item) => eventState(item) === "hidden").length;
     const endedCount = groupedItems.filter((item) => eventState(item) === "ended").length;
     const groupState = hiddenCount === eventCount && eventCount ? "Đã ẩn toàn bộ" : endedCount === eventCount && eventCount ? "Đã kết thúc" : "Theo từng sự kiện";
-    return `<tr><td><b>${safe(group.name)}</b><br><small>Mã: ${safe(groupCode(group))}</small></td><td>${limit}</td><td>${eventCount}<br><small>${groupState}</small></td><td>${visibility}</td><td><div class="actions"><button class="btn btn-small btn-soft" data-copy-group-link="${group.id}">Sao chép liên kết</button><button class="btn btn-small btn-calendar" data-calendar-group="${group.id}">＋ Lịch cả nhóm</button><button class="btn btn-small btn-primary" data-export-group="${group.id}" ${groupRegisteredCount ? "" : "disabled"}>↓ Tải danh sách nhóm</button></div></td><td><div class="actions"><button class="btn btn-small" data-move-group="${group.id}" data-direction="-1" ${groupIndex <= 0 ? "disabled" : ""}>↑</button><button class="btn btn-small" data-move-group="${group.id}" data-direction="1" ${groupIndex >= orderedGroups.length - 1 ? "disabled" : ""}>↓</button><button class="btn btn-small" data-edit-group="${group.id}">Sửa nhóm</button></div></td></tr>`;
+    return `<tr><td><b>${safe(group.name)}</b><br><small>Mã: ${safe(groupCode(group))}</small></td><td>${limit}</td><td>${eventCount}<br><small>${groupState}</small></td><td>${visibility}</td><td><div class="actions"><button class="btn btn-small btn-soft" data-copy-group-link="${group.id}">Sao chép liên kết</button><button class="btn btn-small btn-calendar" data-calendar-group="${group.id}">＋ Lịch cả nhóm</button><button class="btn btn-small btn-download-list" data-export-group="${group.id}" ${groupRegisteredCount ? "" : "disabled"}><span class="sheet-icon" aria-hidden="true">▦</span> Tải danh sách nhóm</button></div></td><td><div class="actions"><button class="btn btn-small" data-move-group="${group.id}" data-direction="-1" ${groupIndex <= 0 ? "disabled" : ""}>↑</button><button class="btn btn-small" data-move-group="${group.id}" data-direction="1" ${groupIndex >= orderedGroups.length - 1 ? "disabled" : ""}>↓</button><button class="btn btn-small" data-edit-group="${group.id}">Sửa nhóm</button></div></td></tr>`;
   }).join("") || '<tr><td colspan="6" class="empty">Chưa có nhóm sự kiện.</td></tr>';
 
   refreshRegistrationFilters();
@@ -438,7 +438,7 @@ function writeRegistrationWorkbook(list, eventId = "", groupId = "") {
   const selectedGroup = groups.find((group) => group.id === groupId);
   const rows = list.map((registration, index) => {
     const registrationEvent = events.find((event) => event.id === registration.eventId);
-    const row = { STT: index + 1, "MSSV/Mã số": registration.identifier || registration.mssv, "Họ tên": registration.name, "Số điện thoại": registration.phone, "Khoa/Đơn vị": registration.faculty, "Đối tượng": registration.participantType || "Sinh viên", Email: registration.email, "Sự kiện": registration.eventTitle, "Ngày sự kiện": registration.eventDate, "Giờ bắt đầu": registrationEvent?.startTime || "", "Giờ kết thúc": registrationEvent?.endTime || "", "Buổi": dayPeriod(registrationEvent?.startTime), "Thời gian đăng ký": ts(registration.createdAt) };
+    const row = { STT: index + 1, "MSSV/Mã số": registration.identifier || registration.mssv, "Họ tên": registration.name, "Khoa/Đơn vị": registration.faculty, "Đối tượng": registration.participantType || "Sinh viên", Email: registration.email, "Sự kiện": registration.eventTitle, "Ngày sự kiện": registration.eventDate, "Giờ bắt đầu": registrationEvent?.startTime || "", "Giờ kết thúc": registrationEvent?.endTime || "", "Buổi": dayPeriod(registrationEvent?.startTime), "Thời gian đăng ký": ts(registration.createdAt) };
     if (!groupId) row["Nhóm sự kiện"] = registration.groupName || "Không nhóm";
     return row;
   });
@@ -446,13 +446,13 @@ function writeRegistrationWorkbook(list, eventId = "", groupId = "") {
   const cleanName = exportName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 70) || "Su_kien";
   const workbook = XLSX.utils.book_new();
   const worksheet = XLSX.utils.json_to_sheet(rows);
-  worksheet["!cols"] = [{ wch: 6 }, { wch: 15 }, { wch: 24 }, { wch: 16 }, { wch: 28 }, { wch: 14 }, { wch: 32 }, { wch: 14 }, { wch: 13 }, { wch: 13 }, { wch: 14 }, { wch: 20 }];
+  worksheet["!cols"] = [{ wch: 6 }, { wch: 15 }, { wch: 24 }, { wch: 28 }, { wch: 14 }, { wch: 32 }, { wch: 32 }, { wch: 14 }, { wch: 13 }, { wch: 13 }, { wch: 14 }, { wch: 20 }, { wch: 24 }];
   XLSX.utils.book_append_sheet(workbook, worksheet, (selectedEvent?.title || selectedGroup?.name || "Đăng ký").slice(0, 31));
   XLSX.writeFile(workbook, `IFAA_${cleanName}_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
 async function downloadRegistrationExcel(eventId = "", groupId = "", button = null) {
-  const originalText = button?.textContent;
+  const originalHtml = button?.innerHTML;
   if (button) {
     button.disabled = true;
     button.textContent = "Đang tải…";
@@ -470,7 +470,7 @@ async function downloadRegistrationExcel(eventId = "", groupId = "", button = nu
   } finally {
     if (button) {
       button.disabled = false;
-      button.textContent = originalText;
+      button.innerHTML = originalHtml;
     }
   }
 }
