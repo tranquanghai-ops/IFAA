@@ -152,10 +152,6 @@ function isNewEvent(event) {
   return !!created && Date.now() - created >= 0 && Date.now() - created < 86400000;
 }
 
-function isRecentlyEnded(event) {
-  const ended = eventEnd(event);
-  return Number.isFinite(ended) && Date.now() >= ended && Date.now() - ended < 86400000;
-}
 
 function eventPosition(event) {
   const position = Number(event.sortOrder);
@@ -285,9 +281,7 @@ function render() {
   const accessibleEvents = events.filter((event) => {
     if (!facultyAllowed(event)) return false;
     if (filter === "mine") return myRegs.has(event.id) && (!linkedGroupId || event.groupId === focusedGroup?.id);
-    const state = eventState(event);
-    if (state === "hidden") return false;
-    if (state === "ended" && !isRecentlyEnded(event)) return false;
+    if (eventState(event) === "hidden") return false;
     if (linkedGroupId) return event.groupId === focusedGroup?.id;
     return !groups.get(event.groupId)?.linkOnly;
   });
@@ -303,7 +297,8 @@ function render() {
     const state = eventState(event);
     if (filter === "mine") return true;
     if (filter === "all") return true;
-    return ["upcoming", "open", "full"].includes(state) || (state === "ended" && isRecentlyEnded(event));
+    if (filter === "ended") return state === "ended";
+    return ["upcoming", "open", "full"].includes(state);
   }).sort((a, b) => {
     const rank = { open: 0, full: 0, upcoming: 1, closed: 2, ended: 2, hidden: 3 };
     const byState = (rank[eventState(a)] ?? 9) - (rank[eventState(b)] ?? 9);
