@@ -224,7 +224,7 @@ function render() {
     const newTag = isNewEvent(event) ? '<span class="tag new">NEW</span>' : "";
     return `<article class="card event admin-event-card event-${state}">
       <div class="event-top"><div><span class="tag event-category">${safe(event.category || "Sự kiện Khoa")}</span><span class="tag ${statusClass}">${statusText}</span>${hotTag}${newTag}<h3>${safe(event.title)}</h3></div></div>
-      <div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span>${isExternalEvent(event) ? '<span><b>Đăng ký:</b> Liên kết bên ngoài</span>' : `<span><b>Sức chứa:</b> ${event.registeredCount || 0}/${event.capacity}</span>`}<span><b>Người tạo:</b> ${safe(event.createdByName || event.createdByEmail)}</span></div>
+      <div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span>${isExternalEvent(event) ? '<span><b>Đăng ký:</b> Liên kết bên ngoài</span>' : `<span><b>Sức chứa:</b> ${event.unlimitedCapacity ? "Không giới hạn" : `${event.registeredCount || 0}/${event.capacity}`}</span>`}<span><b>Người tạo:</b> ${safe(event.createdByName || event.createdByEmail)}</span></div>
       <div class="admin-position-actions"><span>Vị trí ${eventIndex + 1}/${orderedSiblings.length}</span><button class="btn btn-small" data-move-event="${event.id}" data-direction="-1" ${eventIndex <= 0 ? "disabled" : ""}>↑ Lên</button><button class="btn btn-small" data-move-event="${event.id}" data-direction="1" ${eventIndex >= orderedSiblings.length - 1 ? "disabled" : ""}>↓ Xuống</button></div>
       <div class="event-actions admin-card-actions"><button class="btn" data-edit="${event.id}" ${canManage ? "" : "disabled"}>Sửa</button><button class="btn btn-soft" data-copy-event="${event.id}">Sao chép</button><button class="btn btn-calendar" data-calendar-event="${event.id}">＋ Google Lịch</button><button class="btn btn-danger" data-delete="${event.id}" ${canManage ? "" : "disabled"}>Xóa</button></div>
     </article>`;
@@ -415,9 +415,13 @@ function openEvent(event = null, copy = false) {
   $("#eventAllowCancellation").checked = !!event?.allowCancellation;
   $("#eventHot").checked = !!event?.isHot;
   $("#eventShowAsNew").checked = copy ? true : event ? event.showAsNew !== false : true;
+  $("#unlimitedCapacity").checked = !!event?.unlimitedCapacity;
+  $("#hideRegistrationCount").checked = !!event?.hideRegistrationCount;
+  if (event?.unlimitedCapacity) $("#capacity").value = "";
   $("#registrationUrl").value = event?.registrationUrl || "";
   $("#autoCloseRegistration").checked = !!event?.autoCloseRegistration;
   toggleExternalEventFields();
+  setCapacityState();
   setAutoCloseState();
   refreshGroupOptions(event?.groupId || "");
   $("#groupId").disabled = !copy && !!event && (event.registeredCount || 0) > 0;
@@ -447,8 +451,16 @@ function toggleExternalEventFields() {
   const external = EXTERNAL_CATEGORIES.has($("#category").value);
   $("#externalRegistrationField").classList.toggle("hidden", !external);
   $("#registrationUrl").required = external;
-  $("#capacity").disabled = external;
-  if (external && !Number($("#capacity").value)) $("#capacity").value = 1;
+  setCapacityState();
+}
+
+function setCapacityState() {
+  const external = EXTERNAL_CATEGORIES.has($("#category").value);
+  const unlimited = $("#unlimitedCapacity").checked;
+  $("#capacity").disabled = external || unlimited;
+  $("#capacity").required = !external && !unlimited;
+  if (!external && !unlimited && !Number($("#capacity").value)) $("#capacity").value = 50;
+  $("#capacityHelp").textContent = external ? "Sự kiện này đăng ký ở trang bên ngoài." : unlimited ? "Đã tắt giới hạn số người đăng ký." : "Nhập số người tối đa được đăng ký.";
 }
 
 function setAutoCloseState() {
@@ -461,7 +473,8 @@ function setAutoCloseState() {
   $("#autoCloseHelp").textContent = automatic ? "Hệ thống tự đóng khi sự kiện bắt đầu; sự kiện cả ngày sẽ đóng lúc cuối ngày." : "Nhập thời gian đóng đăng ký.";
 }
 
-$("#category").onchange = toggleExternalEventFields;
+$("#category").onchange = () => { toggleExternalEventFields(); setCapacityState(); };
+$("#unlimitedCapacity").onchange = setCapacityState;
 $("#autoCloseRegistration").onchange = setAutoCloseState;
 let descriptionRange = null;
 const descriptionEditor = $("#descriptionEditor");
@@ -537,7 +550,9 @@ $("#eventForm").onsubmit = async (event) => {
   data.autoCloseRegistration = $("#autoCloseRegistration").checked;
   data.externalRegistration = EXTERNAL_CATEGORIES.has(data.category);
   data.registrationUrl = $("#registrationUrl").value.trim();
-  data.capacity = data.externalRegistration ? 1 : Number($("#capacity").value);
+  data.unlimitedCapacity = !data.externalRegistration && $("#unlimitedCapacity").checked;
+  data.hideRegistrationCount = $("#hideRegistrationCount").checked;
+  data.capacity = data.externalRegistration ? 1 : data.unlimitedCapacity ? 1000000000 : Number($("#capacity").value);
   data.allowedFaculties = [...document.querySelectorAll(".event-faculty:checked")].map((input) => input.value);
   data.allowCancellation = $("#eventAllowCancellation").checked;
   data.isHot = $("#eventHot").checked;
