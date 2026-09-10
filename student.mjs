@@ -25,6 +25,40 @@ function groupCode(group) {
   return shareCode(group?.shareCode || group?.name) || group?.id || "";
 }
 
+function calendarStamp(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  const pad = (number) => String(number).padStart(2, "0");
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}T${pad(date.getHours())}${pad(date.getMinutes())}00`;
+}
+
+function calendarRange(event) {
+  const start = new Date(`${event.date}T${event.startTime || "08:00"}:00`);
+  let end = new Date(`${event.date}T${event.endTime || event.startTime || "09:00"}:00`);
+  if (!Number.isFinite(start.getTime())) return null;
+  if (!Number.isFinite(end.getTime()) || end <= start) end = new Date(start.getTime() + 3600000);
+  return `${calendarStamp(start)}/${calendarStamp(end)}`;
+}
+
+function eventCalendarUrl(event) {
+  const range = calendarRange(event);
+  if (!range) return "";
+  const url = new URL("https://calendar.google.com/calendar/render");
+  url.searchParams.set("action", "TEMPLATE");
+  url.searchParams.set("text", event.title || "Sự kiện IFA+A");
+  url.searchParams.set("dates", range);
+  url.searchParams.set("ctz", "Asia/Ho_Chi_Minh");
+  url.searchParams.set("location", event.location || "");
+  const detail = [event.description || "", "Thông tin từ hệ thống đăng ký sự kiện IFA+A."].filter(Boolean).join("\n\n").slice(0, 1800);
+  url.searchParams.set("details", detail);
+  return url.toString();
+}
+
+function openGoogleCalendar(event) {
+  const url = eventCalendarUrl(event);
+  if (!url) return show("Ngày hoặc giờ sự kiện chưa hợp lệ.", "error");
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
 function sanitizeRichHtml(value) {
   const template = document.createElement("template");
   template.innerHTML = String(value || "");
@@ -184,7 +218,7 @@ function eventCard(event) {
   const tagClass = state === "hidden" ? "closed" : state;
   const groupLine = group.text ? `<span><b>${safe(group.text)}</b></span>` : "";
   const category = event.category || DEFAULT_CATEGORY;
-  return `<article class="card event event-${state} ${registered ? "event-registered" : ""}"><div class="event-top"><div><span class="tag event-category">${safe(category)}</span><span class="tag ${tagClass}">${label}</span>${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}<h3>${safe(event.title)}</h3></div></div><div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(formatDate(event))} · ${safe(event.startTime || "")}${event.endTime ? `–${safe(event.endTime)}` : ""} · <b>${safe(dayPeriod(event.startTime))}</b></span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(event, state))}</span>${groupLine}</div><div class="progress"><i style="width:${percent}%"></i></div><div class="capacity"><span>${used}/${capacity} người tham gia</span><b class="${fullSeats ? "full-seats" : lowSeats ? "low-seats" : ""}">${fullSeats ? "Hết chỗ" : `Còn ${left} chỗ`}</b></div><div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${registered && event.allowCancellation ? `<button class="btn btn-danger" data-cancel="${event.id}">Hủy đăng ký</button>` : `<button class="btn ${state === "full" ? "btn-full" : "btn-register"}" data-register="${event.id}" ${disabled || registered ? "disabled" : ""}>${registered ? "Đã đăng ký" : state === "full" ? "Đã đủ" : group.blocked ? "Đã đạt giới hạn đăng ký" : state === "upcoming" ? "Chưa đến giờ" : "Đăng ký"}</button>`}</div></article>`;
+  return `<article class="card event event-${state} ${registered ? "event-registered" : ""}"><div class="event-top"><div><span class="tag event-category">${safe(category)}</span><span class="tag ${tagClass}">${label}</span>${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}<h3>${safe(event.title)}</h3></div></div><div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(formatDate(event))} · ${safe(event.startTime || "")}${event.endTime ? `–${safe(event.endTime)}` : ""} · <b>${safe(dayPeriod(event.startTime))}</b></span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(event, state))}</span>${groupLine}</div><div class="progress"><i style="width:${percent}%"></i></div><div class="capacity"><span>${used}/${capacity} người tham gia</span><b class="${fullSeats ? "full-seats" : lowSeats ? "low-seats" : ""}">${fullSeats ? "Hết chỗ" : `Còn ${left} chỗ`}</b></div><div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${registered ? `<button class="btn btn-calendar" data-calendar="${event.id}">＋ Google Lịch</button>` : ""}${registered && event.allowCancellation ? `<button class="btn btn-danger" data-cancel="${event.id}">Hủy đăng ký</button>` : `<button class="btn ${state === "full" ? "btn-full" : "btn-register"}" data-register="${event.id}" ${disabled || registered ? "disabled" : ""}>${registered ? "Đã đăng ký" : state === "full" ? "Đã đủ" : group.blocked ? "Đã đạt giới hạn đăng ký" : state === "upcoming" ? "Chưa đến giờ" : "Đăng ký"}</button>`}</div></article>`;
 }
 
 function refreshStudentFilters(sourceEvents, focusedGroup) {
@@ -370,7 +404,7 @@ async function register(eventId) {
       transaction.set(registrationRef, { uid: user.uid, email: user.email.toLowerCase(), identifier, mssv: identifier, participantType: profile.participantType, name: profile.name, phone: profile.phone, faculty: profile.faculty, eventId, eventTitle: event.title, eventDate: event.date, groupId: event.groupId || "", groupName: event.groupName || "", createdAt: serverTimestamp() });
       if (event.groupId) transaction.set(limitRef, { uid: user.uid, email: user.email.toLowerCase(), groupId: event.groupId, groupName: group.name, maxRegistrations: group.maxRegistrations, count: (current.count || 0) + 1, eventIds: [...(current.eventIds || []), eventId], updatedAt: serverTimestamp() });
     });
-    show("Đăng ký thành công.", "success");
+    show("Đăng ký thành công. Bạn có thể bấm “Google Lịch” để thêm sự kiện vào lịch cá nhân.", "success");
   } catch (error) {
     show(error.message || "Không thể đăng ký.", "error");
   }
@@ -428,6 +462,9 @@ function openDetail(id) {
   confirmButton.classList.toggle("btn-full", detailFullSeats);
   confirmButton.classList.toggle("btn-register", !detailFullSeats);
   confirmButton.textContent = detailFullSeats ? "Đã đủ" : "Xác nhận đăng ký";
+  const calendarButton = $("#detailCalendarBtn");
+  calendarButton.classList.toggle("hidden", !myRegs.has(chosen.id));
+  calendarButton.dataset.calendar = chosen.id;
   $("#detailDialog").showModal();
 }
 
@@ -465,6 +502,10 @@ document.addEventListener("click", (event) => {
   if (button.dataset.close !== undefined) $("#detailDialog").close();
   if (button.dataset.view) openDetail(button.dataset.view);
   if (button.dataset.register) openDetail(button.dataset.register);
+  if (button.dataset.calendar) {
+    const selectedEvent = events.find((item) => item.id === button.dataset.calendar);
+    if (selectedEvent && myRegs.has(selectedEvent.id)) openGoogleCalendar(selectedEvent);
+  }
   if (button.dataset.cancel && confirm("Hủy đăng ký sự kiện này?")) cancel(button.dataset.cancel);
   if (button.classList.contains("filter")) {
     document.querySelectorAll(".filter").forEach((item) => item.classList.remove("active"));
