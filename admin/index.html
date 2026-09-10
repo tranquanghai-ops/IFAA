@@ -39,7 +39,7 @@
 
 <div class="pane hidden" data-pane-id="settings"><div class="toolbar"><div><h2>Thiết lập đăng ký</h2><p>Quản lý danh sách khoa/đơn vị được sử dụng.</p></div></div><form id="settingsForm" class="card form-grid"><div class="field"><label>Tên hệ thống</label><input value="IFA+A" disabled></div><div class="field span-2"><label>Thêm khoa/đơn vị</label><div class="inline-add"><input id="newFaculty" maxlength="160" placeholder="Nhập tên khoa/đơn vị"><button id="addFacultyBtn" class="btn" type="button">＋ Thêm</button></div><div id="facultySettingsList" class="check-list"></div><small>Mặc định hệ thống có Khoa Mỹ thuật Công nghiệp.</small></div><div><button class="btn btn-primary">Lưu thiết lập</button></div></form></div>
 </section></div>
-<footer class="foot">IFA+A Admin · V3.4</footer>
+<footer class="foot">IFA+A Admin · V3.5</footer>
 </main>
 
 <dialog id="eventDialog"><form id="eventForm" class="modal"><div class="modal-head"><h2 id="eventDialogTitle">Tạo sự kiện</h2><button type="button" class="btn btn-small" data-close>Đóng</button></div><input id="eventId" type="hidden"><div class="form-grid">
@@ -85,5 +85,7 @@
   <label class="check span-2 event-option"><input id="groupLinkOnly" type="checkbox"> Ẩn nhóm khỏi trang sự kiện chung, chỉ hiển thị khi mở bằng liên kết riêng</label>
   <div class="field span-2 group-status-control"><label>Áp dụng trạng thái cho toàn bộ sự kiện trong nhóm</label><select id="groupBulkStatus"><option value="">Giữ nguyên trạng thái từng sự kiện</option><option value="closed">Kết thúc toàn bộ sự kiện</option><option value="hidden">Ẩn toàn bộ sự kiện</option><option value="open">Hiển thị lại toàn bộ sự kiện</option></select><small>Trạng thái đã chọn sẽ được áp dụng ngay khi lưu nhóm.</small></div>
 </div><div id="groupFormError" class="notice error hidden" role="alert"></div><div class="modal-actions"><button type="button" class="btn" data-close-group>Hủy</button><button class="btn btn-primary">Lưu nhóm</button></div></form></dialog>
+
+<dialog id="quickRegistrationDialog"><div class="modal quick-registration-modal"><div class="modal-head"><div><h2 id="quickRegistrationTitle">Danh sách đăng ký</h2><p id="quickRegistrationSummary"></p></div><button type="button" class="btn btn-small" data-close-quick>Đóng</button></div><div class="table-wrap"><table class="quick-registration-table"><thead><tr><th class="col-stt">STT</th><th class="col-identifier">MSSV/Mã số</th><th>Họ tên</th><th>Khoa/Đơn vị</th><th>Đối tượng</th><th>Thời gian</th></tr></thead><tbody id="quickRegistrationRows"></tbody></table></div><div id="quickRegistrationPagination" class="registration-pagination"><button id="quickRegistrationPrev" class="btn btn-small" type="button">← Trang trước</button><span id="quickRegistrationPageText">Trang 1</span><button id="quickRegistrationNext" class="btn btn-small" type="button">Trang sau →</button></div></div></dialog>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script><script type="module" src="./admin.mjs"></script>
 </body></html>
