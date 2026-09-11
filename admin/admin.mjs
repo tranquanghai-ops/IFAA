@@ -121,7 +121,7 @@ function createUniqueEventCode(length = 7) {
 
 function eventShareUrl(event) {
   const url = new URL("https://ifa-activities.web.app/");
-  url.searchParams.set("e", shareCode(event?.shareCode));
+  url.searchParams.set("x", shareCode(event?.shareCode));
   return url.toString();
 }
 
