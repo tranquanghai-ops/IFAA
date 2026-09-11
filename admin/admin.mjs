@@ -105,6 +105,35 @@ function groupShareUrl(group) {
   return url.toString();
 }
 
+function createUniqueEventCode(length = 7) {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const used = new Set([
+    ...events.map((item) => shareCode(item.shareCode)),
+    ...groups.map((item) => groupCode(item))
+  ].filter(Boolean));
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const values = crypto.getRandomValues(new Uint32Array(length));
+    const code = Array.from(values, (value) => alphabet[value % alphabet.length]).join("");
+    if (!used.has(code)) return code;
+  }
+  throw new Error("Không thể tạo mã liên kết. Vui lòng thử lại.");
+}
+
+function eventShareUrl(event) {
+  const url = new URL("https://ifa-activities.web.app/");
+  url.searchParams.set("e", shareCode(event?.shareCode));
+  return url.toString();
+}
+
+async function copyText(value, successMessage) {
+  try {
+    await navigator.clipboard.writeText(value);
+    notice(successMessage, "success");
+  } catch {
+    window.prompt("Sao chép liên kết:", value);
+  }
+}
+
 function calendarStamp(value, dateOnly = false) {
   const date = value instanceof Date ? value : new Date(value);
   const pad = (number) => String(number).padStart(2, "0");
@@ -340,7 +369,7 @@ function render() {
       <div class="event-top admin-event-top"><div class="admin-event-heading"><div class="admin-event-badges"><span class="tag event-category">${safe(event.category || "Sự kiện Khoa")}</span><span class="tag ${statusClass}">${statusText}</span>${hotTag}${newTag}</div><h3>${safe(event.title)}</h3></div><div class="admin-card-position"><span>${eventIndex + 1}/${orderedSiblings.length}</span><button class="btn btn-small" title="Đưa sự kiện lên" aria-label="Đưa sự kiện lên" data-move-event="${event.id}" data-direction="-1" ${eventIndex <= 0 ? "disabled" : ""}>↑</button><button class="btn btn-small" title="Đưa sự kiện xuống" aria-label="Đưa sự kiện xuống" data-move-event="${event.id}" data-direction="1" ${eventIndex >= orderedSiblings.length - 1 ? "disabled" : ""}>↓</button></div></div>
       <div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown" data-admin-timing="${event.id}" data-admin-state="${state}">${safe(adminTimingStatus(event))}</span><span><b>Người tạo:</b> ${safe(event.createdByName || event.createdByEmail)}</span></div>
       ${registrationProgress}
-      <div class="event-actions admin-card-actions"><button class="btn" data-edit="${event.id}" ${canManage ? "" : "disabled"}>Sửa</button><button class="btn btn-soft" data-copy-event="${event.id}">Sao chép</button><button class="btn btn-soft" data-quick-registrations="${event.id}" ${hasRegistrations ? "" : "disabled"}>Xem danh sách</button><button class="btn btn-download-list" data-export-event="${event.id}" ${hasRegistrations ? "" : "disabled"}><span class="sheet-icon" aria-hidden="true">▦</span> Tải danh sách</button><button class="btn btn-calendar" data-calendar-event="${event.id}">＋ Google Lịch</button><button class="btn btn-danger" data-delete="${event.id}" ${canManage ? "" : "disabled"}>Xóa</button></div>
+      <div class="event-actions admin-card-actions"><button class="btn" data-edit="${event.id}" ${canManage ? "" : "disabled"}>Sửa</button><button class="btn btn-soft" data-copy-event="${event.id}">Sao chép</button><button class="btn btn-soft" data-quick-registrations="${event.id}" ${hasRegistrations ? "" : "disabled"}>Xem danh sách</button><button class="btn btn-download-list" data-export-event="${event.id}" ${hasRegistrations ? "" : "disabled"}><span class="sheet-icon" aria-hidden="true">▦</span> Tải danh sách</button><button class="btn btn-calendar" data-calendar-event="${event.id}">＋ Google Lịch</button>${event.shareCode ? `<button class="btn btn-copy-link" data-copy-event-link="${event.id}">🔗 Copy link</button>` : `<button class="btn btn-soft" data-create-event-link="${event.id}" ${canManage ? "" : "disabled"}>＋ Tạo link</button>`}<button class="btn btn-danger" data-delete="${event.id}" ${canManage ? "" : "disabled"}>Xóa</button></div>
     </article>`;
   };
   let adminTone = 0;
@@ -793,6 +822,9 @@ function openEvent(event = null, copy = false) {
   $("#eventAllowCancellation").checked = !!event?.allowCancellation;
   $("#eventHot").checked = !!event?.isHot;
   $("#eventShowAsNew").checked = copy ? true : event ? event.showAsNew !== false : true;
+  $("#eventCreateShareLink").checked = copy ? false : !!event?.shareCode;
+  $("#eventCreateShareLink").disabled = !copy && !!event?.shareCode;
+  $("#eventShareLinkHelp").textContent = !copy && event?.shareCode ? `Mã liên kết hiện tại: ${shareCode(event.shareCode)}` : "Có thể tạo ngay hoặc tạo sau tại trang quản lý sự kiện.";
   $("#unlimitedCapacity").checked = !!event?.unlimitedCapacity;
   $("#hideRegistrationCount").checked = !!event?.hideRegistrationCount;
   if (event?.unlimitedCapacity) $("#capacity").value = "";
@@ -936,6 +968,8 @@ $("#eventForm").onsubmit = async (event) => {
   for (const key of ["title", "category", "date", "location", "startTime", "endTime", "status"]) data[key] = $("#" + key).value.trim();
   data.descriptionHtml = $("#descriptionEditor").innerHTML.trim();
   data.description = $("#descriptionEditor").innerText.trim();
+  const existingEvent = id ? events.find((item) => item.id === id) : null;
+  data.shareCode = existingEvent?.shareCode || ($("#eventCreateShareLink").checked ? createUniqueEventCode() : "");
   const openDateText = $("#openDate").value;
   const openTimeText = $("#openTime").value.trim();
   const closeDateText = $("#closeDate").value;
@@ -1298,6 +1332,23 @@ document.addEventListener("click", async (event) => {
   if (button.dataset.calendarEvent) {
     const selectedEvent = events.find((item) => item.id === button.dataset.calendarEvent);
     if (selectedEvent) openGoogleCalendar(selectedEvent);
+  }
+  if (button.dataset.createEventLink) {
+    const selectedEvent = events.find((item) => item.id === button.dataset.createEventLink);
+    if (!selectedEvent) return;
+    button.disabled = true;
+    try {
+      const code = createUniqueEventCode();
+      await updateDoc(doc(db, "events", selectedEvent.id), { shareCode: code, updatedAt: serverTimestamp() });
+      await copyText(eventShareUrl({ ...selectedEvent, shareCode: code }), "Đã tạo và sao chép liên kết sự kiện.");
+    } catch (error) {
+      button.disabled = false;
+      notice(error.message || "Không thể tạo liên kết sự kiện.", "error");
+    }
+  }
+  if (button.dataset.copyEventLink) {
+    const selectedEvent = events.find((item) => item.id === button.dataset.copyEventLink);
+    if (selectedEvent?.shareCode) await copyText(eventShareUrl(selectedEvent), "Đã sao chép liên kết sự kiện.");
   }
   if (button.dataset.quickRegistrations) await openQuickRegistrations(button.dataset.quickRegistrations);
   if (button.dataset.exportEvent) await downloadRegistrationExcel(button.dataset.exportEvent, "", button);
