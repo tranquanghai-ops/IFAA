@@ -128,10 +128,46 @@ function eventShareUrl(event) {
 async function copyText(value, successMessage) {
   try {
     await navigator.clipboard.writeText(value);
-    notice(successMessage, "success");
   } catch {
-    window.prompt("Sao chép liên kết:", value);
+    const input = document.createElement("textarea");
+    input.value = value;
+    input.setAttribute("readonly", "");
+    input.style.position = "fixed";
+    input.style.opacity = "0";
+    document.body.appendChild(input);
+    input.select();
+    const copied = document.execCommand("copy");
+    input.remove();
+    if (!copied) return notice("Không thể sao chép tự động. Vui lòng thử lại.", "error");
   }
+  notice(successMessage, "success");
+}
+
+function requestAdminText({ title, message = "", value = "", placeholder = "" }) {
+  const dialog = $("#adminTextDialog");
+  const form = $("#adminTextForm");
+  const input = $("#adminTextInput");
+  $("#adminTextTitle").textContent = title;
+  $("#adminTextMessage").textContent = message;
+  input.value = value;
+  input.placeholder = placeholder;
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      dialog.oncancel = null;
+      form.onsubmit = null;
+      $("#adminTextCancel").onclick = null;
+      if (dialog.open) dialog.close();
+      resolve(result);
+    };
+    $("#adminTextCancel").onclick = () => finish("");
+    dialog.oncancel = (event) => { event.preventDefault(); finish(""); };
+    form.onsubmit = (event) => { event.preventDefault(); finish(input.value.trim()); };
+    dialog.showModal();
+    setTimeout(() => { input.focus(); input.select(); }, 0);
+  });
 }
 
 function calendarStamp(value, dateOnly = false) {
@@ -931,9 +967,9 @@ $("#descriptionBlock").onchange = (event) => runDescriptionCommand("formatBlock"
 $("#descriptionSize").onchange = (event) => runDescriptionCommand("fontSize", event.target.value);
 $("#descriptionColor").oninput = (event) => runDescriptionCommand("foreColor", event.target.value);
 $("#descriptionBackgroundColor").oninput = (event) => runDescriptionCommand("hiliteColor", event.target.value);
-$("#insertDescriptionLink").onclick = () => {
+$("#insertDescriptionLink").onclick = async () => {
   rememberDescriptionSelection();
-  const url = window.prompt("Nhập liên kết (https://...):", "https://");
+  const url = await requestAdminText({ title: "Chèn liên kết", message: "Nhập địa chỉ trang đích bắt đầu bằng https://", value: "https://", placeholder: "https://..." });
   if (!url) return;
   if (!/^https:\/\//i.test(url)) return notice("Liên kết phải bắt đầu bằng https://", "error");
   runDescriptionCommand("createLink", url);
@@ -1358,12 +1394,7 @@ document.addEventListener("click", async (event) => {
   if (button.dataset.copyGroupLink) {
     const selectedGroup = groups.find((item) => item.id === button.dataset.copyGroupLink);
     const link = groupShareUrl(selectedGroup || { id: button.dataset.copyGroupLink });
-    try {
-      await navigator.clipboard.writeText(link);
-      notice("Đã sao chép liên kết riêng của nhóm.", "success");
-    } catch {
-      window.prompt("Sao chép liên kết nhóm:", link);
-    }
+    await copyText(link, "Đã sao chép liên kết riêng của nhóm.");
   }
   if (button.dataset.delete) {
     const selected = events.find((item) => item.id === button.dataset.delete);
