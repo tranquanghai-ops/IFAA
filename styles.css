@@ -400,3 +400,29 @@
 /* V2.3: ngành tùy chọn và chế độ xem riêng sự kiện */
 #profileFacultyOther:not(.hidden){display:block;margin-top:10px}
 #eventSectionHead.hidden,#studentStatusFilters.hidden{display:none!important}
+
+
+/* V2.4: popup cố định, xác nhận đồng bộ và bố cục thao tác Admin */
+#notice:not(.hidden),#adminNotice:not(.hidden){
+  position:fixed;z-index:12000;top:max(14px,env(safe-area-inset-top));left:50%;
+  width:min(620px,calc(100vw - 24px));margin:0;transform:translateX(-50%);
+  box-shadow:0 16px 45px rgba(15,23,42,.22);border:1px solid rgba(23,33,58,.12);
+  font-weight:700;animation:notice-pop .2s ease-out
+}
+@keyframes notice-pop{from{opacity:0;transform:translate(-50%,-12px)}to{opacity:1;transform:translate(-50%,0)}}
+.confirm-dialog{width:min(480px,calc(100vw - 24px));border-radius:20px}
+.confirm-card{padding:26px}
+.confirm-symbol{display:grid;place-items:center;width:42px;height:42px;border-radius:50%;background:#fff1f0;color:var(--brand);font-size:24px;font-weight:900}
+.confirm-card h2{margin:14px 0 6px;font-size:24px}
+.confirm-card p{margin:0;color:var(--muted);font-size:16px}
+.confirm-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:24px}
+#profileFacultyOther:not(.hidden),#profileMajorOther:not(.hidden){display:block;margin-top:10px}
+.admin-card-position{flex-direction:column;align-items:stretch;background:transparent;border:0;padding:0}
+.admin-position-controls{display:flex;align-items:center;justify-content:flex-end;gap:4px;padding:3px;border:1px solid #d9dfeb;border-radius:10px;background:#f7f8fb}
+.admin-position-controls>span{padding:0 4px;color:var(--muted);font-size:10px;font-weight:850}
+.admin-card-position .admin-event-link{width:100%;white-space:nowrap}
+@media(max-width:760px){
+  .confirm-card{padding:20px}
+  .confirm-actions .btn{flex:1}
+  .admin-card-position{max-width:112px}
+}
