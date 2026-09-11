@@ -18,7 +18,19 @@ const $ = (selector) => document.querySelector(selector);
 const safe = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
 const millis = (value) => value?.toDate ? value.toDate().getTime() : (value ? new Date(value).getTime() : null);
 const studentIdentifier = (email) => String(email || "").toLowerCase().endsWith(STUDENT_DOMAIN) ? String(email).split("@")[0].toUpperCase() : "";
-const linkParams = new URLSearchParams(window.location.search);
+function resolveLinkParams() {
+  const directParams = new URLSearchParams(window.location.search);
+  if (directParams.get("e") || directParams.get("x")) return directParams;
+  try {
+    const referringPage = new URL(document.referrer);
+    if (referringPage.hostname === "ifa.tdtu.edu.vn") return referringPage.searchParams;
+  } catch {
+    // Trang được mở trực tiếp hoặc trình duyệt không cung cấp địa chỉ trang chứa iframe.
+  }
+  return directParams;
+}
+
+const linkParams = resolveLinkParams();
 const linkedCode = linkParams.get("e")?.trim() || "";
 const linkedEventCode = linkParams.get("x")?.trim() || "";
 let eventsLoaded = false;
