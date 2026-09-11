@@ -4,6 +4,7 @@ import { getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateD
 import { firebaseConfig, OWNER_EMAIL } from "../firebase-config.mjs";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
+const DEFAULT_PUBLIC_BASE_URL = "https://ifa.tdtu.edu.vn/dang-ky-su-kien";
 const EXTERNAL_CATEGORIES = new Set(["Sự kiện Trường", "Sự kiện Khoa khác"]);
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -70,7 +71,7 @@ const purgingGroupIds = new Set();
 let regs = [];
 let admins = [];
 let groups = [];
-let settings = { faculties: [DEFAULT_FACULTY] };
+let settings = { faculties: [DEFAULT_FACULTY], publicBaseUrl: DEFAULT_PUBLIC_BASE_URL };
 let adminStatusFilter = "all";
 let adminEventView = localStorage.getItem("ifaa-admin-event-view") === "list" ? "list" : "cards";
 let registrationPageSize = 20;
@@ -97,10 +98,20 @@ function groupCode(group) {
   return shareCode(group?.shareCode || group?.name) || group?.id || "NHOM";
 }
 
+function configuredPublicBaseUrl() {
+  const value = String(settings.publicBaseUrl || DEFAULT_PUBLIC_BASE_URL).trim();
+  try {
+    const url = new URL(value);
+    url.search = "";
+    url.hash = "";
+    return url;
+  } catch {
+    return new URL(DEFAULT_PUBLIC_BASE_URL);
+  }
+}
+
 function groupShareUrl(group) {
-  const url = new URL("../", window.location.href);
-  url.search = "";
-  url.hash = "";
+  const url = configuredPublicBaseUrl();
   url.searchParams.set("e", groupCode(group));
   return url.toString();
 }
@@ -120,7 +131,7 @@ function createUniqueEventCode(length = 7) {
 }
 
 function eventShareUrl(event) {
-  const url = new URL("https://ifa-activities.web.app/");
+  const url = configuredPublicBaseUrl();
   url.searchParams.set("x", shareCode(event?.shareCode));
   return url.toString();
 }
@@ -738,6 +749,8 @@ function openGroup(group = null) {
 function renderFacultySettings() {
   const faculties = settings.faculties || [DEFAULT_FACULTY];
   $("#facultySettingsList").innerHTML = faculties.map((faculty) => `<span class="check-chip"><span>${safe(faculty)}</span>${faculty === DEFAULT_FACULTY ? "" : `<button type="button" class="btn btn-small btn-danger" data-remove-faculty="${safe(faculty)}">×</button>`}</span>`).join("");
+  const publicUrlInput = $("#publicBaseUrl");
+  if (publicUrlInput && document.activeElement !== publicUrlInput) publicUrlInput.value = settings.publicBaseUrl || DEFAULT_PUBLIC_BASE_URL;
 }
 
 function renderEventFaculties(selected = [DEFAULT_FACULTY]) {
@@ -1234,8 +1247,14 @@ $("#addFacultyBtn").onclick = () => {
 $("#settingsForm").onsubmit = async (event) => {
   event.preventDefault();
   try {
-    await setDoc(doc(db, "settings", "main"), { faculties: settings.faculties || [DEFAULT_FACULTY], participantDomains: ["student.tdtu.edu.vn", "tdtu.edu.vn"], updatedBy: user.email, updatedAt: serverTimestamp() }, { merge: true });
-    notice("Đã lưu thiết lập.", "success");
+    const publicUrl = new URL($("#publicBaseUrl").value.trim());
+    if (publicUrl.protocol !== "https:") throw Error("Đường dẫn công khai phải bắt đầu bằng https://");
+    publicUrl.search = "";
+    publicUrl.hash = "";
+    settings.publicBaseUrl = publicUrl.toString().replace(/\/$/, "");
+    await setDoc(doc(db, "settings", "main"), { faculties: settings.faculties || [DEFAULT_FACULTY], publicBaseUrl: settings.publicBaseUrl, participantDomains: ["student.tdtu.edu.vn", "tdtu.edu.vn"], updatedBy: user.email, updatedAt: serverTimestamp() }, { merge: true });
+    renderFacultySettings();
+    notice("Đã lưu thiết lập. Các nút Copy link đã dùng đường dẫn mới.", "success");
   } catch (error) {
     notice(error.message, "error");
   }
