@@ -1,0 +1,12 @@
+{
+  "name": "ifa-activities-tools",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "migrate:check": "node scripts/migrate-firestore.mjs --dry-run",
+    "migrate:firestore": "node scripts/migrate-firestore.mjs"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.4.0"
+  }
+}

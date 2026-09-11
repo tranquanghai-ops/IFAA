@@ -1492,7 +1492,10 @@ $("#loginBtn").onclick = async () => {
   try {
     await signInWithPopup(auth, provider);
   } catch (error) {
-    if (error?.code !== "auth/popup-closed-by-user" && error?.code !== "auth/cancelled-popup-request") showAdminLoginNotice("Tài khoản chưa được cấp quyền quản trị IFA+A.");
+    if (error?.code !== "auth/popup-closed-by-user" && error?.code !== "auth/cancelled-popup-request") {
+      const code = error?.code || "auth/unknown";
+      showAdminLoginNotice(`Lỗi đăng nhập (${code}): ${error?.message || "Không xác định được nguyên nhân."}`);
+    }
   }
 };
 $("#logoutBtn").onclick = () => signOut(auth);
@@ -1506,7 +1509,7 @@ onAuthStateChanged(auth, async (currentUser) => {
   const resolvedRole = currentUser.emailVerified ? await accessRole(currentUser) : "";
   if (!resolvedRole) {
     await signOut(auth);
-    showAdminLoginNotice("Tài khoản chưa được cấp quyền quản trị IFA+A.");
+    showAdminLoginNotice(`Google đã chọn tài khoản ${currentUser.email || "(không có email)"}, nhưng tài khoản này chưa có quyền quản trị IFA+A.`);
     return;
   }
   showAdminLoginNotice();

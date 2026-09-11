@@ -1,1 +1,30 @@
-{"firestore":{"rules":"firestore.rules"},"hosting":{"public":".","ignore":["firebase.json","**/.*","**/node_modules/**"]}}
+{
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "hosting": {
+    "public": ".",
+    "ignore": [
+      "firebase.json",
+      ".firebaserc",
+      "firestore.rules",
+      "README.md",
+      "node_modules/**",
+      ".git/**",
+      ".github/**"
+    ],
+    "cleanUrls": true,
+    "trailingSlash": true,
+    "headers": [
+      {
+        "source": "**/*.@(js|mjs|css|html)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      }
+    ]
+  }
+}
