@@ -5,6 +5,7 @@ import { firebaseConfig, OWNER_EMAIL } from "../firebase-config.mjs";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
 const DEFAULT_PUBLIC_BASE_URL = "https://ifa.tdtu.edu.vn/dang-ky-su-kien";
+const DEFAULT_ATTENDANCE_BASE_URL = "https://ifa-activities.web.app/check-in/";
 const EXTERNAL_CATEGORIES = new Set(["Sự kiện Trường", "Sự kiện Khoa khác"]);
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -75,7 +76,7 @@ const purgingGroupIds = new Set();
 let regs = [];
 let admins = [];
 let groups = [];
-let settings = { faculties: [DEFAULT_FACULTY], publicBaseUrl: DEFAULT_PUBLIC_BASE_URL };
+let settings = { faculties: [DEFAULT_FACULTY], publicBaseUrl: DEFAULT_PUBLIC_BASE_URL, attendancePublicBaseUrl: DEFAULT_ATTENDANCE_BASE_URL };
 let adminStatusFilter = "all";
 let adminEventView = localStorage.getItem("ifaa-admin-event-view") === "list" ? "list" : "cards";
 let registrationPageSize = 20;
@@ -112,6 +113,24 @@ function configuredPublicBaseUrl() {
   } catch {
     return new URL(DEFAULT_PUBLIC_BASE_URL);
   }
+}
+
+function configuredAttendanceBaseUrl() {
+  const value = String(settings.attendancePublicBaseUrl || DEFAULT_ATTENDANCE_BASE_URL).trim();
+  try {
+    const url = new URL(value);
+    url.search = "";
+    url.hash = "";
+    return url;
+  } catch {
+    return new URL(DEFAULT_ATTENDANCE_BASE_URL);
+  }
+}
+
+function attendanceShareUrl(sessionId) {
+  const url = configuredAttendanceBaseUrl();
+  url.searchParams.set("event", sessionId);
+  return url.toString();
 }
 
 function groupShareUrl(group) {
@@ -755,6 +774,8 @@ function renderFacultySettings() {
   $("#facultySettingsList").innerHTML = faculties.map((faculty) => `<span class="check-chip"><span>${safe(faculty)}</span>${faculty === DEFAULT_FACULTY ? "" : `<button type="button" class="btn btn-small btn-danger" data-remove-faculty="${safe(faculty)}">×</button>`}</span>`).join("");
   const publicUrlInput = $("#publicBaseUrl");
   if (publicUrlInput && document.activeElement !== publicUrlInput) publicUrlInput.value = settings.publicBaseUrl || DEFAULT_PUBLIC_BASE_URL;
+  const attendanceUrlInput = $("#attendancePublicBaseUrl");
+  if (attendanceUrlInput && document.activeElement !== attendanceUrlInput) attendanceUrlInput.value = settings.attendancePublicBaseUrl || DEFAULT_ATTENDANCE_BASE_URL;
 }
 
 function renderEventFaculties(selected = [DEFAULT_FACULTY]) {
@@ -1263,7 +1284,12 @@ $("#settingsForm").onsubmit = async (event) => {
     publicUrl.search = "";
     publicUrl.hash = "";
     settings.publicBaseUrl = publicUrl.toString().replace(/\/$/, "");
-    await setDoc(doc(db, "settings", "main"), { faculties: settings.faculties || [DEFAULT_FACULTY], publicBaseUrl: settings.publicBaseUrl, participantDomains: ["student.tdtu.edu.vn", "tdtu.edu.vn"], updatedBy: user.email, updatedAt: serverTimestamp() }, { merge: true });
+    const attendanceUrl = new URL($("#attendancePublicBaseUrl").value.trim());
+    if (attendanceUrl.protocol !== "https:") throw Error("Đường dẫn điểm danh phải bắt đầu bằng https://");
+    attendanceUrl.search = "";
+    attendanceUrl.hash = "";
+    settings.attendancePublicBaseUrl = attendanceUrl.toString();
+    await setDoc(doc(db, "settings", "main"), { faculties: settings.faculties || [DEFAULT_FACULTY], publicBaseUrl: settings.publicBaseUrl, attendancePublicBaseUrl: settings.attendancePublicBaseUrl, participantDomains: ["student.tdtu.edu.vn", "tdtu.edu.vn"], updatedBy: user.email, updatedAt: serverTimestamp() }, { merge: true });
     renderFacultySettings();
     notice("Đã lưu thiết lập. Các nút Copy link đã dùng đường dẫn mới.", "success");
   } catch (error) {
@@ -1779,7 +1805,7 @@ document.addEventListener("click", async (event) => {
 });
 
 $("#attendanceCopyLink").onclick = async () => {
-  await copyText(location.origin + "/check-in/?event=" + selectedAttendanceSession.id, "Đã sao chép link quét điểm danh.");
+  await copyText(attendanceShareUrl(selectedAttendanceSession.id), "Đã sao chép link quét điểm danh.");
 };
 $("#attendanceEnd").onclick = async () => {
   await updateDoc(doc(db, "attendanceSessions", selectedAttendanceSession.id), { status: "ended", endedAt: serverTimestamp() });
