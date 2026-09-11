@@ -25,11 +25,7 @@ jobs:
         with:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_IFAA }}
 
-      - name: Show Firebase deployment account
-        run: node -e "const fs=require('fs');const x=JSON.parse(fs.readFileSync(process.env.GOOGLE_GHA_CREDS_PATH,'utf8'));console.log('Firebase deployment account:',x.client_email||x.service_account_impersonation_url||'unknown')"
-
       - name: Deploy Firestore Rules
-        continue-on-error: true
         run: npx --yes firebase-tools@latest deploy --only firestore:rules --project ifa-activities --non-interactive
 
       - name: Deploy to Firebase Hosting
