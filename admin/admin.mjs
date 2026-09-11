@@ -66,13 +66,15 @@ let isSubAdmin = false;
 let events = [];
 const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const purgingEventIds = new Set();
+const purgingGroupIds = new Set();
 let regs = [];
 let admins = [];
 let groups = [];
 let settings = { faculties: [DEFAULT_FACULTY] };
 let adminStatusFilter = "all";
 let adminEventView = localStorage.getItem("ifaa-admin-event-view") === "list" ? "list" : "cards";
-const REGISTRATION_PAGE_SIZE = 20;
+let registrationPageSize = 20;
+const registrationStatusFilters = new Set(["open", "ended"]);
 let registrationPageIndex = 0;
 let registrationPageCursors = [null];
 let registrationHasNext = false;
@@ -291,6 +293,8 @@ function showPane(name) {
 function render() {
   const activeEvents = events.filter((item) => !item.deletedAt);
   const trashedEvents = events.filter((item) => item.deletedAt);
+  const activeGroups = groups.filter((item) => !item.deletedAt);
+  const trashedGroups = groups.filter((item) => item.deletedAt);
   const counts = activeEvents.reduce((result, item) => {
     result[eventState(item)] += 1;
     return result;
@@ -304,7 +308,7 @@ function render() {
 
   const filteredEvents = (adminStatusFilter === "all" ? activeEvents.filter((event) => eventState(event) !== "hidden") : activeEvents.filter((event) => eventState(event) === adminStatusFilter))
     .slice().sort((a, b) => Number(isExternalEvent(a)) - Number(isExternalEvent(b)) || eventPosition(a) - eventPosition(b));
-  const orderedGroups = groups.slice().sort((a, b) => groupPosition(a) - groupPosition(b));
+  const orderedGroups = activeGroups.slice().sort((a, b) => groupPosition(a) - groupPosition(b));
   $("#eventRows").className = `admin-event-groups view-${adminEventView}`;
   document.querySelectorAll("[data-event-view]").forEach((button) => button.classList.toggle("active", button.dataset.eventView === adminEventView));
   const groupedAdminEvents = new Map();
@@ -351,7 +355,7 @@ function render() {
     const toneClass = groupId === "__ungrouped__" ? "admin-group-ungrouped" : `group-tone-${adminTone++ % 5}`;
     const groupIndex = orderedGroups.findIndex((item) => item.id === groupId);
     const groupRegistrationCount = activeEvents.filter((item) => item.groupId === groupId).reduce((total, item) => total + Number(item.registeredCount || 0), 0);
-    const groupMove = groupId === "__ungrouped__" ? `<b>${items.length} sự kiện</b>` : `<div class="admin-group-move"><b>${items.length} sự kiện · ${groupRegistrationCount} lượt đăng ký</b><button class="btn btn-small btn-download-list" data-export-group="${groupId}" ${groupRegistrationCount ? "" : "disabled"}><span class="sheet-icon" aria-hidden="true">▦</span> Tải danh sách nhóm</button><button class="btn btn-small" data-move-group="${groupId}" data-direction="-1" ${groupIndex <= 0 ? "disabled" : ""}>↑ Nhóm</button><button class="btn btn-small" data-move-group="${groupId}" data-direction="1" ${groupIndex < 0 || groupIndex >= orderedGroups.length - 1 ? "disabled" : ""}>↓ Nhóm</button></div>`;
+    const groupMove = groupId === "__ungrouped__" ? `<b>${items.length} sự kiện</b>` : `<div class="admin-group-move"><b>${items.length} sự kiện · ${groupRegistrationCount} lượt đăng ký</b><button class="btn btn-small btn-download-list" data-export-group="${groupId}" ${groupRegistrationCount ? "" : "disabled"}><span class="sheet-icon" aria-hidden="true">▦</span> Tải danh sách nhóm</button>${eventGroup?.shareCode ? `<button class="btn btn-small btn-copy-link" data-copy-group-link="${groupId}">🔗 Sao chép link nhóm</button>` : ""}<button class="btn btn-small" data-move-group="${groupId}" data-direction="-1" ${groupIndex <= 0 ? "disabled" : ""}>↑ Nhóm</button><button class="btn btn-small" data-move-group="${groupId}" data-direction="1" ${groupIndex < 0 || groupIndex >= orderedGroups.length - 1 ? "disabled" : ""}>↓ Nhóm</button></div>`;
     return `<section class="admin-event-group ${toneClass}"><div class="admin-event-group-head"><div><span>${groupId === "__ungrouped__" ? "SỰ KIỆN RIÊNG" : "NHÓM SỰ KIỆN"}</span><h3>${safe(title)}</h3>${limit ? `<small>${safe(limit)}</small>` : ""}</div>${groupMove}</div><div class="event-grid admin-event-grid">${items.map((item) => adminEventCard(item, items)).join("")}</div></section>`;
   }).join("") : '<div class="card empty">Không có sự kiện ở trạng thái này.</div>';
 
@@ -364,8 +368,19 @@ function render() {
     const hiddenCount = groupedItems.filter((item) => eventState(item) === "hidden").length;
     const endedCount = groupedItems.filter((item) => eventState(item) === "ended").length;
     const groupState = hiddenCount === eventCount && eventCount ? "Đã ẩn toàn bộ" : endedCount === eventCount && eventCount ? "Đã kết thúc" : "Theo từng sự kiện";
-    return `<tr><td><b>${safe(group.name)}</b><br><small>Mã: ${safe(groupCode(group))}</small></td><td>${limit}</td><td>${eventCount}<br><small>${groupState}</small></td><td>${visibility}</td><td><div class="actions"><button class="btn btn-small btn-soft" data-copy-group-link="${group.id}">Sao chép liên kết</button><button class="btn btn-small btn-calendar" data-calendar-group="${group.id}">＋ Lịch cả nhóm</button><button class="btn btn-small btn-download-list" data-export-group="${group.id}" ${groupRegisteredCount ? "" : "disabled"}><span class="sheet-icon" aria-hidden="true">▦</span> Tải danh sách nhóm</button></div></td><td><div class="actions"><button class="btn btn-small" data-move-group="${group.id}" data-direction="-1" ${groupIndex <= 0 ? "disabled" : ""}>↑</button><button class="btn btn-small" data-move-group="${group.id}" data-direction="1" ${groupIndex >= orderedGroups.length - 1 ? "disabled" : ""}>↓</button><button class="btn btn-small" data-edit-group="${group.id}">Sửa nhóm</button></div></td></tr>`;
+    return `<tr><td><b>${safe(group.name)}</b><br><small>Mã: ${safe(groupCode(group))}</small></td><td>${limit}</td><td>${eventCount}<br><small>${groupState}</small></td><td>${visibility}</td><td><div class="actions"><button class="btn btn-small btn-soft" data-copy-group-link="${group.id}">Sao chép liên kết</button><button class="btn btn-small btn-calendar" data-calendar-group="${group.id}">＋ Lịch cả nhóm</button><button class="btn btn-small btn-download-list" data-export-group="${group.id}" ${groupRegisteredCount ? "" : "disabled"}><span class="sheet-icon" aria-hidden="true">▦</span> Tải danh sách nhóm</button></div></td><td><div class="actions"><button class="btn btn-small" data-move-group="${group.id}" data-direction="-1" ${groupIndex <= 0 ? "disabled" : ""}>↑</button><button class="btn btn-small" data-move-group="${group.id}" data-direction="1" ${groupIndex >= orderedGroups.length - 1 ? "disabled" : ""}>↓</button><button class="btn btn-small" data-edit-group="${group.id}">Sửa nhóm</button><button class="btn btn-small btn-danger" data-delete-group="${group.id}">Xóa nhóm</button></div></td></tr>`;
   }).join("") || '<tr><td colspan="6" class="empty">Chưa có nhóm sự kiện.</td></tr>';
+
+  if ($("#trashGroupRows")) {
+    $("#trashGroupRows").innerHTML = isOwner && trashedGroups.length
+      ? trashedGroups.slice().sort((a, b) => (millis(b.deletedAt) || 0) - (millis(a.deletedAt) || 0)).map((item) => {
+          const deletedTime = millis(item.deletedAt);
+          const purgeTime = deletedTime ? deletedTime + TRASH_RETENTION_MS : 0;
+          const itemCount = events.filter((event) => event.deletedWithGroupId === item.id).length;
+          return `<tr><td><b>${safe(item.name)}</b><br><small>Mã: ${safe(groupCode(item))}</small></td><td>${itemCount}</td><td>${deletedTime ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" }).format(new Date(deletedTime)) : "—"}<br><small>${safe(item.deletedByEmail || "")}</small></td><td><b>${purgeTime ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" }).format(new Date(purgeTime)) : "—"}</b></td><td><div class="actions"><button class="btn btn-small btn-restore" data-restore-group="${item.id}">↶ Khôi phục nhóm</button><button class="btn btn-small btn-danger" data-purge-group="${item.id}">Xóa vĩnh viễn</button></div></td></tr>`;
+        }).join("")
+      : '<tr><td colspan="5" class="empty">Không có nhóm trong thùng rác.</td></tr>';
+  }
 
   if ($("#trashRows")) {
     $("#trashRows").innerHTML = isOwner && trashedEvents.length
@@ -396,13 +411,20 @@ function updateAdminCountdowns() {
 
 setInterval(updateAdminCountdowns, 1000);
 
+function registrationStatusMatches(event) {
+  const state = eventState(event);
+  return (state === "open" && registrationStatusFilters.has("open"))
+    || (state === "ended" && registrationStatusFilters.has("ended"))
+    || (state === "hidden" && registrationStatusFilters.has("hidden"));
+}
+
 function refreshRegistrationFilters() {
   const selectedGroup = $("#groupFilter").value;
   const selectedEvent = $("#eventFilter").value;
-  $("#groupFilter").innerHTML = '<option value="">Tất cả nhóm sự kiện</option>' + groups.slice().sort((a, b) => groupPosition(a) - groupPosition(b)).map((group) => `<option value="${group.id}">${safe(group.name)}</option>`).join("");
+  $("#groupFilter").innerHTML = '<option value="">Tất cả nhóm sự kiện</option>' + groups.filter((group) => !group.deletedAt).slice().sort((a, b) => groupPosition(a) - groupPosition(b)).map((group) => `<option value="${group.id}">${safe(group.name)}</option>`).join("");
   if (groups.some((group) => group.id === selectedGroup)) $("#groupFilter").value = selectedGroup;
   const activeGroup = $("#groupFilter").value;
-  const availableEvents = events.filter((event) => !event.deletedAt && (!activeGroup || event.groupId === activeGroup)).slice().sort((a, b) => eventPosition(a) - eventPosition(b));
+  const availableEvents = events.filter((event) => !event.deletedAt && !isExternalEvent(event) && registrationStatusMatches(event) && (!activeGroup || event.groupId === activeGroup)).slice().sort((a, b) => eventPosition(a) - eventPosition(b));
   $("#eventFilter").innerHTML = '<option value="">— Chọn sự kiện để tải danh sách —</option>' + availableEvents.map((event) => `<option value="${event.id}">${safe(event.title)} · ${safe(event.date || "")}</option>`).join("");
   if (availableEvents.some((event) => event.id === selectedEvent)) $("#eventFilter").value = selectedEvent;
 }
@@ -440,13 +462,13 @@ async function loadRegistrationPage(direction = 0) {
   try {
     const clauses = [where("eventId", "==", eventId)];
     if (cursor) clauses.push(startAfter(cursor));
-    clauses.push(limit(REGISTRATION_PAGE_SIZE + 1));
+    clauses.push(limit(registrationPageSize + 1));
     const snapshot = await getDocs(query(collection(db, "registrations"), ...clauses));
     if (requestId !== registrationRequestId || $("#eventFilter").value !== eventId) return;
-    const visibleDocs = snapshot.docs.slice(0, REGISTRATION_PAGE_SIZE);
+    const visibleDocs = snapshot.docs.slice(0, registrationPageSize);
     regs = visibleDocs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => (millis(b.createdAt) || 0) - (millis(a.createdAt) || 0));
     registrationPageIndex = targetPage;
-    registrationHasNext = snapshot.docs.length > REGISTRATION_PAGE_SIZE;
+    registrationHasNext = snapshot.docs.length > registrationPageSize;
     registrationLoadedEventId = eventId;
     if (registrationHasNext && visibleDocs.length) registrationPageCursors[targetPage + 1] = visibleDocs[visibleDocs.length - 1];
   } catch (error) {
@@ -474,16 +496,16 @@ function renderRegs() {
   $("#registrationPageText").textContent = `Trang ${registrationPageIndex + 1}`;
   if (!eventId) {
     $("#registrationLoadHint").textContent = "Danh sách chưa được tải để tiết kiệm lượt đọc dữ liệu.";
-    $("#regRows").innerHTML = '<tr><td colspan="9" class="empty">Vui lòng chọn một sự kiện để xem danh sách đăng ký.</td></tr>';
+    $("#regRows").innerHTML = '<tr><td colspan="8" class="empty">Vui lòng chọn một sự kiện để xem danh sách đăng ký.</td></tr>';
     return;
   }
   if (registrationLoading) {
-    $("#registrationLoadHint").textContent = "Đang tải tối đa 20 lượt đăng ký…";
-    $("#regRows").innerHTML = '<tr><td colspan="9" class="empty">Đang tải danh sách đăng ký…</td></tr>';
+    $("#registrationLoadHint").textContent = `Đang tải tối đa ${registrationPageSize} lượt đăng ký…`;
+    $("#regRows").innerHTML = '<tr><td colspan="8" class="empty">Đang tải danh sách đăng ký…</td></tr>';
     return;
   }
   $("#registrationLoadHint").textContent = list.length ? `Đang hiển thị ${list.length} người ở trang ${registrationPageIndex + 1}.` : "Sự kiện này chưa có người đăng ký.";
-  $("#regRows").innerHTML = list.map((registration, index) => `<tr><td class="col-stt">${registrationPageIndex * REGISTRATION_PAGE_SIZE + index + 1}</td><td class="col-identifier"><b>${safe(registration.identifier || registration.mssv)}</b></td><td>${safe(registration.name)}</td><td>${safe(registration.phone)}</td><td>${safe(registration.faculty)}</td><td>${safe(registration.participantType || "Sinh viên")}</td><td>${safe(registration.eventTitle)}</td><td>${ts(registration.createdAt)}</td><td><button class="btn btn-small btn-danger" data-delete-registration="${registration.id}">Xóa</button></td></tr>`).join("") || '<tr><td colspan="9" class="empty">Sự kiện này chưa có người đăng ký.</td></tr>';
+  $("#regRows").innerHTML = list.map((registration, index) => `<tr><td class="col-stt">${registrationPageIndex * registrationPageSize + index + 1}</td><td class="col-identifier"><b>${safe(registration.identifier || registration.mssv)}</b></td><td>${safe(registration.name)}</td><td>${safe(registration.faculty)}</td><td>${safe(registration.participantType || "Sinh viên")}</td><td>${safe(registration.eventTitle)}</td><td>${ts(registration.createdAt)}</td><td><button class="btn btn-small btn-danger" data-delete-registration="${registration.id}">Xóa</button></td></tr>`).join("") || '<tr><td colspan="8" class="empty">Sự kiện này chưa có người đăng ký.</td></tr>';
 }
 
 async function fetchRegistrations(field, value) {
@@ -545,7 +567,7 @@ function renderQuickRegistrations() {
     $("#quickRegistrationRows").innerHTML = '<tr><td colspan="6" class="empty">Đang tải danh sách đăng ký…</td></tr>';
     return;
   }
-  $("#quickRegistrationRows").innerHTML = quickRegistrationRows.map((registration, index) => `<tr><td class="col-stt">${quickRegistrationPageIndex * REGISTRATION_PAGE_SIZE + index + 1}</td><td class="col-identifier"><b>${safe(registration.identifier || registration.mssv)}</b></td><td>${safe(registration.name)}</td><td>${safe(registration.faculty)}</td><td>${safe(registration.participantType || "Sinh viên")}</td><td>${ts(registration.createdAt)}</td></tr>`).join("") || '<tr><td colspan="6" class="empty">Sự kiện này chưa có người đăng ký.</td></tr>';
+  $("#quickRegistrationRows").innerHTML = quickRegistrationRows.map((registration, index) => `<tr><td class="col-stt">${quickRegistrationPageIndex * registrationPageSize + index + 1}</td><td class="col-identifier"><b>${safe(registration.identifier || registration.mssv)}</b></td><td>${safe(registration.name)}</td><td>${safe(registration.faculty)}</td><td>${safe(registration.participantType || "Sinh viên")}</td><td>${ts(registration.createdAt)}</td></tr>`).join("") || '<tr><td colspan="6" class="empty">Sự kiện này chưa có người đăng ký.</td></tr>';
 }
 
 async function loadQuickRegistrationPage(direction = 0) {
@@ -565,13 +587,13 @@ async function loadQuickRegistrationPage(direction = 0) {
   try {
     const clauses = [where("eventId", "==", eventId)];
     if (cursor) clauses.push(startAfter(cursor));
-    clauses.push(limit(REGISTRATION_PAGE_SIZE + 1));
+    clauses.push(limit(registrationPageSize + 1));
     const snapshot = await getDocs(query(collection(db, "registrations"), ...clauses));
     if (requestId !== quickRegistrationRequestId || eventId !== quickRegistrationEventId) return;
-    const visibleDocs = snapshot.docs.slice(0, REGISTRATION_PAGE_SIZE);
+    const visibleDocs = snapshot.docs.slice(0, registrationPageSize);
     quickRegistrationRows = visibleDocs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => (millis(b.createdAt) || 0) - (millis(a.createdAt) || 0));
     quickRegistrationPageIndex = targetPage;
-    quickRegistrationHasNext = snapshot.docs.length > REGISTRATION_PAGE_SIZE;
+    quickRegistrationHasNext = snapshot.docs.length > registrationPageSize;
     if (quickRegistrationHasNext && visibleDocs.length) quickRegistrationPageCursors[targetPage + 1] = visibleDocs[visibleDocs.length - 1];
   } catch (error) {
     quickRegistrationRows = [];
@@ -623,7 +645,7 @@ async function removeRegistration(registration) {
 
 function refreshGroupOptions(selected = "") {
   const select = $("#groupId");
-  select.innerHTML = '<option value="">Không nhóm</option>' + groups.map((group) => `<option value="${group.id}">${safe(group.name)} — ${group.unlimited ? "không giới hạn" : `tối đa ${group.maxRegistrations}`}</option>`).join("") + '<option value="__new__">＋ Tạo nhóm mới</option>';
+  select.innerHTML = '<option value="">Không nhóm</option>' + groups.filter((group) => !group.deletedAt).map((group) => `<option value="${group.id}">${safe(group.name)} — ${group.unlimited ? "không giới hạn" : `tối đa ${group.maxRegistrations}`}</option>`).join("") + '<option value="__new__">＋ Tạo nhóm mới</option>';
   select.value = selected || "";
 }
 
@@ -665,6 +687,13 @@ async function permanentlyDeleteEvent(selected) {
   await deleteDoc(doc(db, "events", selected.id));
 }
 
+async function permanentlyDeleteGroup(selected) {
+  if (!selected || !isOwner) throw Error("Chỉ Chủ sở hữu được xóa vĩnh viễn.");
+  const groupedTrashEvents = events.filter((item) => item.deletedWithGroupId === selected.id && item.deletedAt);
+  for (const groupedEvent of groupedTrashEvents) await permanentlyDeleteEvent(groupedEvent);
+  await deleteDoc(doc(db, "eventGroups", selected.id));
+}
+
 async function cleanupExpiredTrash() {
   if (!isOwner) return;
   const cutoff = Date.now() - TRASH_RETENTION_MS;
@@ -677,6 +706,17 @@ async function cleanupExpiredTrash() {
       console.warn("Không thể tự xóa sự kiện hết hạn trong thùng rác:", error);
     } finally {
       purgingEventIds.delete(selected.id);
+    }
+  }
+  const expiredGroups = groups.filter((item) => item.deletedAt && (millis(item.deletedAt) || Infinity) <= cutoff && !purgingGroupIds.has(item.id));
+  for (const selected of expiredGroups) {
+    purgingGroupIds.add(selected.id);
+    try {
+      await permanentlyDeleteGroup(selected);
+    } catch (error) {
+      console.warn("Không thể tự xóa nhóm hết hạn trong thùng rác:", error);
+    } finally {
+      purgingGroupIds.delete(selected.id);
     }
   }
 }
@@ -695,6 +735,7 @@ function listen() {
     groups = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => (millis(b.createdAt) || 0) - (millis(a.createdAt) || 0));
     refreshGroupOptions($("#groupId").value);
     render();
+    if (isOwner) void cleanupExpiredTrash();
   }, (error) => notice(error.message, "error"));
 
   const eventsQuery = isSubAdmin
@@ -1074,7 +1115,7 @@ $("#groupForm").onsubmit = async (event) => {
 };
 
 async function moveGroup(groupId, direction) {
-  const ordered = groups.slice().sort((a, b) => groupPosition(a) - groupPosition(b));
+  const ordered = groups.filter((item) => !item.deletedAt).slice().sort((a, b) => groupPosition(a) - groupPosition(b));
   const from = ordered.findIndex((item) => item.id === groupId);
   const to = from + direction;
   if (from < 0 || to < 0 || to >= ordered.length) return;
@@ -1185,6 +1226,74 @@ document.addEventListener("click", async (event) => {
   if (button.dataset.copyEvent) openEvent(events.find((item) => item.id === button.dataset.copyEvent), true);
   if (button.id === "newGroupBtn") openGroup();
   if (button.dataset.closeGroup !== undefined) $("#groupDialog").close();
+  if (button.dataset.deleteGroup) {
+    const selectedGroup = groups.find((item) => item.id === button.dataset.deleteGroup && !item.deletedAt);
+    if (!selectedGroup) return;
+    const groupedEvents = events.filter((item) => item.groupId === selectedGroup.id && !item.deletedAt);
+    const approved = await confirmAction({
+      title: "Chuyển nhóm vào thùng rác?",
+      message: groupedEvents.length
+        ? `Nhóm “${selectedGroup.name}” và ${groupedEvents.length} sự kiện bên trong sẽ được chuyển vào thùng rác.`
+        : `Bạn có chắc muốn chuyển nhóm “${selectedGroup.name}” vào thùng rác?`,
+      verification: "XÓA"
+    });
+    if (!approved) return;
+    button.disabled = true;
+    button.textContent = "Đang chuyển…";
+    try {
+      await updateDoc(doc(db, "eventGroups", selectedGroup.id), {
+        deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email, updatedAt: serverTimestamp()
+      });
+      await Promise.all(groupedEvents.map((item) => updateDoc(doc(db, "events", item.id), {
+        deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email,
+        deletedPreviousStatus: item.status || "open", deletedWithGroupId: selectedGroup.id, updatedAt: serverTimestamp()
+      })));
+      notice("Đã chuyển nhóm sự kiện vào thùng rác.", "success");
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = "Xóa nhóm";
+      notice(error.message || "Không thể chuyển nhóm vào thùng rác.", "error");
+    }
+  }
+  if (button.dataset.restoreGroup) {
+    if (!isOwner) return notice("Chỉ Chủ sở hữu được khôi phục nhóm.", "error");
+    const selectedGroup = groups.find((item) => item.id === button.dataset.restoreGroup && item.deletedAt);
+    if (!selectedGroup) return;
+    const groupedEvents = events.filter((item) => item.deletedWithGroupId === selectedGroup.id && item.deletedAt);
+    button.disabled = true;
+    try {
+      await updateDoc(doc(db, "eventGroups", selectedGroup.id), {
+        deletedAt: null, deletedByUid: "", deletedByEmail: "", restoredAt: serverTimestamp(), restoredByEmail: user.email, updatedAt: serverTimestamp()
+      });
+      await Promise.all(groupedEvents.map((item) => updateDoc(doc(db, "events", item.id), {
+        deletedAt: null, deletedByUid: "", deletedByEmail: "", deletedWithGroupId: "",
+        status: item.deletedPreviousStatus || item.status || "open", restoredAt: serverTimestamp(), restoredByEmail: user.email, updatedAt: serverTimestamp()
+      })));
+      notice(`Đã khôi phục nhóm “${selectedGroup.name}” và ${groupedEvents.length} sự kiện.`, "success");
+    } catch (error) {
+      button.disabled = false;
+      notice(error.message || "Không thể khôi phục nhóm.", "error");
+    }
+  }
+  if (button.dataset.purgeGroup) {
+    if (!isOwner) return notice("Chỉ Chủ sở hữu được xóa vĩnh viễn.", "error");
+    const selectedGroup = groups.find((item) => item.id === button.dataset.purgeGroup && item.deletedAt);
+    if (!selectedGroup) return;
+    const approved = await confirmAction({
+      title: "Xóa vĩnh viễn nhóm?",
+      message: `Nhóm “${selectedGroup.name}”, các sự kiện và lượt đăng ký liên quan sẽ bị xóa vĩnh viễn.`,
+      verification: "XÓA"
+    });
+    if (!approved) return;
+    button.disabled = true;
+    try {
+      await permanentlyDeleteGroup(selectedGroup);
+      notice("Đã xóa vĩnh viễn nhóm sự kiện.", "success");
+    } catch (error) {
+      button.disabled = false;
+      notice(error.message || "Không thể xóa vĩnh viễn nhóm.", "error");
+    }
+  }
   if (button.dataset.editGroup) openGroup(groups.find((item) => item.id === button.dataset.editGroup));
   if (button.dataset.calendarEvent) {
     const selectedEvent = events.find((item) => item.id === button.dataset.calendarEvent);
@@ -1212,8 +1321,8 @@ document.addEventListener("click", async (event) => {
       const approved = await confirmAction({
         title: "Chuyển sự kiện vào thùng rác?",
         message: registeredCount
-          ? `Sự kiện “${selected.title}” có ${registeredCount} lượt đăng ký. Dữ liệu sẽ được giữ nguyên và có thể khôi phục trong 30 ngày.`
-          : `Sự kiện “${selected.title}” sẽ được giữ trong thùng rác 30 ngày trước khi xóa vĩnh viễn.`,
+          ? `Sự kiện “${selected.title}” có ${registeredCount} lượt đăng ký. Danh sách đăng ký sẽ được giữ nguyên.`
+          : `Bạn có chắc muốn chuyển sự kiện “${selected.title}” vào thùng rác?`,
         verification: "XÓA"
       });
       if (!approved) return;
@@ -1300,6 +1409,22 @@ document.addEventListener("click", async (event) => {
     renderFacultySettings();
   }
 });
+
+document.querySelectorAll(".registration-status-filter").forEach((checkbox) => {
+  checkbox.onchange = () => {
+    registrationStatusFilters.clear();
+    document.querySelectorAll(".registration-status-filter:checked").forEach((item) => registrationStatusFilters.add(item.value));
+    $("#eventFilter").value = "";
+    resetRegistrationPage();
+    refreshRegistrationFilters();
+    renderRegs();
+  };
+});
+$("#registrationPageSize").onchange = async () => {
+  registrationPageSize = Number($("#registrationPageSize").value) || 20;
+  resetRegistrationPage();
+  await loadRegistrationPage(0);
+};
 
 $("#eventFilter").onchange = async () => {
   resetRegistrationPage();
