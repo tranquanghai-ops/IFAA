@@ -1064,7 +1064,7 @@ $("#eventForm").onsubmit = async (event) => {
         if (invalidCapacityEvent) throw Error(`Không thể áp dụng sức chứa ${data.capacity}; sự kiện “${invalidCapacityEvent.title}” đã có ${invalidCapacityEvent.registeredCount || 0} người đăng ký.`);
       }
       const syncLabels = { description: "Mô tả", location: "Địa điểm", capacity: "Sức chứa", openAt: "Thời gian mở đăng ký", closeAt: "Thời gian đóng đăng ký" };
-      if (siblingEvents.length && !confirm(`Áp dụng ${syncFields.map((field) => syncLabels[field]).join(", ")} cho ${siblingEvents.length} sự kiện khác trong nhóm “${data.groupName}”?`)) {
+      if (siblingEvents.length && !(await confirmAction({ title: "Áp dụng cho cả nhóm?", message: `Áp dụng ${syncFields.map((field) => syncLabels[field]).join(", ")} cho ${siblingEvents.length} sự kiện khác trong nhóm “${data.groupName}”?` }))) {
         throw Error("Đã hủy thao tác áp dụng cho nhóm. Sự kiện chưa được lưu.");
       }
       await updateDoc(doc(db, "events", id), data);
@@ -1126,7 +1126,7 @@ $("#groupForm").onsubmit = async (event) => {
     }
     const groupedEvents = id ? events.filter((item) => item.groupId === id) : [];
     const statusNames = { closed: "kết thúc", hidden: "ẩn", open: "hiển thị lại" };
-    if (bulkStatus && groupedEvents.length && !confirm(`Áp dụng trạng thái “${statusNames[bulkStatus]}” cho toàn bộ ${groupedEvents.length} sự kiện trong nhóm này?`)) throw Error("Đã hủy thay đổi trạng thái nhóm.");
+    if (bulkStatus && groupedEvents.length && !(await confirmAction({ title: "Cập nhật cả nhóm?", message: `Áp dụng trạng thái “${statusNames[bulkStatus]}” cho toàn bộ ${groupedEvents.length} sự kiện trong nhóm này?` }))) throw Error("Đã hủy thay đổi trạng thái nhóm.");
     const effectiveMax = unlimited ? (Number.isInteger(maxRegistrations) && maxRegistrations >= 1 ? maxRegistrations : 2) : maxRegistrations;
     const data = { name, shareCode: code, maxRegistrations: effectiveMax, unlimited, linkOnly: $("#groupLinkOnly").checked, updatedAt: serverTimestamp() };
     if (id) {
@@ -1439,7 +1439,7 @@ document.addEventListener("click", async (event) => {
   }
   if (button.dataset.deleteRegistration) {
     const registration = regs.find((item) => item.id === button.dataset.deleteRegistration);
-    if (registration && confirm(`Xóa đăng ký của ${registration.name || registration.email} khỏi sự kiện “${registration.eventTitle}”?`)) try {
+    if (registration && await confirmAction({ title: "Xóa đăng ký?", message: `Xóa đăng ký của ${registration.name || registration.email} khỏi sự kiện “${registration.eventTitle}”?` })) try {
       button.disabled = true;
       await removeRegistration(registration);
       await loadRegistrationPage(0);
@@ -1449,7 +1449,7 @@ document.addEventListener("click", async (event) => {
       notice(error.message, "error");
     }
   }
-  if (button.dataset.removeAdmin && confirm(`Xóa quyền Admin của ${button.dataset.removeAdmin}?`)) try {
+  if (button.dataset.removeAdmin && await confirmAction({ title: "Xóa quyền Admin?", message: `Tài khoản ${button.dataset.removeAdmin} sẽ không còn quyền quản trị.` })) try {
     await deleteDoc(doc(db, "admins", button.dataset.removeAdmin));
     notice("Đã xóa Admin.", "success");
   } catch (error) {
@@ -1505,7 +1505,7 @@ $("#resetEventBtn").onclick = async () => {
       notice("Sự kiện này không có dữ liệu đăng ký.", "success");
       return;
     }
-    if (!confirm(`Xóa toàn bộ ${list.length} lượt đăng ký của sự kiện “${selectedEvent.title}”? Thao tác này không thể hoàn tác.`)) return;
+    if (!(await confirmAction({ title: "Xóa toàn bộ đăng ký?", message: `Xóa toàn bộ ${list.length} lượt đăng ký của sự kiện “${selectedEvent.title}”? Thao tác này không thể hoàn tác.`, verification: "XÓA" }))) return;
     for (let index = 0; index < list.length; index += 1) {
       button.textContent = `Đang xóa ${index + 1}/${list.length}…`;
       await removeRegistration(list[index]);
