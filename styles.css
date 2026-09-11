@@ -426,3 +426,14 @@
   .confirm-actions .btn{flex:1}
   .admin-card-position{max-width:112px}
 }
+
+
+/* V2.5: popup xác nhận sáng, rõ và không làm mờ nền */
+.confirm-dialog::backdrop{background:rgba(15,23,42,.34);backdrop-filter:none;-webkit-backdrop-filter:none}
+.confirm-dialog .confirm-card{
+  width:100%;padding:26px;border:1px solid #e4e7ec;border-radius:20px;
+  background:#fff;color:var(--ink);box-shadow:0 22px 65px rgba(15,23,42,.22)
+}
+.confirm-dialog .confirm-card h2{color:var(--ink)}
+.confirm-dialog .confirm-card p{color:#475467}
+@media(max-width:560px){.confirm-dialog .confirm-card{padding:20px}}
