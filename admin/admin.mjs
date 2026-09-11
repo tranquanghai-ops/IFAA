@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
-import { getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit, startAfter, serverTimestamp, Timestamp, runTransaction } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
+import { getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit, startAfter, serverTimestamp, Timestamp, runTransaction, writeBatch } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
 import { firebaseConfig, OWNER_EMAIL } from "../firebase-config.mjs";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
@@ -65,6 +65,10 @@ let isOwner = false;
 let currentRole = "admin";
 let isSubAdmin = false;
 let events = [];
+let attendanceSessions = [];
+let attendanceFilter = "open";
+let selectedAttendanceSession = null;
+let attendanceRoster = [];
 const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const purgingEventIds = new Set();
 const purgingGroupIds = new Set();
@@ -416,7 +420,7 @@ function render() {
       <div class="event-top admin-event-top"><div class="admin-event-heading"><div class="admin-event-badges"><span class="tag event-category">${safe(event.category || "Sự kiện Khoa")}</span><span class="tag ${statusClass}">${statusText}</span>${hotTag}${newTag}</div><h3>${safe(event.title)}</h3></div><div class="admin-card-position"><div class="admin-position-controls"><span>${eventIndex + 1}/${orderedSiblings.length}</span><button class="btn btn-small" title="Đưa sự kiện lên" aria-label="Đưa sự kiện lên" data-move-event="${event.id}" data-direction="-1" ${eventIndex <= 0 ? "disabled" : ""}>↑</button><button class="btn btn-small" title="Đưa sự kiện xuống" aria-label="Đưa sự kiện xuống" data-move-event="${event.id}" data-direction="1" ${eventIndex >= orderedSiblings.length - 1 ? "disabled" : ""}>↓</button></div>${event.shareCode ? `<button class="btn btn-small btn-copy-link admin-event-link" data-copy-event-link="${event.id}">🔗 Copy link</button>` : `<button class="btn btn-small btn-soft admin-event-link" data-create-event-link="${event.id}" ${canManage ? "" : "disabled"}>＋ Tạo link</button>`}</div></div>
       <div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown" data-admin-timing="${event.id}" data-admin-state="${state}">${safe(adminTimingStatus(event))}</span><span><b>Người tạo:</b> ${safe(event.createdByName || event.createdByEmail)}</span></div>
       ${registrationProgress}
-      <div class="event-actions admin-card-actions"><button class="btn" data-edit="${event.id}" ${canManage ? "" : "disabled"}>Sửa</button><button class="btn btn-soft" data-copy-event="${event.id}">Sao chép</button><button class="btn btn-soft" data-quick-registrations="${event.id}" ${hasRegistrations ? "" : "disabled"}>Xem danh sách</button><button class="btn btn-download-list" data-export-event="${event.id}" ${hasRegistrations ? "" : "disabled"}><span class="sheet-icon" aria-hidden="true">▦</span> Tải danh sách</button><button class="btn btn-calendar" data-calendar-event="${event.id}">＋ Google Lịch</button><button class="btn btn-danger" data-delete="${event.id}" ${canManage ? "" : "disabled"}>Xóa</button></div>
+      <div class="event-actions admin-card-actions"><button class="btn" data-edit="${event.id}" ${canManage ? "" : "disabled"}>Sửa</button><button class="btn btn-soft" data-copy-event="${event.id}">Sao chép</button><button class="btn btn-soft" data-quick-registrations="${event.id}" ${hasRegistrations ? "" : "disabled"}>Xem danh sách</button><button class="btn btn-download-list" data-export-event="${event.id}" ${hasRegistrations ? "" : "disabled"}><span class="sheet-icon" aria-hidden="true">▦</span> Tải danh sách</button>${!isExternalEvent(event) ? `<button class="btn btn-calendar" data-attendance-event="${event.id}">${attendanceSessions.some((item) => item.eventId === event.id) ? "Quản lý điểm danh" : "＋ Điểm danh sự kiện"}</button>` : ""}<button class="btn btn-danger" data-delete="${event.id}" ${canManage ? "" : "disabled"}>Xóa</button></div>
     </article>`;
   };
   let adminTone = 0;
@@ -824,6 +828,13 @@ function listen() {
     render();
     if (isOwner) void cleanupExpiredTrash();
   }, (error) => notice(error.message, "error"));
+
+  onSnapshot(collection(db, "attendanceSessions"), (snapshot) => {
+    attendanceSessions = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))
+      .filter((item) => !isSubAdmin || item.createdByUid === user.uid);
+    renderAttendance();
+    render();
+  }, (error) => notice("Không thể tải dữ liệu điểm danh: " + error.message, "error"));
 
   // Danh sách đăng ký chỉ được truy vấn sau khi Admin chọn một sự kiện.
 
@@ -1578,6 +1589,185 @@ $("#exportBtn").onclick = async () => {
     return;
   }
   await downloadRegistrationExcel(eventId, eventId ? "" : groupId, $("#exportBtn"));
+};
+
+
+function attendanceStatusLabel(status) {
+  return status === "open" ? "Đang mở" : status === "ended" ? "Đã kết thúc" : "Đã chốt danh sách";
+}
+
+function renderAttendance() {
+  const target = $("#attendanceRows");
+  if (!target) return;
+  const list = attendanceSessions
+    .filter((item) => attendanceFilter === "all" || item.status === attendanceFilter)
+    .sort((a, b) => (millis(b.createdAt) || 0) - (millis(a.createdAt) || 0));
+  target.innerHTML = list.length ? list.map((item) => `<article class="att-row">
+    <div><span class="att-badge ${safe(item.status)}">${safe(attendanceStatusLabel(item.status))}</span>
+    <h3>${safe(item.title)}</h3><div class="att-meta">${safe(item.date || "")} · ${safe(item.location || "")} · ${Number(item.rosterCount || 0)} sinh viên</div></div>
+    <div class="att-actions"><button class="btn" data-attendance-manage="${item.id}">Quản lý điểm danh</button></div>
+  </article>`).join("") : '<div class="card empty">Không có sự kiện điểm danh trong bộ lọc này.</div>';
+}
+
+function populateAttendanceEventOptions(selectedId = "") {
+  const select = $("#attendanceEventId");
+  if (!select) return;
+  const existing = new Set(attendanceSessions.map((item) => item.eventId));
+  const eligible = events.filter((item) => !item.deletedAt && !isExternalEvent(item) && !existing.has(item.id));
+  select.innerHTML = '<option value="">— Chọn sự kiện —</option>' + eligible.map((item) =>
+    `<option value="${item.id}" ${item.id === selectedId ? "selected" : ""}>${safe(item.title)} · ${safe(item.date || "")}</option>`
+  ).join("");
+}
+
+function attendanceCode() {
+  const values = crypto.getRandomValues(new Uint32Array(2));
+  return (values[0].toString(36) + values[1].toString(36)).slice(0, 9).toUpperCase();
+}
+
+async function createAttendanceFromEvent(eventId) {
+  const selectedEvent = events.find((item) => item.id === eventId && !item.deletedAt);
+  if (!selectedEvent || isExternalEvent(selectedEvent)) throw Error("Sự kiện không hợp lệ.");
+  const existing = attendanceSessions.find((item) => item.eventId === eventId);
+  if (existing) {
+    await openAttendanceManage(existing.id);
+    return existing.id;
+  }
+  const sessionId = attendanceCode();
+  const registrationSnapshot = await getDocs(query(collection(db, "registrations"), where("eventId", "==", eventId)));
+  const roster = registrationSnapshot.docs.map((item) => {
+    const data = item.data();
+    return { ...data, mssv: String(data.identifier || data.mssv || "").trim().toUpperCase() };
+  }).filter((item) => item.mssv);
+  const writes = [
+    { ref: doc(db, "attendanceSessions", sessionId), data: { eventId, title: selectedEvent.title, date: selectedEvent.date || "", location: selectedEvent.location || "", status: "open", rosterCount: roster.length, createdByUid: user.uid, createdByEmail: user.email, createdAt: serverTimestamp() } },
+    ...roster.map((item) => ({ ref: doc(db, "attendanceRoster", sessionId + "_" + item.mssv), data: { sessionId, eventId, mssv: item.mssv, name: item.name || "", email: item.email || "", uid: item.uid || "", createdAt: serverTimestamp() } }))
+  ];
+  for (let offset = 0; offset < writes.length; offset += 450) {
+    const batch = writeBatch(db);
+    writes.slice(offset, offset + 450).forEach((entry) => batch.set(entry.ref, entry.data));
+    await batch.commit();
+  }
+  notice(`Đã tạo điểm danh và chuyển ${roster.length} sinh viên đăng ký.`, "success");
+  showPane("attendance");
+  return sessionId;
+}
+
+async function loadAttendanceManage() {
+  if (!selectedAttendanceSession) return;
+  const sessionId = selectedAttendanceSession.id;
+  const [assignmentSnapshot, checkinSnapshot, rosterSnapshot, grantSnapshot] = await Promise.all([
+    getDocs(query(collection(db, "scannerAssignments"), where("sessionId", "==", sessionId))),
+    getDocs(query(collection(db, "checkins"), where("sessionId", "==", sessionId))),
+    getDocs(query(collection(db, "attendanceRoster"), where("sessionId", "==", sessionId))),
+    isSubAdmin ? Promise.resolve({ docs: [] }) : getDocs(query(collection(db, "attendanceGrants"), where("sessionId", "==", sessionId)))
+  ]);
+  attendanceRoster = rosterSnapshot.docs.map((item) => item.data());
+  const grants = new Map(grantSnapshot.docs.map((item) => [item.id, item.data()]));
+  $("#attendanceGrantedByHead").classList.toggle("hidden", isSubAdmin);
+  $("#attendanceScannerRows").innerHTML = assignmentSnapshot.docs.map((item) => {
+    const data = item.data();
+    const grant = grants.get(item.id) || {};
+    return `<tr><td>${safe(data.mssv)}</td><td>${safe(data.name)}</td><td>${data.role === "leader" ? "SV Leader" : "SV quét"}</td>
+      <td class="${isSubAdmin ? "hidden" : ""}">${safe(grant.grantedByName || grant.grantedByEmail || "")}</td>
+      <td><button class="btn btn-small" data-attendance-remove-scanner="${item.id}" ${selectedAttendanceSession.status === "finalized" ? "disabled" : ""}>Xóa</button></td></tr>`;
+  }).join("") || '<tr><td colspan="5" class="empty">Chưa cấp quyền cho sinh viên quét.</td></tr>';
+  $("#attendanceCheckinRows").innerHTML = checkinSnapshot.docs.filter((item) => !item.data().deletedAt).map((item) => {
+    const data = item.data();
+    return `<tr><td>${safe(data.mssv)}</td><td>${safe(data.name)}</td><td>${safe(ts(data.checkedAt))}</td><td>${safe(data.scannerName || data.scannerMssv || "")}</td></tr>`;
+  }).join("") || '<tr><td colspan="4" class="empty">Chưa có lượt điểm danh.</td></tr>';
+}
+
+async function openAttendanceManage(sessionId) {
+  selectedAttendanceSession = attendanceSessions.find((item) => item.id === sessionId);
+  if (!selectedAttendanceSession) return;
+  const highAdmin = isOwner || currentRole === "admin";
+  $("#attendanceManageTitle").textContent = selectedAttendanceSession.title;
+  $("#attendanceManageMeta").textContent = attendanceStatusLabel(selectedAttendanceSession.status);
+  $("#attendanceEnd").disabled = selectedAttendanceSession.status !== "open";
+  $("#attendanceFinalize").disabled = !highAdmin || selectedAttendanceSession.status === "finalized";
+  $("#attendanceReopen").classList.toggle("hidden", !highAdmin || selectedAttendanceSession.status !== "finalized");
+  $("#attendanceScannerForm").classList.toggle("hidden", selectedAttendanceSession.status !== "open");
+  $("#attendanceManageDialog").showModal();
+  await loadAttendanceManage();
+}
+
+$("#attendanceCreateForm").onsubmit = async (event) => {
+  event.preventDefault();
+  const eventId = $("#attendanceEventId").value;
+  if (!eventId) return;
+  const submit = event.submitter;
+  if (submit) submit.disabled = true;
+  try {
+    await createAttendanceFromEvent(eventId);
+    $("#attendanceCreateDialog").close();
+  } catch (error) {
+    notice(error.message || "Không thể tạo điểm danh.", "error");
+  } finally {
+    if (submit) submit.disabled = false;
+  }
+};
+
+$("#attendanceScannerForm").onsubmit = async (event) => {
+  event.preventDefault();
+  const keyword = $("#attendanceScannerLookup").value.trim().toLocaleLowerCase("vi");
+  const student = attendanceRoster.find((item) => item.mssv.toLocaleLowerCase("vi") === keyword || item.name.toLocaleLowerCase("vi") === keyword);
+  if (!student) return notice("Không tìm thấy sinh viên trong danh sách đăng ký.", "error");
+  const email = student.email || student.mssv.toLowerCase() + "@student.tdtu.edu.vn";
+  const assignmentId = selectedAttendanceSession.id + "_" + email;
+  await setDoc(doc(db, "scannerAssignments", assignmentId), { sessionId: selectedAttendanceSession.id, email, mssv: student.mssv, name: student.name, role: $("#attendanceScannerRole").value, active: true, grantedAt: serverTimestamp() });
+  await setDoc(doc(db, "attendanceGrants", assignmentId), { sessionId: selectedAttendanceSession.id, assignmentId, grantedAt: serverTimestamp(), grantedByEmail: user.email, grantedByName: user.displayName || user.email });
+  $("#attendanceScannerLookup").value = "";
+  await loadAttendanceManage();
+  notice("Đã cấp quyền quét.", "success");
+};
+
+document.addEventListener("click", async (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  if (button.id === "newAttendanceBtn") {
+    populateAttendanceEventOptions();
+    $("#attendanceCreateDialog").showModal();
+  }
+  if (button.dataset.closeAttendanceCreate !== undefined) $("#attendanceCreateDialog").close();
+  if (button.dataset.closeAttendanceManage !== undefined) $("#attendanceManageDialog").close();
+  if (button.dataset.attendanceFilter) {
+    attendanceFilter = button.dataset.attendanceFilter;
+    document.querySelectorAll(".attendance-filter").forEach((item) => item.classList.toggle("active", item === button));
+    renderAttendance();
+  }
+  if (button.dataset.attendanceEvent) {
+    const existing = attendanceSessions.find((item) => item.eventId === button.dataset.attendanceEvent);
+    if (existing) await openAttendanceManage(existing.id);
+    else {
+      button.disabled = true;
+      try { await createAttendanceFromEvent(button.dataset.attendanceEvent); }
+      catch (error) { notice(error.message || "Không thể tạo điểm danh.", "error"); }
+      finally { button.disabled = false; }
+    }
+  }
+  if (button.dataset.attendanceManage) await openAttendanceManage(button.dataset.attendanceManage);
+  if (button.dataset.attendanceRemoveScanner) {
+    await deleteDoc(doc(db, "scannerAssignments", button.dataset.attendanceRemoveScanner));
+    await loadAttendanceManage();
+  }
+});
+
+$("#attendanceCopyLink").onclick = async () => {
+  await copyText(location.origin + "/check-in/?event=" + selectedAttendanceSession.id, "Đã sao chép link quét điểm danh.");
+};
+$("#attendanceEnd").onclick = async () => {
+  await updateDoc(doc(db, "attendanceSessions", selectedAttendanceSession.id), { status: "ended", endedAt: serverTimestamp() });
+  $("#attendanceManageDialog").close();
+};
+$("#attendanceFinalize").onclick = async () => {
+  const approved = await confirmAction({ title: "Chốt danh sách điểm danh?", message: "Sau khi chốt sẽ không thể chỉnh sửa danh sách. Bạn có chắc muốn tiếp tục?" });
+  if (!approved) return;
+  await updateDoc(doc(db, "attendanceSessions", selectedAttendanceSession.id), { status: "finalized", finalizedAt: serverTimestamp(), finalizedBy: user.email });
+  $("#attendanceManageDialog").close();
+};
+$("#attendanceReopen").onclick = async () => {
+  await updateDoc(doc(db, "attendanceSessions", selectedAttendanceSession.id), { status: "ended", reopenedAt: serverTimestamp(), reopenedBy: user.email });
+  $("#attendanceManageDialog").close();
 };
 
 function showAdminLoginNotice(message = "") {
