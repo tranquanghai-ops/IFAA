@@ -346,3 +346,19 @@
   .trash-table{min-width:760px}
   .login-graphic-notice{padding:12px 13px}
 }
+
+
+/* V4.0: bộ lọc đăng ký, nhóm trong thùng rác và HOT góc thẻ */
+.registration-status-options{display:flex;flex-wrap:wrap;gap:9px}
+.registration-filter-card .form-grid{align-items:end}
+.registration-page-size-field{max-width:240px}
+.btn-copy-link{border-color:#6b78d6;background:#f1f3ff;color:#263ba5;font-weight:800}
+.trash-section-title{margin:20px 0 8px;color:#344054}
+.admin-event-card{position:relative}
+.admin-event-card .tag.hot{position:absolute;z-index:2;top:-1px;right:-1px;width:92px;height:92px;padding:12px 5px 0 34px;border:0;border-radius:0 14px 0 0;clip-path:polygon(0 0,100% 0,100% 100%);background:linear-gradient(135deg,#ff7a00,#e11d48);color:#fff;font-size:13px;font-weight:950;letter-spacing:.04em;text-shadow:0 1px 2px rgba(0,0,0,.25)}
+.admin-event-card:has(.tag.hot) .admin-card-position{margin-right:72px}
+@media(max-width:760px){
+  .registration-page-size-field{max-width:none}
+  .admin-event-card .tag.hot{width:78px;height:78px;padding:9px 4px 0 27px;font-size:11px}
+  .admin-event-card:has(.tag.hot) .admin-card-position{margin-right:58px}
+}
