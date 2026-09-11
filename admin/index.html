@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="vi">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>IFA+A Admin</title><link rel="stylesheet" href="../styles.css?v=2.1"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>IFA+A Admin</title><link rel="stylesheet" href="../styles.css?v=2.2"></head>
 <body><main class="shell">
 <header class="topbar"><div class="brand"><div class="mark logo-mark" aria-label="Logo Khoa Mỹ thuật Công nghiệp">IFA</div><div><h1>IFA+A Admin</h1><p>Quản lý sự kiện và đăng ký</p></div></div><div class="account"><span id="accountEmail" class="account-email"></span><a href="../" class="btn btn-small">Trang sinh viên</a><button id="logoutBtn" class="btn btn-small btn-account btn-account-logout hidden">Đăng xuất</button></div></header>
 <section id="adminLogin" class="card login-card"><div class="mark logo-mark" aria-label="Logo Khoa Mỹ thuật Công nghiệp">IFA</div><h2>Trang quản trị</h2><p>Đăng nhập bằng tài khoản Google đã được cấp quyền.</p><div id="adminLoginNotice" class="login-graphic-notice hidden" role="alert"><span class="login-notice-icon" aria-hidden="true">!</span><div><b>Không thể đăng nhập</b><p id="adminLoginNoticeText"></p></div></div><button id="loginBtn" class="btn btn-primary">Đăng nhập Google</button></section>
@@ -45,7 +45,7 @@
 
 <div class="pane hidden" data-pane-id="settings"><div class="toolbar"><div><h2>Thiết lập đăng ký</h2><p>Quản lý danh sách khoa/đơn vị được sử dụng.</p></div></div><form id="settingsForm" class="card form-grid"><div class="field"><label>Tên hệ thống</label><input value="IFA+A" disabled></div><div class="field span-2"><label>Thêm khoa/đơn vị</label><div class="inline-add"><input id="newFaculty" maxlength="160" placeholder="Nhập tên khoa/đơn vị"><button id="addFacultyBtn" class="btn" type="button">＋ Thêm</button></div><div id="facultySettingsList" class="check-list"></div><small>Mặc định hệ thống có Khoa Mỹ thuật Công nghiệp.</small></div><div><button class="btn btn-primary">Lưu thiết lập</button></div></form></div>
 </section></div>
-<footer class="foot">IFA+A Admin · V2.1</footer>
+<footer class="foot">IFA+A Admin · V2.2</footer>
 </main>
 
 <dialog id="eventDialog"><form id="eventForm" class="modal"><div class="modal-head"><h2 id="eventDialogTitle">Tạo sự kiện</h2><button type="button" class="btn btn-small" data-close>Đóng</button></div><input id="eventId" type="hidden"><div class="form-grid">
@@ -77,6 +77,7 @@
     <label class="close-mode-chip"><input type="radio" name="closeMode" value="manual"> Chọn thời gian cụ thể</label>
   </div><div id="closeRegistrationFields" class="datetime-24 hidden"><input id="closeDate" type="date" aria-label="Ngày đóng đăng ký"><input id="closeTime" class="time-24" type="text" inputmode="numeric" maxlength="5" placeholder="HH:mm" pattern="(?:[01][0-9]|2[0-3]):[0-5][0-9]" aria-label="Giờ đóng đăng ký"></div><small id="closeModeHelp">Hệ thống sẽ đóng đăng ký sau 24 giờ tính từ lúc mở.</small></div>
   <label class="check span-2 event-option new-option"><input id="eventShowAsNew" type="checkbox" checked> Hiển thị sự kiện mới <small>(sẽ tự tắt sau 24 giờ)</small></label>
+  <label class="check span-2 event-option link-option"><input id="eventCreateShareLink" type="checkbox"> Tạo liên kết riêng cho sự kiện <small id="eventShareLinkHelp">Có thể tạo ngay hoặc tạo sau tại trang quản lý sự kiện.</small></label>
   <label class="check span-2 event-option"><input id="hideRegistrationCount" type="checkbox"> Ẩn số lượng người đã đăng ký trên trang sinh viên</label>
   <label class="check span-2 event-option hot-option"><input id="eventHot" type="checkbox"> Đánh dấu đây là sự kiện HOT</label>
   <label class="check span-2 event-option"><input id="eventAllowCancellation" type="checkbox"> Cho phép người tham gia tự hủy đăng ký sự kiện này</label>
@@ -112,5 +113,5 @@
 </dialog>
 
 <dialog id="quickRegistrationDialog"><div class="modal quick-registration-modal"><div class="modal-head"><div><h2 id="quickRegistrationTitle">Danh sách đăng ký</h2><p id="quickRegistrationSummary"></p></div><button type="button" class="btn btn-small" data-close-quick>Đóng</button></div><div class="table-wrap"><table class="quick-registration-table"><thead><tr><th class="col-stt">STT</th><th class="col-identifier">MSSV/Mã số</th><th>Họ tên</th><th>Khoa/Đơn vị</th><th>Đối tượng</th><th>Thời gian</th></tr></thead><tbody id="quickRegistrationRows"></tbody></table></div><div id="quickRegistrationPagination" class="registration-pagination"><button id="quickRegistrationPrev" class="btn btn-small" type="button">← Trang trước</button><span id="quickRegistrationPageText">Trang 1</span><button id="quickRegistrationNext" class="btn btn-small" type="button">Trang sau →</button></div></div></dialog>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script><script type="module" src="./admin.mjs?v=2.1"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script><script type="module" src="./admin.mjs?v=2.2"></script>
 </body></html>
