@@ -17,7 +17,8 @@ const $ = (selector) => document.querySelector(selector);
 const safe = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
 const millis = (value) => value?.toDate ? value.toDate().getTime() : (value ? new Date(value).getTime() : null);
 const studentIdentifier = (email) => String(email || "").toLowerCase().endsWith(STUDENT_DOMAIN) ? String(email).split("@")[0].toUpperCase() : "";
-const linkedGroupId = new URLSearchParams(window.location.search).get("e")?.trim() || "";
+const linkedCode = new URLSearchParams(window.location.search).get("e")?.trim() || "";
+let eventsLoaded = false;
 
 function shareCode(value) {
   return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/gi, "d").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60).toUpperCase();
@@ -280,6 +281,41 @@ function eventCard(event) {
   }
   return `<article class="card event event-${state} ${external ? "event-external" : ""} ${registered ? "event-registered" : ""}"><div class="event-top"><div><span class="tag event-category">${safe(category)}</span><span class="tag ${tagClass}">${label}</span>${hotTag}${newTag}${external ? '<span class="tag external">ĐĂNG KÝ BÊN NGOÀI</span>' : ""}${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}<h3>${safe(event.title)}</h3></div></div><div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(event, state))}</span>${groupLine}</div>${capacityHtml}<div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${STUDENT_CALENDAR_ENABLED && registered ? `<button class="btn btn-calendar" data-calendar="${event.id}">＋ Google Lịch</button>` : ""}${actionButton}</div></article>`;
 }
+function linkedEventPage(event) {
+  const state = eventState(event);
+  const external = isExternalEvent(event);
+  const registered = myRegs.has(event.id);
+  const used = Number(event.registeredCount || 0);
+  const capacity = Number(event.capacity || 0);
+  const left = event.unlimitedCapacity ? Infinity : Math.max(0, capacity - used);
+  const full = !event.unlimitedCapacity && capacity > 0 && left === 0;
+  const low = !event.unlimitedCapacity && capacity > 0 && left > 0 && left / capacity <= 0.2;
+  const group = groupStatus(event);
+  const description = event.descriptionHtml ? sanitizeRichHtml(event.descriptionHtml) : `<p>${safe(event.description || "Chưa có mô tả chi tiết.")}</p>`;
+  const statusLabel = { upcoming: "SẮP MỞ", open: "ĐANG MỞ", full: "ĐÃ ĐỦ", closed: "ĐÃ ĐÓNG ĐĂNG KÝ", ended: "ĐÃ KẾT THÚC", hidden: "ĐÃ ẨN" }[state] || "SỰ KIỆN";
+  let availability = "";
+  if (!external && !event.hideRegistrationCount) {
+    if (event.unlimitedCapacity) availability = `<div class="linked-capacity">${used} người đã đăng ký</div>`;
+    else if (full) availability = '<div class="linked-capacity full">Hết chỗ</div>';
+    else availability = `<div class="linked-capacity ${low ? "low" : ""}">${used}/${capacity} người tham gia · Còn ${left} chỗ</div>`;
+  } else if (!external && low) availability = '<div class="linked-capacity low">Sắp hết chỗ</div>';
+  let action = "";
+  if (external) action = event.registrationUrl ? `<button class="btn btn-register linked-primary-action" data-external-url="${safe(event.registrationUrl)}">Đến trang đăng ký</button>` : '<button class="btn linked-primary-action" disabled>Chưa có liên kết đăng ký</button>';
+  else if (registered) action = `<button class="btn linked-primary-action registered" disabled>Đã đăng ký</button>${event.allowCancellation ? `<button class="btn" data-cancel="${event.id}">Hủy đăng ký</button>` : ""}`;
+  else if (state === "open" && !full && !group.blocked) action = `<button class="btn btn-register linked-primary-action" data-direct-register="${event.id}">Đăng ký sự kiện</button>`;
+  else {
+    const message = full ? "Đã đủ" : state === "upcoming" ? "Chưa đến giờ đăng ký" : state === "ended" ? "Hết thời gian đăng ký" : group.blocked ? "Đã đạt giới hạn đăng ký" : "Đã đóng đăng ký";
+    action = `<button class="btn linked-primary-action unavailable" disabled>${message}</button>`;
+  }
+  return `<article class="linked-event-form">
+    <header class="linked-event-header"><div class="linked-event-tags"><span class="tag ${safe(state)}">${safe(statusLabel)}</span>${event.isHot ? '<span class="tag hot">🔥 HOT</span>' : ""}${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}</div><h2>${safe(event.title)}</h2></header>
+    <section class="linked-event-info"><p><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</p><p><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</p><p class="countdown">${safe(timingStatus(event, state))}</p>${group.text && !external ? `<p><b>${safe(group.text)}</b></p>` : ""}</section>
+    <section class="linked-event-description rich-content">${description}</section>
+    ${availability}
+    <div class="linked-event-actions">${action}</div>
+  </article>`;
+}
+
 function refreshStudentFilters(sourceEvents, focusedGroup) {
   const categorySelect = $("#categoryFilter");
   const currentCategory = categoryFilter;
@@ -302,9 +338,27 @@ function refreshStudentFilters(sourceEvents, focusedGroup) {
 }
 
 function render() {
-  const focusedGroup = linkedGroupId ? [...groups.values()].find((group) => !group.deletedAt && (group.id === linkedGroupId || groupCode(group) === shareCode(linkedGroupId))) : null;
-  const linkedMode = !!linkedGroupId;
-  $("#studentAdvancedFilters").classList.toggle("hidden", linkedMode);
+  const focusedEvent = linkedCode ? events.find((event) => !event.deletedAt && event.shareCode && shareCode(event.shareCode) === shareCode(linkedCode)) : null;
+  const focusedGroup = linkedCode && !focusedEvent ? [...groups.values()].find((group) => !group.deletedAt && (group.id === linkedCode || groupCode(group) === shareCode(linkedCode))) : null;
+  const linkedEventMode = !!focusedEvent;
+  const linkedMode = !!linkedCode && !linkedEventMode;
+  $("#linkedEventPanel").classList.toggle("hidden", !linkedEventMode && !(linkedCode && eventsLoaded && groupsLoaded && !focusedGroup));
+  $("#studentHero").classList.toggle("hidden", linkedEventMode);
+  $("#eventSectionHead").classList.toggle("hidden", linkedEventMode);
+  $("#studentAdvancedFilters").classList.toggle("hidden", linkedEventMode || linkedMode);
+  $("#eventGrid").classList.toggle("hidden", linkedEventMode);
+  $("#groupFocusPanel").classList.toggle("hidden", linkedEventMode || !linkedMode);
+  if (linkedEventMode) {
+    $("#linkedEventPanel").innerHTML = linkedEventPage(focusedEvent);
+    return;
+  }
+  if (linkedCode && eventsLoaded && groupsLoaded && !focusedGroup) {
+    $("#studentHero").classList.add("hidden");
+    $("#eventSectionHead").classList.add("hidden");
+    $("#eventGrid").classList.add("hidden");
+    $("#linkedEventPanel").innerHTML = '<article class="linked-event-form linked-event-error"><h2>Không tìm thấy sự kiện</h2><p>Liên kết có thể không đúng hoặc sự kiện đã ngừng hiển thị.</p></article>';
+    return;
+  }
   const filterLabels = { available: "Sắp mở & đang mở", mine: linkedMode ? "Đã chọn" : "Đã đăng ký", ended: "Đã kết thúc", all: "Tất cả" };
   document.querySelectorAll("#studentStatusFilters .filter").forEach((button) => {
     const visible = !linkedMode || ["all", "mine"].includes(button.dataset.filter);
@@ -314,8 +368,8 @@ function render() {
   });
   if (linkedMode && !["all", "mine"].includes(filter)) filter = "all";
   document.querySelectorAll("#studentStatusFilters .filter").forEach((button) => button.classList.toggle("active", button.dataset.filter === filter));
-  $("#groupFocusPanel").classList.toggle("hidden", !linkedGroupId);
-  if (linkedGroupId) {
+  $("#groupFocusPanel").classList.toggle("hidden", !linkedCode);
+  if (linkedCode) {
     $("#groupFocusTitle").textContent = focusedGroup?.name || (groupsLoaded ? "Không tìm thấy nhóm sự kiện" : "Đang tải nhóm sự kiện…");
     $("#groupFocusText").textContent = focusedGroup
       ? focusedGroup.unlimited
@@ -327,9 +381,9 @@ function render() {
   const accessibleEvents = events.filter((event) => {
     if (event.deletedAt || groups.get(event.groupId)?.deletedAt) return false;
     if (!facultyAllowed(event)) return false;
-    if (filter === "mine") return myRegs.has(event.id) && (!linkedGroupId || event.groupId === focusedGroup?.id);
+    if (filter === "mine") return myRegs.has(event.id) && (!linkedCode || event.groupId === focusedGroup?.id);
     if (eventState(event) === "hidden") return false;
-    if (linkedGroupId) return event.groupId === focusedGroup?.id;
+    if (linkedCode) return event.groupId === focusedGroup?.id;
     return !groups.get(event.groupId)?.linkOnly;
   });
   refreshStudentFilters(accessibleEvents, focusedGroup);
@@ -360,7 +414,7 @@ function render() {
     return (millis(b.createdAt) || 0) - (millis(a.createdAt) || 0);
   });
 
-  $("#eventSummary").textContent = linkedGroupId && focusedGroup
+  $("#eventSummary").textContent = linkedCode && focusedGroup
     ? `${list.length} sự kiện trong nhóm ${focusedGroup.name}`
     : `${list.length} sự kiện phù hợp với ${profile?.faculty || "khoa/đơn vị của bạn"}`;
   const grid = $("#eventGrid");
@@ -453,6 +507,7 @@ function loadData() {
   }, (error) => show(`Không thể tải nhóm sự kiện: ${error.message}`, "error")));
   unsubscribers.push(onSnapshot(collection(db, "events"), (snapshot) => {
     events = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    eventsLoaded = true;
     render();
   }, (error) => show(`Không thể tải sự kiện: ${error.message}`, "error")));
 }
@@ -622,6 +677,7 @@ document.addEventListener("click", (event) => {
   if (button.dataset.close !== undefined) $("#detailDialog").close();
   if (button.dataset.view) openDetail(button.dataset.view);
   if (button.dataset.register) openDetail(button.dataset.register);
+  if (button.dataset.directRegister) register(button.dataset.directRegister);
   if (button.dataset.externalUrl) {
     const url = button.dataset.externalUrl;
     if (/^https:\/\//i.test(url)) window.open(url, "_blank", "noopener,noreferrer");
