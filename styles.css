@@ -437,3 +437,7 @@
 .confirm-dialog .confirm-card h2{color:var(--ink)}
 .confirm-dialog .confirm-card p{color:#475467}
 @media(max-width:560px){.confirm-dialog .confirm-card{padding:20px}}
+
+@media (max-width: 700px) {
+  .admin-event-toolbar .view-switch { display: none !important; }
+}
