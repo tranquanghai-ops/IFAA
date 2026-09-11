@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#a71930">
   <title>IFA+A — Đăng ký sự kiện</title>
   <meta name="description" content="Hệ thống đăng ký sự kiện Khoa Mỹ thuật Công nghiệp">
-  <link rel="stylesheet" href="./styles.css?v=2.3">
+  <link rel="stylesheet" href="./styles.css?v=2.4">
 </head>
 <body>
 <main class="shell">
@@ -30,7 +30,8 @@
       <div id="profileSectionHead" class="section-head"><div><h2>Thông tin người tham gia</h2><p>Thông tin được lưu cho các lần đăng ký sau và có thể chỉnh sửa.</p></div></div>
       <form id="profileForm" class="form-grid">
         <div class="field"><label>Email</label><input id="profileEmail" disabled></div>
-        <div class="field"><label>Khoa/Đơn vị/Ngành *</label><select id="profileFaculty" required><option value="">-- Chọn khoa/đơn vị/ngành --</option></select><input id="profileFacultyOther" class="hidden" maxlength="150" placeholder="Nhập khoa, đơn vị hoặc ngành khác" aria-label="Khoa, đơn vị hoặc ngành khác"></div>
+        <div class="field"><label>Khoa/Đơn vị *</label><select id="profileFaculty" required><option value="">-- Chọn khoa/đơn vị --</option></select><input id="profileFacultyOther" class="hidden" maxlength="150" placeholder="Nhập khoa/đơn vị khác" aria-label="Khoa hoặc đơn vị khác"></div>
+        <div class="field"><label>Ngành *</label><select id="profileMajor" required><option value="">-- Chọn ngành --</option></select><input id="profileMajorOther" class="hidden" maxlength="150" placeholder="Nhập tên ngành" aria-label="Tên ngành"></div>
         <div class="field"><label>MSSV/Mã số *</label><input id="profileIdentifier" maxlength="30" required></div>
         <div class="field"><label>Họ tên *</label><input id="profileName" maxlength="120" required></div>
         <div><button class="btn btn-primary">Lưu thông tin</button></div>
@@ -46,10 +47,12 @@
       <section id="eventGrid" class="event-list"></section>
     </div>
   </div>
-  <footer class="foot">IFA+A · Khoa Mỹ thuật Công nghiệp · V2.3<br>Built by: Trần Quang Hải</footer>
+  <footer class="foot">IFA+A · Khoa Mỹ thuật Công nghiệp · V2.4<br>Built by: Trần Quang Hải</footer>
 </main>
 
+<dialog id="studentConfirmDialog" class="confirm-dialog"><div class="confirm-card"><span class="confirm-symbol">?</span><h2 id="studentConfirmTitle">Xác nhận</h2><p id="studentConfirmMessage"></p><div class="confirm-actions"><button id="studentConfirmCancel" class="btn" type="button">Hủy</button><button id="studentConfirmOk" class="btn btn-danger" type="button">Xác nhận</button></div></div></dialog>
+
 <dialog id="detailDialog"><div class="modal"><div class="modal-head"><h2 id="detailTitle"></h2><button class="btn btn-small" data-close>Đóng</button></div><div id="detailBody"></div><div class="modal-actions"><button class="btn" data-close>Hủy</button><button id="detailCalendarBtn" class="btn btn-calendar hidden" type="button">＋ Thêm vào Google Lịch</button><button id="confirmBtn" class="btn btn-register">Xác nhận đăng ký</button></div></div></dialog>
-<script type="module" src="./student.mjs?v=2.3"></script>
+<script type="module" src="./student.mjs?v=2.4"></script>
 </body>
 </html>
