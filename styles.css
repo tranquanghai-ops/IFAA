@@ -363,3 +363,35 @@
   .admin-event-card .tag.hot{position:static;width:auto;height:auto;padding:4px 8px;font-size:inherit}
   .admin-event-card:has(.tag.hot) .admin-card-position{margin-right:0}
 }
+
+
+/* Trang sự kiện riêng V2.2 */
+.linked-event-page{max-width:920px;margin:18px auto 40px}
+.linked-event-form{overflow:hidden;background:#fff;border:1px solid var(--line);border-top:9px solid var(--brand);border-radius:18px;box-shadow:var(--shadow)}
+.linked-event-header,.linked-event-info,.linked-event-description,.linked-event-actions{padding:24px 30px}
+.linked-event-header{border-bottom:1px solid var(--line)}
+.linked-event-header h2{margin:8px 0 0;font-size:clamp(1.65rem,3vw,2.35rem);line-height:1.22}
+.linked-event-tags{display:flex;flex-wrap:wrap;gap:6px}
+.linked-event-info{background:#f8f9fc;border-bottom:1px solid var(--line)}
+.linked-event-info p{margin:7px 0;font-size:1.04rem}
+.linked-event-info .countdown{color:var(--brand);font-weight:800}
+.linked-event-description{min-height:180px;font-size:1.05rem;overflow-wrap:anywhere}
+.linked-event-description img{max-width:100%;height:auto}
+.linked-event-description table{display:block;max-width:100%;overflow-x:auto;border-collapse:collapse}
+.linked-event-description td,.linked-event-description th{border:1px solid #667085;padding:8px}
+.linked-capacity{margin:0 30px;padding:14px 18px;border-radius:12px;background:#ecfdf3;color:var(--green);font-weight:800}
+.linked-capacity.low{background:#fff7e6;color:#b54708}
+.linked-capacity.full{background:#fff1f0;color:var(--red)}
+.linked-event-actions{display:flex;gap:12px;justify-content:flex-end}
+.linked-primary-action{min-width:220px;padding:14px 22px;font-weight:800}
+.linked-primary-action.registered{background:#e8f5ed;color:var(--green)}
+.linked-primary-action.unavailable{background:#fee4e2;color:var(--red);opacity:1}
+.linked-event-error{padding:42px;text-align:center;border-top-color:#667085}
+@media(max-width:700px){
+  .linked-event-page{margin:10px 0 28px}
+  .linked-event-form{border-radius:14px}
+  .linked-event-header,.linked-event-info,.linked-event-description,.linked-event-actions{padding:18px}
+  .linked-event-actions{flex-direction:column}
+  .linked-primary-action{width:100%;min-width:0}
+  .linked-capacity{margin:0 18px}
+}
