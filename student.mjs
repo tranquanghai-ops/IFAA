@@ -136,6 +136,25 @@ function show(message, type = "") {
   setTimeout(() => notice.classList.add("hidden"), 6000);
 }
 
+function askStudentConfirmation(message, title = "Xác nhận") {
+  const dialog = $("#studentConfirmDialog");
+  $("#studentConfirmTitle").textContent = title;
+  $("#studentConfirmMessage").textContent = message;
+  return new Promise((resolve) => {
+    const finish = (answer) => {
+      $("#studentConfirmOk").onclick = null;
+      $("#studentConfirmCancel").onclick = null;
+      dialog.oncancel = null;
+      dialog.close();
+      resolve(answer);
+    };
+    $("#studentConfirmOk").onclick = () => finish(true);
+    $("#studentConfirmCancel").onclick = () => finish(false);
+    dialog.oncancel = (event) => { event.preventDefault(); finish(false); };
+    dialog.showModal();
+  });
+}
+
 function formatDate(event) {
   try {
     return new Intl.DateTimeFormat("vi-VN", { weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(`${event.date}T00:00:00`));
@@ -448,25 +467,46 @@ function render() {
   }).join("");
 }
 
-function syncOtherFacultyField() {
-  const select = $("#profileFaculty");
-  const input = $("#profileFacultyOther");
-  const isOther = select.value === "__other__";
-  input.classList.toggle("hidden", !isOther);
-  input.required = isOther;
-  if (!isOther) input.value = "";
+function selectedFacultyValue() {
+  return $("#profileFaculty").value === "__other__" ? $("#profileFacultyOther").value.trim() : $("#profileFaculty").value;
+}
+
+function syncProfileOrganizationFields(preserveValues = false) {
+  const facultySelect = $("#profileFaculty");
+  const facultyOther = $("#profileFacultyOther");
+  const majorSelect = $("#profileMajor");
+  const majorOther = $("#profileMajorOther");
+  const customFaculty = facultySelect.value === "__other__";
+  facultyOther.classList.toggle("hidden", !customFaculty);
+  facultyOther.required = customFaculty;
+  if (!customFaculty && !preserveValues) facultyOther.value = "";
+
+  const isMTCN = !customFaculty && facultySelect.value === DEFAULT_FACULTY;
+  majorSelect.classList.toggle("hidden", !isMTCN);
+  majorSelect.required = isMTCN;
+  majorOther.classList.toggle("hidden", isMTCN);
+  majorOther.required = !isMTCN;
+  if (isMTCN && !preserveValues) majorOther.value = "";
 }
 
 function populateFacultyOptions() {
-  const select = $("#profileFaculty");
-  const configured = settings.faculties || [DEFAULT_FACULTY];
-  const standardValues = [...new Set([...FACULTY_MAJORS, ...configured].filter(Boolean))];
-  const savedValue = profile?.faculty || DEFAULT_FACULTY;
-  const isCustom = !!savedValue && !standardValues.includes(savedValue);
-  select.innerHTML = '<option value="">-- Chọn khoa/đơn vị/ngành --</option>' + standardValues.map((name) => `<option value="${safe(name)}">${safe(name)}</option>`).join("") + '<option value="__other__">Khác (nhập thủ công)</option>';
-  select.value = isCustom ? "__other__" : savedValue;
-  $("#profileFacultyOther").value = isCustom ? savedValue : "";
-  syncOtherFacultyField();
+  const facultySelect = $("#profileFaculty");
+  const configured = [...new Set(settings.faculties || [DEFAULT_FACULTY])].filter((name) => name && !FACULTY_MAJORS.includes(name));
+  if (!configured.includes(DEFAULT_FACULTY)) configured.unshift(DEFAULT_FACULTY);
+
+  const legacyMajor = FACULTY_MAJORS.includes(profile?.faculty) && profile?.faculty !== DEFAULT_FACULTY ? profile.faculty : "";
+  const savedFaculty = legacyMajor ? DEFAULT_FACULTY : (profile?.faculty || DEFAULT_FACULTY);
+  const isCustomFaculty = !!savedFaculty && !configured.includes(savedFaculty);
+  facultySelect.innerHTML = '<option value="">-- Chọn khoa/đơn vị --</option>' + configured.map((name) => `<option value="${safe(name)}">${safe(name)}</option>`).join("") + '<option value="__other__">Khoa/đơn vị khác</option>';
+  facultySelect.value = isCustomFaculty ? "__other__" : savedFaculty;
+  $("#profileFacultyOther").value = isCustomFaculty ? savedFaculty : "";
+
+  const savedMajor = profile?.major || legacyMajor || "";
+  const mtcnMajors = FACULTY_MAJORS.filter((name) => name !== DEFAULT_FACULTY);
+  $("#profileMajor").innerHTML = '<option value="">-- Chọn ngành --</option>' + mtcnMajors.map((name) => `<option value="${safe(name)}">${safe(name)}</option>`).join("");
+  $("#profileMajor").value = mtcnMajors.includes(savedMajor) ? savedMajor : "";
+  $("#profileMajorOther").value = savedMajor && !mtcnMajors.includes(savedMajor) ? savedMajor : "";
+  syncProfileOrganizationFields(true);
 }
 
 function showProfileForm(force = false) {
@@ -565,10 +605,10 @@ async function register(eventId) {
       if (event.status !== "open" || (event.registeredCount || 0) >= event.capacity || now < (millis(event.openAt) ?? 0) || now > (millis(event.closeAt) ?? Infinity)) throw Error("Sự kiện đã đủ, chưa mở hoặc đã đóng.");
       const identifier = profile.identifier || profile.mssv || user.email.split("@")[0].toUpperCase();
       transaction.update(eventRef, { registeredCount: (event.registeredCount || 0) + 1, updatedAt: serverTimestamp() });
-      transaction.set(registrationRef, { uid: user.uid, email: user.email.toLowerCase(), identifier, mssv: identifier, participantType: profile.participantType, name: profile.name, phone: profile.phone || "", faculty: profile.faculty, eventId, eventTitle: event.title, eventDate: event.date, eventCreatorUid: event.createdByUid || "", groupId: event.groupId || "", groupName: event.groupName || "", createdAt: serverTimestamp() });
+      transaction.set(registrationRef, { uid: user.uid, email: user.email.toLowerCase(), identifier, mssv: identifier, participantType: profile.participantType, name: profile.name, phone: profile.phone || "", faculty: profile.faculty, major: profile.major || "", eventId, eventTitle: event.title, eventDate: event.date, eventCreatorUid: event.createdByUid || "", groupId: event.groupId || "", groupName: event.groupName || "", createdAt: serverTimestamp() });
       if (event.groupId) transaction.set(limitRef, { uid: user.uid, email: user.email.toLowerCase(), groupId: event.groupId, groupName: group.name, maxRegistrations: group.maxRegistrations, count: (current.count || 0) + 1, eventIds: [...(current.eventIds || []), eventId], updatedAt: serverTimestamp() });
     });
-    show("Đăng ký thành công. Bạn có thể bấm “Google Lịch” để thêm sự kiện vào lịch cá nhân.", "success");
+    show("Đăng ký sự kiện thành công.", "success");
   } catch (error) {
     show(error.message || "Không thể đăng ký.", "error");
   }
@@ -653,10 +693,10 @@ $("#profileForm").onsubmit = async (event) => {
     const previous = profile;
     const automaticIdentifier = studentIdentifier(user.email);
     const identifier = automaticIdentifier || $("#profileIdentifier").value.trim().toUpperCase();
-    const selectedFaculty = $("#profileFaculty").value;
-    const faculty = selectedFaculty === "__other__" ? $("#profileFacultyOther").value.trim() : selectedFaculty;
-    const data = { uid: user.uid, email: user.email.toLowerCase(), participantType: participantType(user.email), identifier, mssv: identifier, name: $("#profileName").value.trim(), phone: profile?.phone || "", faculty, updatedAt: serverTimestamp() };
-    if (!data.identifier || !data.name || !data.faculty) throw Error("Vui lòng nhập đầy đủ thông tin.");
+    const faculty = selectedFacultyValue();
+    const major = faculty === DEFAULT_FACULTY ? $("#profileMajor").value : $("#profileMajorOther").value.trim();
+    const data = { uid: user.uid, email: user.email.toLowerCase(), participantType: participantType(user.email), identifier, mssv: identifier, name: $("#profileName").value.trim(), phone: profile?.phone || "", faculty, major, updatedAt: serverTimestamp() };
+    if (!data.identifier || !data.name || !data.faculty || !data.major) throw Error("Vui lòng nhập đầy đủ thông tin.");
     await setDoc(doc(db, "profiles", user.uid), previous ? data : { ...data, createdAt: serverTimestamp() }, { merge: true });
     profile = { ...previous, ...data };
     showProfileForm(false);
@@ -688,10 +728,10 @@ $("#loginBtn").onclick = async () => {
 };
 $("#logoutBtn").onclick = () => signOut(auth);
 $("#editProfileBtn").onclick = () => showProfileForm(true);
-$("#profileFaculty").onchange = syncOtherFacultyField;
+$("#profileFaculty").onchange = () => syncProfileOrganizationFields(false);
 $("#categoryFilter").onchange = (event) => { categoryFilter = event.target.value; render(); };
 $("#studentGroupFilter").onchange = (event) => { studentGroupFilter = event.target.value; render(); };
-document.addEventListener("click", (event) => {
+document.addEventListener("click", async (event) => {
   const button = event.target.closest("button");
   if (!button) return;
   if (button.dataset.close !== undefined) $("#detailDialog").close();
@@ -707,7 +747,7 @@ document.addEventListener("click", (event) => {
     const selectedEvent = events.find((item) => item.id === button.dataset.calendar);
     if (selectedEvent && myRegs.has(selectedEvent.id)) openGoogleCalendar(selectedEvent);
   }
-  if (button.dataset.cancel && confirm("Hủy đăng ký sự kiện này?")) cancel(button.dataset.cancel);
+  if (button.dataset.cancel && await askStudentConfirmation("Bạn có chắc muốn hủy đăng ký sự kiện này?", "Hủy đăng ký?")) await cancel(button.dataset.cancel);
   if (button.classList.contains("filter")) {
     document.querySelectorAll(".filter").forEach((item) => item.classList.remove("active"));
     button.classList.add("active");
