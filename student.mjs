@@ -5,6 +5,7 @@ import { firebaseConfig, STUDENT_DOMAIN } from "./firebase-config.mjs";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
 const DEFAULT_CATEGORY = "Sự kiện Khoa";
+const FACULTY_MAJORS = ["Khoa Mỹ thuật Công nghiệp", "Ngành Đồ họa", "Ngành Thiết kế công nghiệp", "Ngành Thiết kế nội thất", "Ngành Thiết kế thời trang", "Ngành Nghệ thuật số"];
 const EVENT_CATEGORIES = ["Sự kiện Khoa", "Ngành Đồ họa", "Ngành Thiết kế công nghiệp", "Ngành Thiết kế nội thất", "Ngành Thiết kế thời trang", "Ngành Nghệ thuật số", "Sự kiện Trường", "Sự kiện Khoa khác"];
 const EXTERNAL_CATEGORIES = new Set(["Sự kiện Trường", "Sự kiện Khoa khác"]);
 const STUDENT_CALENDAR_ENABLED = false;
@@ -447,11 +448,25 @@ function render() {
   }).join("");
 }
 
+function syncOtherFacultyField() {
+  const select = $("#profileFaculty");
+  const input = $("#profileFacultyOther");
+  const isOther = select.value === "__other__";
+  input.classList.toggle("hidden", !isOther);
+  input.required = isOther;
+  if (!isOther) input.value = "";
+}
+
 function populateFacultyOptions() {
   const select = $("#profileFaculty");
-  const values = [...new Set([...(settings.faculties || [DEFAULT_FACULTY]), profile?.faculty].filter(Boolean))];
-  select.innerHTML = '<option value="">-- Chọn khoa/đơn vị --</option>' + values.map((name) => `<option value="${safe(name)}">${safe(name)}</option>`).join("");
-  select.value = profile?.faculty || DEFAULT_FACULTY;
+  const configured = settings.faculties || [DEFAULT_FACULTY];
+  const standardValues = [...new Set([...FACULTY_MAJORS, ...configured].filter(Boolean))];
+  const savedValue = profile?.faculty || DEFAULT_FACULTY;
+  const isCustom = !!savedValue && !standardValues.includes(savedValue);
+  select.innerHTML = '<option value="">-- Chọn khoa/đơn vị/ngành --</option>' + standardValues.map((name) => `<option value="${safe(name)}">${safe(name)}</option>`).join("") + '<option value="__other__">Khác (nhập thủ công)</option>';
+  select.value = isCustom ? "__other__" : savedValue;
+  $("#profileFacultyOther").value = isCustom ? savedValue : "";
+  syncOtherFacultyField();
 }
 
 function showProfileForm(force = false) {
@@ -638,7 +653,9 @@ $("#profileForm").onsubmit = async (event) => {
     const previous = profile;
     const automaticIdentifier = studentIdentifier(user.email);
     const identifier = automaticIdentifier || $("#profileIdentifier").value.trim().toUpperCase();
-    const data = { uid: user.uid, email: user.email.toLowerCase(), participantType: participantType(user.email), identifier, mssv: identifier, name: $("#profileName").value.trim(), phone: profile?.phone || "", faculty: $("#profileFaculty").value, updatedAt: serverTimestamp() };
+    const selectedFaculty = $("#profileFaculty").value;
+    const faculty = selectedFaculty === "__other__" ? $("#profileFacultyOther").value.trim() : selectedFaculty;
+    const data = { uid: user.uid, email: user.email.toLowerCase(), participantType: participantType(user.email), identifier, mssv: identifier, name: $("#profileName").value.trim(), phone: profile?.phone || "", faculty, updatedAt: serverTimestamp() };
     if (!data.identifier || !data.name || !data.faculty) throw Error("Vui lòng nhập đầy đủ thông tin.");
     await setDoc(doc(db, "profiles", user.uid), previous ? data : { ...data, createdAt: serverTimestamp() }, { merge: true });
     profile = { ...previous, ...data };
@@ -671,6 +688,7 @@ $("#loginBtn").onclick = async () => {
 };
 $("#logoutBtn").onclick = () => signOut(auth);
 $("#editProfileBtn").onclick = () => showProfileForm(true);
+$("#profileFaculty").onchange = syncOtherFacultyField;
 $("#categoryFilter").onchange = (event) => { categoryFilter = event.target.value; render(); };
 $("#studentGroupFilter").onchange = (event) => { studentGroupFilter = event.target.value; render(); };
 document.addEventListener("click", (event) => {
