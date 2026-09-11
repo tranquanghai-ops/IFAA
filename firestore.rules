@@ -8,6 +8,11 @@ service cloud.firestore {
     function owner(){ return staff() && email() == 'tranquanghai@tdtu.edu.vn'; }
     function admin(){ return owner() || (signedIn() && exists(/databases/$(database)/documents/admins/$(email()))); }
     function participant(){ return student() || staff() || admin(); }
+    function highAdmin(){ return owner() || (admin() && get(/databases/$(database)/documents/admins/$(email())).data.role == 'admin'); }
+    function assignmentPath(sessionId){ return /databases/$(database)/documents/scannerAssignments/$(sessionId + '_' + email()); }
+    function assigned(sessionId){ return signedIn() && exists(assignmentPath(sessionId)) && get(assignmentPath(sessionId)).data.active == true; }
+    function leader(sessionId){ return assigned(sessionId) && get(assignmentPath(sessionId)).data.role == 'leader'; }
+    function attendanceSession(sessionId){ return get(/databases/$(database)/documents/attendanceSessions/$(sessionId)).data; }
     function eventAfter(id){ return getAfter(/databases/$(database)/documents/events/$(id)).data; }
     function eventBefore(id){ return get(/databases/$(database)/documents/events/$(id)).data; }
     function regPath(uid,id){ return /databases/$(database)/documents/registrations/$(uid + '_' + id); }
@@ -184,6 +189,61 @@ service cloud.firestore {
         && (unlimitedGroup(request.resource.data.groupId)
           || request.resource.data.count <= get(groupPath(request.resource.data.groupId)).data.maxRegistrations)
         && request.resource.data.eventIds.size() == request.resource.data.count);
+      allow delete: if false;
+    }
+
+    match /attendanceSessions/{sessionId} {
+      allow read: if signedIn();
+      allow create: if admin()
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.status == 'open';
+      allow update: if highAdmin()
+        || (admin()
+          && resource.data.createdByUid == request.auth.uid
+          && resource.data.status != 'finalized'
+          && request.resource.data.status != 'finalized');
+      allow delete: if false;
+    }
+
+    match /attendanceRoster/{rosterId} {
+      allow read: if admin() || assigned(resource.data.sessionId);
+      allow create, update: if admin();
+      allow delete: if highAdmin();
+    }
+
+    match /scannerAssignments/{assignmentId} {
+      allow get: if admin() || (signedIn() && resource.data.email == email());
+      allow list: if admin();
+      allow create: if admin()
+        && attendanceSession(request.resource.data.sessionId).status != 'finalized';
+      allow update: if admin()
+        && request.resource.data.sessionId == resource.data.sessionId
+        && attendanceSession(resource.data.sessionId).status != 'finalized';
+      allow delete: if admin()
+        && attendanceSession(resource.data.sessionId).status != 'finalized';
+    }
+
+    match /attendanceGrants/{grantId} {
+      allow read: if highAdmin();
+      allow create, update: if admin();
+      allow delete: if highAdmin();
+    }
+
+    match /checkins/{checkinId} {
+      allow get, list: if admin()
+        || (student() && resource.data.email == email())
+        || (assigned(resource.data.sessionId)
+          && attendanceSession(resource.data.sessionId).status != 'finalized');
+      allow create: if assigned(request.resource.data.sessionId)
+        && attendanceSession(request.resource.data.sessionId).status == 'open'
+        && exists(/databases/$(database)/documents/attendanceRoster/$(request.resource.data.sessionId + '_' + request.resource.data.mssv))
+        && request.resource.data.scannerUid == request.auth.uid
+        && request.resource.data.scannerEmail == email();
+      allow update: if (admin()
+          && attendanceSession(resource.data.sessionId).status != 'finalized')
+        || (leader(resource.data.sessionId)
+          && attendanceSession(resource.data.sessionId).status == 'open'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deletedAt','deletedByUid','deletedByEmail']));
       allow delete: if false;
     }
   }
