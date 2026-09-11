@@ -607,7 +607,8 @@ $("#loginBtn").onclick = async () => {
     await signInWithPopup(auth, provider);
   } catch (error) {
     if (error?.code !== "auth/popup-closed-by-user" && error?.code !== "auth/cancelled-popup-request") {
-      showLoginNotice("Không thể đăng nhập. Vui lòng thử lại.");
+      const code = error?.code || "auth/unknown";
+      showLoginNotice(`Lỗi đăng nhập (${code}): ${error?.message || "Không xác định được nguyên nhân."}`);
     }
   }
 };
