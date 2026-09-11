@@ -117,6 +117,7 @@ let user = null;
 let profile = null;
 let events = [];
 let myRegs = new Map();
+let attendanceByEvent = new Map();
 let groupLimits = new Map();
 let groups = new Map();
 let groupsLoaded = false;
@@ -313,7 +314,7 @@ function eventCard(event) {
   } else {
     actionButton = `<button class="btn ${state === "full" ? "btn-full" : ["closed", "ended"].includes(state) ? "btn-expired" : "btn-register"}" data-register="${event.id}" ${disabled || registered ? "disabled" : ""}>${registered ? "Đã đăng ký" : state === "full" ? "Đã đủ" : ["closed", "ended"].includes(state) ? "Hết thời gian đăng ký" : group.blocked ? "Đã đạt giới hạn đăng ký" : state === "upcoming" ? "Chưa đến giờ" : "Đăng ký"}</button>`;
   }
-  return `<article class="card event event-${state} ${external ? "event-external" : ""} ${registered ? "event-registered" : ""}"><div class="event-top"><div><span class="tag event-category">${safe(category)}</span><span class="tag ${tagClass}">${label}</span>${hotTag}${newTag}${external ? '<span class="tag external">ĐĂNG KÝ BÊN NGOÀI</span>' : ""}${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}<h3>${safe(event.title)}</h3></div></div><div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(event, state))}</span>${groupLine}</div>${capacityHtml}<div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${STUDENT_CALENDAR_ENABLED && registered ? `<button class="btn btn-calendar" data-calendar="${event.id}">＋ Google Lịch</button>` : ""}${actionButton}</div></article>`;
+  return `<article class="card event event-${state} ${external ? "event-external" : ""} ${registered ? "event-registered" : ""}"><div class="event-top"><div><span class="tag event-category">${safe(category)}</span><span class="tag ${tagClass}">${label}</span>${hotTag}${newTag}${external ? '<span class="tag external">ĐĂNG KÝ BÊN NGOÀI</span>' : ""}${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}<h3>${safe(event.title)}</h3></div></div><div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(event, state))}</span>${groupLine}</div>${capacityHtml}<div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${attendanceByEvent.has(event.id) ? `<button class="btn" data-history="${event.id}">Xem lịch sử điểm danh</button>` : ""}${STUDENT_CALENDAR_ENABLED && registered ? `<button class="btn btn-calendar" data-calendar="${event.id}">＋ Google Lịch</button>` : ""}${actionButton}</div></article>`;
 }
 function linkedEventPage(event) {
   const state = eventState(event);
@@ -335,7 +336,7 @@ function linkedEventPage(event) {
   } else if (!external && low) availability = '<div class="linked-capacity low">Sắp hết chỗ</div>';
   let action = "";
   if (external) action = event.registrationUrl ? `<button class="btn btn-register linked-primary-action" data-external-url="${safe(event.registrationUrl)}">Đến trang đăng ký</button>` : '<button class="btn linked-primary-action" disabled>Chưa có liên kết đăng ký</button>';
-  else if (registered) action = `<button class="btn linked-primary-action registered" disabled>Đã đăng ký</button>${event.allowCancellation ? `<button class="btn" data-cancel="${event.id}">Hủy đăng ký</button>` : ""}`;
+  else if (registered) action = `<button class="btn linked-primary-action registered" disabled>Đã đăng ký</button>${attendanceByEvent.has(event.id) ? `<button class="btn" data-history="${event.id}">Xem lịch sử điểm danh</button>` : ""}${event.allowCancellation ? `<button class="btn" data-cancel="${event.id}">Hủy đăng ký</button>` : ""}`;
   else if (state === "open" && !full && !group.blocked) action = `<button class="btn btn-register linked-primary-action" data-direct-register="${event.id}">Đăng ký sự kiện</button>`;
   else {
     const message = full ? "Đã đủ" : state === "upcoming" ? "Chưa đến giờ đăng ký" : state === "ended" ? "Hết thời gian đăng ký" : group.blocked ? "Đã đạt giới hạn đăng ký" : "Đã đóng đăng ký";
@@ -565,6 +566,10 @@ function loadData() {
     myRegs = new Map(snapshot.docs.map((item) => [item.data().eventId, { id: item.id, ...item.data() }]));
     render();
   }, (error) => show(`Không thể tải đăng ký: ${error.message}`, "error")));
+  unsubscribers.push(onSnapshot(query(collection(db, "checkins"), where("email", "==", user.email)), (snapshot) => {
+    attendanceByEvent = new Map(snapshot.docs.filter((item) => !item.data().deletedAt).map((item) => [item.data().eventId, { id: item.id, ...item.data() }]));
+    render();
+  }, (error) => show(`Không thể tải lịch sử điểm danh: ${error.message}`, "error")));
   unsubscribers.push(onSnapshot(query(collection(db, "registrationLimits"), where("uid", "==", user.uid)), (snapshot) => {
     groupLimits = new Map(snapshot.docs.map((item) => [item.data().groupId, item.data()]));
     render();
@@ -754,6 +759,10 @@ document.addEventListener("click", async (event) => {
     const url = button.dataset.externalUrl;
     if (/^https:\/\//i.test(url)) window.open(url, "_blank", "noopener,noreferrer");
     else show("Liên kết đăng ký chưa hợp lệ.", "error");
+  }
+  if (button.dataset.history) {
+    const item = attendanceByEvent.get(button.dataset.history);
+    show(item ? `Đã điểm danh lúc ${ts(item.checkedAt)}.` : "Chưa có lịch sử điểm danh.");
   }
   if (button.dataset.calendar) {
     const selectedEvent = events.find((item) => item.id === button.dataset.calendar);
