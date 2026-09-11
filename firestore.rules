@@ -234,7 +234,7 @@ service cloud.firestore {
         || (student() && resource.data.email == email())
         || (assigned(resource.data.sessionId)
           && attendanceSession(resource.data.sessionId).status != 'finalized');
-      allow create: if assigned(request.resource.data.sessionId)
+      allow create: if (admin() || assigned(request.resource.data.sessionId))
         && attendanceSession(request.resource.data.sessionId).status == 'open'
         && exists(/databases/$(database)/documents/attendanceRoster/$(request.resource.data.sessionId + '_' + request.resource.data.mssv))
         && request.resource.data.scannerUid == request.auth.uid
