@@ -112,6 +112,15 @@
   </form>
 </dialog>
 
+<dialog id="adminTextDialog" class="confirm-dialog">
+  <form id="adminTextForm" class="modal confirm-modal">
+    <div class="confirm-icon" aria-hidden="true">↗</div>
+    <div class="confirm-copy"><h2 id="adminTextTitle">Nhập liên kết</h2><p id="adminTextMessage"></p></div>
+    <div class="field"><label id="adminTextLabel" for="adminTextInput">Liên kết</label><input id="adminTextInput" type="url" inputmode="url" autocomplete="url" placeholder="https://"></div>
+    <div class="modal-actions confirm-actions"><button id="adminTextCancel" type="button" class="btn">Hủy</button><button id="adminTextSubmit" type="submit" class="btn btn-primary">Áp dụng</button></div>
+  </form>
+</dialog>
+
 <dialog id="quickRegistrationDialog"><div class="modal quick-registration-modal"><div class="modal-head"><div><h2 id="quickRegistrationTitle">Danh sách đăng ký</h2><p id="quickRegistrationSummary"></p></div><button type="button" class="btn btn-small" data-close-quick>Đóng</button></div><div class="table-wrap"><table class="quick-registration-table"><thead><tr><th class="col-stt">STT</th><th class="col-identifier">MSSV/Mã số</th><th>Họ tên</th><th>Khoa/Đơn vị</th><th>Đối tượng</th><th>Thời gian</th></tr></thead><tbody id="quickRegistrationRows"></tbody></table></div><div id="quickRegistrationPagination" class="registration-pagination"><button id="quickRegistrationPrev" class="btn btn-small" type="button">← Trang trước</button><span id="quickRegistrationPageText">Trang 1</span><button id="quickRegistrationNext" class="btn btn-small" type="button">Trang sau →</button></div></div></dialog>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script><script type="module" src="./admin.mjs?v=2.4"></script>
 </body></html>
