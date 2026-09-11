@@ -395,3 +395,8 @@
   .linked-primary-action{width:100%;min-width:0}
   .linked-capacity{margin:0 18px}
 }
+
+
+/* V2.3: ngành tùy chọn và chế độ xem riêng sự kiện */
+#profileFacultyOther:not(.hidden){display:block;margin-top:10px}
+#eventSectionHead.hidden,#studentStatusFilters.hidden{display:none!important}
