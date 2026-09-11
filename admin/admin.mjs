@@ -1691,14 +1691,39 @@ async function openAttendanceManage(sessionId) {
   await loadAttendanceManage();
 }
 
+async function createStandaloneAttendance() {
+  const title = $("#attendanceStandaloneTitle").value.trim();
+  const date = $("#attendanceStandaloneDate").value;
+  const location = $("#attendanceStandaloneLocation").value.trim();
+  if (!title || !date) throw Error("Vui lòng nhập tên và ngày diễn ra sự kiện.");
+  const sessionId = attendanceCode();
+  const profileSnapshot = await getDocs(collection(db, "profiles"));
+  const roster = profileSnapshot.docs.map((item) => {
+    const data = item.data();
+    const email = String(data.email || "").trim().toLowerCase();
+    const mssv = String(data.identifier || data.mssv || (email.endsWith("@student.tdtu.edu.vn") ? email.split("@")[0] : "")).trim().toUpperCase();
+    return { ...data, email, mssv };
+  }).filter((item) => item.mssv && item.email.endsWith("@student.tdtu.edu.vn"));
+  const writes = [
+    { ref: doc(db, "attendanceSessions", sessionId), data: { eventId: "", source: "standalone", title, date, location, status: "open", rosterCount: roster.length, createdByUid: user.uid, createdByEmail: user.email, createdAt: serverTimestamp() } },
+    ...roster.map((item) => ({ ref: doc(db, "attendanceRoster", sessionId + "_" + item.mssv), data: { sessionId, eventId: "", mssv: item.mssv, name: item.name || "", email: item.email, uid: item.uid || "", createdAt: serverTimestamp() } }))
+  ];
+  for (let offset = 0; offset < writes.length; offset += 450) {
+    const batch = writeBatch(db);
+    writes.slice(offset, offset + 450).forEach((entry) => batch.set(entry.ref, entry.data));
+    await batch.commit();
+  }
+  notice(`Đã tạo sự kiện điểm danh với ${roster.length} sinh viên trong danh sách đối chiếu.`, "success");
+  showPane("attendance");
+}
+
 $("#attendanceCreateForm").onsubmit = async (event) => {
   event.preventDefault();
-  const eventId = $("#attendanceEventId").value;
-  if (!eventId) return;
   const submit = event.submitter;
   if (submit) submit.disabled = true;
   try {
-    await createAttendanceFromEvent(eventId);
+    await createStandaloneAttendance();
+    event.target.reset();
     $("#attendanceCreateDialog").close();
   } catch (error) {
     notice(error.message || "Không thể tạo điểm danh.", "error");
@@ -1725,7 +1750,8 @@ document.addEventListener("click", async (event) => {
   const button = event.target.closest("button");
   if (!button) return;
   if (button.id === "newAttendanceBtn") {
-    populateAttendanceEventOptions();
+    $("#attendanceCreateForm").reset();
+    $("#attendanceStandaloneDate").value = new Date().toISOString().slice(0, 10);
     $("#attendanceCreateDialog").showModal();
   }
   if (button.dataset.closeAttendanceCreate !== undefined) $("#attendanceCreateDialog").close();
