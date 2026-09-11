@@ -302,7 +302,7 @@ function refreshStudentFilters(sourceEvents, focusedGroup) {
 }
 
 function render() {
-  const focusedGroup = linkedGroupId ? [...groups.values()].find((group) => group.id === linkedGroupId || groupCode(group) === shareCode(linkedGroupId)) : null;
+  const focusedGroup = linkedGroupId ? [...groups.values()].find((group) => !group.deletedAt && (group.id === linkedGroupId || groupCode(group) === shareCode(linkedGroupId))) : null;
   const linkedMode = !!linkedGroupId;
   $("#studentAdvancedFilters").classList.toggle("hidden", linkedMode);
   const filterLabels = { available: "Sắp mở & đang mở", mine: linkedMode ? "Đã chọn" : "Đã đăng ký", ended: "Đã kết thúc", all: "Tất cả" };
@@ -325,7 +325,7 @@ function render() {
   }
 
   const accessibleEvents = events.filter((event) => {
-    if (event.deletedAt) return false;
+    if (event.deletedAt || groups.get(event.groupId)?.deletedAt) return false;
     if (!facultyAllowed(event)) return false;
     if (filter === "mine") return myRegs.has(event.id) && (!linkedGroupId || event.groupId === focusedGroup?.id);
     if (eventState(event) === "hidden") return false;
@@ -471,6 +471,10 @@ async function register(eventId) {
       if (registrationSnapshot.exists()) throw Error("Bạn đã đăng ký sự kiện này.");
       const event = eventSnapshot.data();
       if (event.deletedAt) throw Error("Sự kiện không còn khả dụng.");
+      if (event.groupId) {
+        const activeGroupSnapshot = await transaction.get(doc(db, "eventGroups", event.groupId));
+        if (!activeGroupSnapshot.exists() || activeGroupSnapshot.data().deletedAt) throw Error("Nhóm sự kiện không còn khả dụng.");
+      }
       if (!allowedFaculties(event).includes(profile.faculty)) throw Error("Sự kiện không mở cho khoa/đơn vị của bạn.");
       let group = null;
       let current = null;
