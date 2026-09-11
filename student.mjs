@@ -17,7 +17,9 @@ const $ = (selector) => document.querySelector(selector);
 const safe = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
 const millis = (value) => value?.toDate ? value.toDate().getTime() : (value ? new Date(value).getTime() : null);
 const studentIdentifier = (email) => String(email || "").toLowerCase().endsWith(STUDENT_DOMAIN) ? String(email).split("@")[0].toUpperCase() : "";
-const linkedCode = new URLSearchParams(window.location.search).get("e")?.trim() || "";
+const linkParams = new URLSearchParams(window.location.search);
+const linkedCode = linkParams.get("e")?.trim() || "";
+const linkedEventCode = linkParams.get("x")?.trim() || "";
 let eventsLoaded = false;
 
 function shareCode(value) {
@@ -338,11 +340,11 @@ function refreshStudentFilters(sourceEvents, focusedGroup) {
 }
 
 function render() {
-  const focusedEvent = linkedCode ? events.find((event) => !event.deletedAt && event.shareCode && shareCode(event.shareCode) === shareCode(linkedCode)) : null;
-  const focusedGroup = linkedCode && !focusedEvent ? [...groups.values()].find((group) => !group.deletedAt && (group.id === linkedCode || groupCode(group) === shareCode(linkedCode))) : null;
+  const focusedEvent = linkedEventCode ? events.find((event) => !event.deletedAt && event.shareCode && shareCode(event.shareCode) === shareCode(linkedEventCode)) : null;
+  const focusedGroup = linkedCode ? [...groups.values()].find((group) => !group.deletedAt && (group.id === linkedCode || groupCode(group) === shareCode(linkedCode))) : null;
   const linkedEventMode = !!focusedEvent;
-  const linkedMode = !!linkedCode && !linkedEventMode;
-  $("#linkedEventPanel").classList.toggle("hidden", !linkedEventMode && !(linkedCode && eventsLoaded && groupsLoaded && !focusedGroup));
+  const linkedMode = !!linkedCode;
+  $("#linkedEventPanel").classList.toggle("hidden", !linkedEventMode && !(linkedEventCode && eventsLoaded));
   $("#studentHero").classList.toggle("hidden", linkedEventMode);
   $("#eventSectionHead").classList.toggle("hidden", linkedEventMode);
   $("#studentAdvancedFilters").classList.toggle("hidden", linkedEventMode || linkedMode);
@@ -352,7 +354,7 @@ function render() {
     $("#linkedEventPanel").innerHTML = linkedEventPage(focusedEvent);
     return;
   }
-  if (linkedCode && eventsLoaded && groupsLoaded && !focusedGroup) {
+  if (linkedEventCode && eventsLoaded && !focusedEvent) {
     $("#studentHero").classList.add("hidden");
     $("#eventSectionHead").classList.add("hidden");
     $("#eventGrid").classList.add("hidden");
