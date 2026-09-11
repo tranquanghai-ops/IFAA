@@ -348,7 +348,7 @@
 }
 
 
-/* V4.1: bộ lọc đăng ký, nhóm trong thùng rác và nhãn HOT */
+/* V2.1: bộ lọc đăng ký, nhóm trong thùng rác và nhãn HOT */
 .registration-status-options{display:flex;flex-wrap:wrap;gap:9px}
 .registration-filter-card .form-grid{align-items:end}
 .registration-page-size-field{max-width:240px}
