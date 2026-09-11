@@ -20,14 +20,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Authenticate Firebase service account
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_IFAA }}
-
-      - name: Deploy Firestore Rules
-        run: npx --yes firebase-tools@latest deploy --only firestore:rules --project ifa-activities --non-interactive
-
       - name: Deploy to Firebase Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
