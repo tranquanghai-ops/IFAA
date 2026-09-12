@@ -1649,7 +1649,8 @@ function studentRecord(value = {}) {
 }
 function renderFacultyStudents(rows = facultyStudents) {
   $("#facultyStudentCount").textContent = `${rows.length} đang hiển thị · tổng ${facultyStudentTotal || rows.length} sinh viên${facultyStudentHasNext ? " · còn trang sau" : ""}`;
-  $("#facultyStudentRows").innerHTML = rows.map((item) => `<tr><td><b>${safe(item.mssv)}</b></td><td>${safe(item.name)}</td><td>${safe(item.gender)}</td><td>${safe(item.major)}</td><td>${safe(item.studentClass)}</td><td><button class="btn btn-small btn-danger" data-remove-faculty-student="${safe(item.mssv)}">Xóa</button></td></tr>`).join("") || '<tr><td colspan="6" class="empty">Không có sinh viên phù hợp.</td></tr>';
+  $("#facultyStudentTotalTop").textContent = `Tổng: ${facultyStudentTotal || rows.length} sinh viên`;
+  $("#facultyStudentRows").innerHTML = rows.map((item) => `<tr><td><b>${safe(item.mssv)}</b></td><td><input class="student-inline" data-student-field="name" data-student-id="${safe(item.mssv)}" value="${safe(item.name)}"></td><td><select class="student-inline" data-student-field="gender" data-student-id="${safe(item.mssv)}"><option value="">—</option><option ${item.gender === "Nam" ? "selected" : ""}>Nam</option><option ${item.gender === "Nữ" ? "selected" : ""}>Nữ</option></select></td><td><select class="student-inline" data-student-field="major" data-student-id="${safe(item.mssv)}"><option value="">— Chọn ngành —</option>${FACULTY_MAJORS.map((v) => `<option ${item.major === v ? "selected" : ""}>${safe(v)}</option>`).join("")}</select></td><td><input class="student-inline" data-student-field="studentClass" data-student-id="${safe(item.mssv)}" value="${safe(item.studentClass)}"></td><td><button class="btn btn-small btn-danger" data-remove-faculty-student="${safe(item.mssv)}">Xóa</button></td></tr>`).join("") || '<tr><td colspan="6" class="empty">Không có sinh viên phù hợp.</td></tr>';
   $("#attendanceStudentOptions").innerHTML = rows.map((item) => `<option value="${safe(item.mssv)}">${safe(item.name)}</option><option value="${safe(item.name)}">${safe(item.mssv)}</option>`).join("");
   $("#facultyStudentPageInfo").textContent = `Trang ${facultyStudentPage}`;
   $("#facultyStudentPrev").disabled = facultyStudentPage <= 1;
@@ -2039,6 +2040,11 @@ $("#facultyStudentFile").onchange = async (event) => {
 };
 $("#facultyStudentTemplate").onclick = () => downloadWorkbook("MAU_DANH_SACH_SV_KHOA.xlsx", "Danh sach SV khoa", [{ MSSV: "12300325", "Họ và tên": "Nguyễn Văn A", "Giới tính": "Nam", "Ngành": "Thiết kế nội thất", "Lớp": "230H0101" }]);
 $("#facultyStudentExport").onclick = () => downloadWorkbook("DANH_SACH_SV_KHOA.xlsx", "Danh sach SV khoa", facultyStudents.map((item, index) => ({ STT: index + 1, MSSV: item.mssv, "Họ và tên": item.name, "Giới tính": item.gender, "Ngành": item.major, "Lớp": item.studentClass })));
+$("#facultyStudentRows").onchange = async (event) => {
+  const field = event.target.closest("[data-student-field]"); if (!field) return;
+  try { await setDoc(doc(db, "facultyStudents", field.dataset.studentId), { [field.dataset.studentField]: field.value.trim(), ...(field.dataset.studentField === "name" ? { nameLower: normalizeSearch(field.value) } : {}), updatedByUid: user.uid, updatedAt: serverTimestamp() }, { merge: true }); notice("Đã tự lưu thông tin sinh viên.", "success"); }
+  catch (error) { notice("Không thể tự lưu: " + error.message, "error"); }
+};
 $("#facultyStudentRows").onclick = async (event) => {
   const button = event.target.closest("[data-remove-faculty-student]"); if (!button) return;
   const approved = await confirmAction({ title: "Xóa sinh viên?", message: `Xóa MSSV ${button.dataset.removeFacultyStudent} khỏi danh sách SV khoa?` });
