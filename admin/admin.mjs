@@ -141,7 +141,7 @@ function configuredAttendanceBaseUrl() {
 
 function attendanceShareUrl(sessionId) {
   const url = configuredAttendanceBaseUrl();
-  url.searchParams.set("event", sessionId);
+  // Dùng cùng tham số `e` với trang đăng ký. Tên `event` có thể bị\n  // WordPress/plugin lịch của trang khoa giữ lại trước khi iframe được tải.\n  url.searchParams.set("e", sessionId);
   return url.toString();
 }
 

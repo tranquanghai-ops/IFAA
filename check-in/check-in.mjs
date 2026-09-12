@@ -11,14 +11,14 @@ provider.setCustomParameters({ prompt: "select_account" });
 const $ = (selector) => document.querySelector(selector);
 function resolveSessionId() {
   const directParams = new URLSearchParams(window.location.search);
-  const directId = directParams.get("event")?.trim();
+  const directId = (directParams.get("e") || directParams.get("event"))?.trim();
   if (directId) return directId;
   const hashParams = new URLSearchParams(window.location.hash.replace(/^#\??/, ""));
-  const hashId = hashParams.get("event")?.trim();
+  const hashId = (hashParams.get("e") || hashParams.get("event"))?.trim();
   if (hashId) return hashId;
   try {
     const referringPage = new URL(document.referrer);
-    if (referringPage.hostname === "ifa.tdtu.edu.vn") return referringPage.searchParams.get("event")?.trim() || "";
+    if (referringPage.hostname === "ifa.tdtu.edu.vn") {\n      return (referringPage.searchParams.get("e") || referringPage.searchParams.get("event"))?.trim() || "";\n    }
   } catch {
     // Trang được mở trực tiếp hoặc trình duyệt không cung cấp địa chỉ trang chứa iframe.
   }
