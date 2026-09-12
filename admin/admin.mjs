@@ -74,6 +74,9 @@ let attendanceSessions = [];
 let attendanceFilter = "open";
 let selectedAttendanceSession = null;
 let attendanceRoster = [];
+let attendanceManageRows = [], attendancePage = 1, attendancePageSize = 10;
+let attendanceReportPage = 1, attendanceReportPageSize = 10, attendanceReportFilter = "present";
+let attendanceViewerScale = 1;
 let attendanceRosterImport = [];
 let attendancePermissionMembers = [];
 let facultyStudents = [];
@@ -1802,6 +1805,7 @@ async function loadAttendanceManage() {
     isSubAdmin ? Promise.resolve({ docs: [] }) : getDocs(query(collection(db, "attendanceGrants"), where("sessionId", "==", sessionId)))
   ]);
   attendanceRoster = rosterSnapshot.docs.map((item) => item.data());
+  attendanceManageRows = checkinSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
   const grants = new Map(grantSnapshot.docs.map((item) => [item.id, item.data()]));
   $("#attendanceGrantedByHead").classList.toggle("hidden", isSubAdmin);
   $("#attendanceScannerRows").innerHTML = assignmentSnapshot.docs.map((item) => {
@@ -1811,15 +1815,54 @@ async function loadAttendanceManage() {
       <td class="${isSubAdmin ? "hidden" : ""}">${safe(grant.grantedByName || grant.grantedByEmail || "")}</td>
       <td><button class="btn btn-small btn-danger" data-attendance-remove-scanner="${item.id}" ${selectedAttendanceSession.status === "finalized" ? "disabled" : ""}>Xóa</button></td></tr>`;
   }).join("") || '<tr><td colspan="5" class="empty">Chưa cấp quyền cho sinh viên quét.</td></tr>';
-  $("#attendanceCheckinRows").innerHTML = checkinSnapshot.docs.filter((item) => !item.data().deletedAt).map((item) => {
-    const data = item.data();
-    return `<tr><td>${safe(data.mssv)}</td><td>${safe(data.name)}</td><td>${safe(ts(data.checkedAt))}</td><td>${safe(data.scannerName || data.scannerMssv || "")}</td></tr>`;
-  }).join("") || '<tr><td colspan="4" class="empty">Chưa có lượt điểm danh.</td></tr>';
+  renderAttendanceManageRows();
+}
+
+function attendanceCheckedMillis(item) { return millis(item.checkedAt) || 0; }
+function attendanceActiveRows() { return attendanceManageRows.filter((item) => !item.deletedAt).sort((a, b) => attendanceCheckedMillis(b) - attendanceCheckedMillis(a)); }
+function attendanceReportData() {
+  const completed = attendanceActiveRows().filter((item) => item.mssv);
+  const attended = new Map(completed.map((item) => [String(item.mssv).toUpperCase(), item]));
+  const registered = attendanceRoster.map((item) => ({ ...item, state: attended.has(String(item.mssv).toUpperCase()) ? "present" : "absent" }));
+  const rosterIds = new Set(attendanceRoster.map((item) => String(item.mssv).toUpperCase()));
+  const outside = completed.filter((item) => !rosterIds.has(String(item.mssv).toUpperCase())).map((item) => ({ ...item, state: "outside" }));
+  return { present: registered.filter((item) => item.state === "present"), absent: registered.filter((item) => item.state === "absent"), outside };
+}
+function renderAttendanceManageRows() {
+  const active = attendanceActiveRows(), pending = active.filter((item) => !item.mssv && item.photoData), completed = active.filter((item) => item.mssv), trashed = attendanceManageRows.filter((item) => item.deletedAt).sort((a, b) => (millis(b.deletedAt) || 0) - (millis(a.deletedAt) || 0));
+  $("#attendancePendingSection").classList.toggle("hidden", !pending.length);
+  $("#attendancePendingPhotoCount").textContent = pending.length + " ảnh";
+  $("#attendancePendingPhotoRows").innerHTML = pending.map((item, index) => `<tr><td>${pending.length - index}</td><td><button class="attendance-photo-link" data-attendance-view-photo="${item.id}">Xem hình</button></td><td>${safe(item.scannerName || item.scannerMssv || "")}</td><td>${safe(ts(item.checkedAt))}</td><td><input class="attendance-inline-mssv" data-attendance-pending-input="${item.id}" maxlength="12" placeholder="Nhập MSSV" ${selectedAttendanceSession?.status === "finalized" ? "disabled" : ""}></td><td><button class="btn btn-primary" data-attendance-label-photo="${item.id}" ${selectedAttendanceSession?.status === "finalized" ? "disabled" : ""}>Lưu MSSV</button> <button class="btn btn-danger" data-attendance-delete-checkin="${item.id}" ${selectedAttendanceSession?.status === "finalized" ? "disabled" : ""}>Xóa</button></td></tr>`).join("");
+
+  const totalPages = Math.max(1, Math.ceil(completed.length / attendancePageSize)); attendancePage = Math.min(attendancePage, totalPages);
+  const pageRows = completed.slice((attendancePage - 1) * attendancePageSize, attendancePage * attendancePageSize);
+  $("#attendanceCheckinCount").textContent = completed.length + " lượt";
+  $("#attendanceDeleteAll").disabled = !active.length || selectedAttendanceSession?.status === "finalized";
+  $("#attendanceCheckinRows").innerHTML = pageRows.map((item, index) => `<tr><td>${completed.length - ((attendancePage - 1) * attendancePageSize + index)}</td><td>${item.photoData ? `<button class="attendance-photo-link" data-attendance-view-photo="${item.id}">${safe(item.mssv)}</button>` : safe(item.mssv)}</td><td>${safe(item.name || "Không có dữ liệu")}</td><td>${safe(item.scannerName || item.scannerMssv || "")}</td><td>${safe(ts(item.checkedAt))}</td><td><button class="btn btn-small btn-danger" data-attendance-delete-checkin="${item.id}" ${selectedAttendanceSession?.status === "finalized" ? "disabled" : ""}>Xóa</button></td></tr>`).join("") || '<tr><td colspan="6" class="empty">Chưa có lượt điểm danh.</td></tr>';
+  $("#attendancePageInfo").textContent = `Trang ${attendancePage}/${totalPages} · ${completed.length} lượt`;
+  $("#attendancePrev").disabled = attendancePage <= 1; $("#attendanceNext").disabled = attendancePage >= totalPages;
+
+  $("#attendanceTrashCount").textContent = trashed.length + " lượt";
+  $("#attendanceTrashRows").innerHTML = trashed.map((item) => `<tr><td>${safe(item.mssv || "Ảnh chưa nhập MSSV")}</td><td>${safe(item.name || "")}</td><td>${safe(item.deletedByEmail || item.deletedByUid || "")}</td><td><button class="btn btn-small" data-attendance-restore-checkin="${item.id}" ${selectedAttendanceSession?.status === "finalized" ? "disabled" : ""}>Khôi phục</button></td></tr>`).join("") || '<tr><td colspan="4" class="empty">Thùng rác đang trống.</td></tr>';
+
+  const report = attendanceReportData(), hasRoster = attendanceRoster.length > 0;
+  $("#attendanceReportSection").classList.toggle("hidden", !hasRoster);
+  if (hasRoster) {
+    $("#attendancePresentCount").textContent = report.present.length; $("#attendanceAbsentCount").textContent = report.absent.length; $("#attendanceOutsideCount").textContent = report.outside.length;
+    document.querySelectorAll("[data-attendance-report-filter]").forEach((button) => button.classList.toggle("active", button.dataset.attendanceReportFilter === attendanceReportFilter));
+    const reportRows = report[attendanceReportFilter] || report.present, reportPages = Math.max(1, Math.ceil(reportRows.length / attendanceReportPageSize)); attendanceReportPage = Math.min(attendanceReportPage, reportPages);
+    const reportPageRows = reportRows.slice((attendanceReportPage - 1) * attendanceReportPageSize, attendanceReportPage * attendanceReportPageSize);
+    const labels = { present: "Có mặt", absent: "Vắng", outside: "Ngoài danh sách" };
+    $("#attendanceReportRows").innerHTML = reportPageRows.map((item) => `<tr><td><b>${safe(item.mssv)}</b></td><td>${safe(item.name || "Không có dữ liệu")}</td><td>${safe(labels[item.state])}</td></tr>`).join("") || '<tr><td colspan="3" class="empty">Không có sinh viên trong nhóm này.</td></tr>';
+    $("#attendanceReportPageInfo").textContent = `Trang ${attendanceReportPage}/${reportPages} · ${reportRows.length} dòng`;
+    $("#attendanceReportPrev").disabled = attendanceReportPage <= 1; $("#attendanceReportNext").disabled = attendanceReportPage >= reportPages;
+  }
 }
 
 async function openAttendanceManage(sessionId) {
   selectedAttendanceSession = attendanceSessions.find((item) => item.id === sessionId);
   if (!selectedAttendanceSession) return;
+  attendancePage = 1; attendanceReportPage = 1; attendanceReportFilter = "present";
   $("#attendanceManageTitle").textContent = selectedAttendanceSession.title;
   $("#attendanceManageMeta").textContent = `${attendanceStatusLabel(selectedAttendanceSession.status)} · ${vietnamDate(selectedAttendanceSession.date)}`;
   $("#attendanceEnd").classList.toggle("hidden", selectedAttendanceSession.status !== "open");
@@ -2116,6 +2159,25 @@ $("#facultyStudentExpiredDeleteAll").onclick = async () => {
   await loadExpiredFacultyStudents(); await loadFacultyStudentMeta(); notice("Đã xóa danh sách sinh viên hết hạn.", "success");
 };
 
+async function resolveAttendanceStudent(rawMssv) {
+  const mssv = String(rawMssv || "").trim().toUpperCase();
+  const rosterStudent = attendanceRoster.find((item) => String(item.mssv).toUpperCase() === mssv);
+  if (rosterStudent) return rosterStudent;
+  const snapshot = await getDoc(doc(db, "facultyStudents", mssv));
+  return snapshot.exists() ? { mssv, ...snapshot.data() } : { mssv, name: "Không có dữ liệu", email: mssv.toLowerCase() + "@student.tdtu.edu.vn", uid: "" };
+}
+function openAttendanceImage(id) {
+  const item = attendanceManageRows.find((row) => row.id === id);
+  if (!item?.photoData) return notice("Không tìm thấy hình điểm danh.", "error");
+  attendanceViewerScale = 1; $("#attendanceViewerImage").src = item.photoData; $("#attendanceViewerImage").style.width = "100%"; $("#attendanceImageDialog").showModal();
+}
+function setAttendanceImageScale(value) {
+  attendanceViewerScale = Math.min(3, Math.max(.5, value)); $("#attendanceViewerImage").style.width = `${attendanceViewerScale * 100}%`;
+}
+function attendanceExportRows() {
+  return attendanceActiveRows().filter((item) => item.mssv).map((item, index, rows) => ({ STT: rows.length - index, MSSV: item.mssv, "Họ và tên": item.name || "Không có dữ liệu", "Người quét": item.scannerName || item.scannerMssv || "", "Thời gian": ts(item.checkedAt) }));
+}
+
 $("#attendanceScannerForm").onsubmit = async (event) => {
   event.preventDefault();
   const keyword = $("#attendanceScannerLookup").value.trim().toLocaleLowerCase("vi");
@@ -2140,6 +2202,7 @@ document.addEventListener("click", async (event) => {
   }
   if (button.dataset.closeAttendanceCreate !== undefined) $("#attendanceCreateDialog").close();
   if (button.dataset.closeAttendanceManage !== undefined) $("#attendanceManageDialog").close();
+  if (button.dataset.closeAttendanceImage !== undefined) $("#attendanceImageDialog").close();
   if (button.dataset.closeAttendanceEdit !== undefined) $("#attendanceEditDialog").close();
   if (button.dataset.attendanceFilter) {
     attendanceFilter = button.dataset.attendanceFilter;
@@ -2158,6 +2221,25 @@ document.addEventListener("click", async (event) => {
   }
   if (button.dataset.attendanceManage) await openAttendanceManage(button.dataset.attendanceManage);
   if (button.dataset.attendanceEdit) openAttendanceEdit(button.dataset.attendanceEdit);
+  if (button.dataset.attendanceReportFilter) { attendanceReportFilter = button.dataset.attendanceReportFilter; attendanceReportPage = 1; renderAttendanceManageRows(); }
+  if (button.dataset.attendanceViewPhoto) openAttendanceImage(button.dataset.attendanceViewPhoto);
+  if (button.dataset.attendanceLabelPhoto) {
+    const id = button.dataset.attendanceLabelPhoto, input = document.querySelector(`[data-attendance-pending-input="${CSS.escape(id)}"]`), mssv = input?.value.trim().toUpperCase() || "";
+    if (!/^(?=.{8,12}$)(?=.*\d)[A-Z0-9]+$/.test(mssv)) return notice("MSSV không hợp lệ; cần 8–12 chữ hoặc số.", "error");
+    const duplicate = attendanceActiveRows().find((item) => item.mssv && String(item.mssv).toUpperCase() === mssv);
+    if (duplicate) return notice(`MSSV ${mssv} đã có trong danh sách điểm danh.`, "error");
+    const student = await resolveAttendanceStudent(mssv);
+    await updateDoc(doc(db, "checkins", id), { mssv, name: student.name || "Không có dữ liệu", email: student.email || "", studentUid: student.uid || "" });
+    notice(`Đã lưu ${mssv} · ${student.name || "Không có dữ liệu"}.`, "success"); await loadAttendanceManage();
+  }
+  if (button.dataset.attendanceDeleteCheckin) {
+    const item = attendanceManageRows.find((row) => row.id === button.dataset.attendanceDeleteCheckin); if (!item || selectedAttendanceSession.status === "finalized") return;
+    await updateDoc(doc(db, "checkins", item.id), { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email }); notice("Đã chuyển lượt điểm danh vào thùng rác.", "success"); await loadAttendanceManage();
+  }
+  if (button.dataset.attendanceRestoreCheckin) {
+    const item = attendanceManageRows.find((row) => row.id === button.dataset.attendanceRestoreCheckin); if (!item || selectedAttendanceSession.status === "finalized") return;
+    await updateDoc(doc(db, "checkins", item.id), { deletedAt: null, deletedByUid: "", deletedByEmail: "" }); notice("Đã khôi phục lượt điểm danh.", "success"); await loadAttendanceManage();
+  }
   if (button.dataset.deleteAttendance) {
     const selected = attendanceSessions.find((item) => item.id === button.dataset.deleteAttendance);
     if (!selected || (isSubAdmin && selected.createdByUid !== user.uid)) return notice("Bạn không có quyền xóa phiên điểm danh này.", "error");
@@ -2184,6 +2266,27 @@ document.addEventListener("click", async (event) => {
 $("#attendanceCopyLink").onclick = async () => {
   await copyText(attendanceShareUrl(selectedAttendanceSession.id), "Đã sao chép link quét điểm danh.");
 };
+$("#attendancePrev").onclick = () => { if (attendancePage > 1) { attendancePage -= 1; renderAttendanceManageRows(); } };
+$("#attendanceNext").onclick = () => { attendancePage += 1; renderAttendanceManageRows(); };
+$("#attendancePageSize").onchange = (event) => { attendancePageSize = Number(event.target.value || 10); attendancePage = 1; renderAttendanceManageRows(); };
+$("#attendanceReportPrev").onclick = () => { if (attendanceReportPage > 1) { attendanceReportPage -= 1; renderAttendanceManageRows(); } };
+$("#attendanceReportNext").onclick = () => { attendanceReportPage += 1; renderAttendanceManageRows(); };
+$("#attendanceReportPageSize").onchange = (event) => { attendanceReportPageSize = Number(event.target.value || 10); attendanceReportPage = 1; renderAttendanceManageRows(); };
+$("#attendanceExportExcel").onclick = () => downloadWorkbook(`DIEM_DANH_${shareCode(selectedAttendanceSession?.title)}.xlsx`, "Danh sach diem danh", attendanceExportRows());
+$("#attendanceExportReport").onclick = () => {
+  const report = attendanceReportData(), labels = { present: "Có mặt", absent: "Vắng", outside: "Ngoài danh sách" };
+  const rows = [...report.present, ...report.absent, ...report.outside].map((item, index) => ({ STT: index + 1, MSSV: item.mssv, "Họ và tên": item.name || "Không có dữ liệu", "Đối chiếu": labels[item.state] }));
+  downloadWorkbook(`DOI_CHIEU_${shareCode(selectedAttendanceSession?.title)}.xlsx`, "Doi chieu", rows);
+};
+$("#attendanceDeleteAll").onclick = async () => {
+  const rows = attendanceActiveRows(); if (!rows.length || selectedAttendanceSession?.status === "finalized") return;
+  if (!(await confirmAction({ title: "Xóa toàn bộ lượt điểm danh?", message: `${rows.length} lượt sẽ chuyển vào thùng rác và có thể khôi phục. Nhập XÓA để tiếp tục.`, verification: "XÓA" }))) return;
+  for (let offset = 0; offset < rows.length; offset += 450) { const batch = writeBatch(db); rows.slice(offset, offset + 450).forEach((item) => batch.update(doc(db, "checkins", item.id), { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email })); await batch.commit(); }
+  notice("Đã chuyển toàn bộ lượt điểm danh vào thùng rác.", "success"); await loadAttendanceManage();
+};
+$("#attendanceImageZoomOut").onclick = () => setAttendanceImageScale(attendanceViewerScale - .25);
+$("#attendanceImageZoomReset").onclick = () => setAttendanceImageScale(1);
+$("#attendanceImageZoomIn").onclick = () => setAttendanceImageScale(attendanceViewerScale + .25);
 $("#attendanceEditForm").onsubmit = async (event) => {
   event.preventDefault(); const id = $("#attendanceEditDialog").dataset.sessionId, item = attendanceSessions.find((value) => value.id === id); if (!item) return;
   const date = $("#attendanceEditDate").value, endDate = $("#attendanceEditEndDate").value; if (endDate < date) return notice("Ngày kết thúc không được trước ngày tổ chức.", "error");

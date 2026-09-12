@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#a71930">
   <title>Quét điểm danh · IFA+A</title>
-  <link rel="stylesheet" href="../attendance.css?v=5">
+  <link rel="stylesheet" href="../attendance.css?v=6">
 </head>
 <body>
 <main class="att-shell scanner-box">
@@ -14,6 +14,7 @@
     <div class="att-actions"><button id="logoutBtn" class="att-btn hidden">Đăng xuất</button></div>
   </header>
   <div id="notice" class="att-notice hidden"></div>
+  <div id="scanToast" class="scan-toast" role="alert" aria-live="assertive"><b></b><span></span></div>
   <section id="loginCard" class="att-card scanner-login">
     <h2>Đăng nhập tài khoản TDTU</h2>
     <p>Chỉ Admin hoặc sinh viên đã được cấp quyền quét cho sự kiện này mới có thể sử dụng.</p>
@@ -30,14 +31,16 @@
         <label class="camera-select-label">Camera sau<select id="cameraSelect"><option value="">Tự động chọn camera sau</option></select></label>
       </section>
       <form id="scanForm" class="att-form manual-scan-form"><input id="mssv" class="scan-input" autocomplete="off" autocapitalize="characters" placeholder="Nhập MSSV thủ công (có thể bổ sung sau)"><button class="att-btn green">Lưu điểm danh</button></form>
-      <div id="photoPreviewBox" class="photo-preview-box hidden"><img id="photoPreview" alt="Hình vừa chụp"><div><b>Đã chụp hình</b><p>Có thể lưu hình ngay hoặc bổ sung MSSV sau.</p><div class="att-actions"><button id="savePhoto" class="att-btn green" type="button">Lưu hình</button><button id="retakePhoto" class="att-btn photo" type="button">Chụp lại</button></div></div></div>
+      <section id="pendingPhotoSection" class="hidden"><div class="rows-head"><h2>Ảnh chờ nhập MSSV</h2><span id="pendingPhotoCount" class="att-badge">0 ảnh</span></div><div class="table-scroll"><table class="att-table"><thead><tr><th>STT</th><th>Hình</th><th>Người chụp</th><th>Thời gian</th><th>Nhập MSSV</th><th>Thao tác</th></tr></thead><tbody id="pendingPhotoRows"></tbody></table></div></section>
       <div class="rows-head"><h2>Danh sách điểm danh</h2><span id="rowCount" class="att-badge">0 lượt</span></div>
-      <div class="table-scroll"><table class="att-table"><thead><tr><th>MSSV</th><th>Họ tên</th><th>Thời gian</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
+      <div class="table-scroll"><table class="att-table"><thead><tr><th>STT</th><th>MSSV</th><th>Họ tên</th><th>Thời gian</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
       <details class="scanner-settings"><summary>Âm thanh và phản hồi</summary><div class="settings-grid"><label>Quét thành công<select id="successSound"><option value="bell">Chuông cao</option><option value="double">Hai tiếng</option><option value="soft">Âm nhẹ</option></select></label><label>Quét trùng/lỗi<select id="duplicateSound"><option value="low">Âm trầm</option><option value="double-low">Hai tiếng trầm</option><option value="off">Tắt âm</option></select></label></div><div class="att-actions"><button id="testSuccess" class="att-btn" type="button">Thử thành công</button><button id="testDuplicate" class="att-btn" type="button">Thử cảnh báo</button></div></details>
     </div>
   </section>
 </main>
+<dialog id="photoDialog" class="scanner-dialog"><div class="scanner-dialog-card"><div class="rows-head"><h2>Kiểm tra ảnh trước khi lưu</h2><button id="closePhotoDialog" class="att-btn" type="button">Đóng</button></div><div class="scanner-image-stage"><img id="photoPreview" alt="Hình vừa chụp"></div><div class="scanner-zoom-actions"><button id="photoZoomOut" class="att-btn" type="button">− Thu nhỏ</button><button id="photoZoomReset" class="att-btn" type="button">100%</button><button id="photoZoomIn" class="att-btn" type="button">＋ Phóng to</button></div><label class="photo-mssv-field">MSSV trên hình <span>(có thể để trống và bổ sung sau)</span><input id="photoMssv" maxlength="12" autocomplete="off" autocapitalize="characters" placeholder="Nhập MSSV nếu đã đọc được"></label><div class="scanner-dialog-actions"><button id="retakePhoto" class="att-btn photo" type="button">Chụp lại</button><button id="savePhoto" class="att-btn green" type="button">Lưu hình</button></div></div></dialog>
+<dialog id="checkinImageDialog" class="scanner-dialog"><div class="scanner-dialog-card"><div class="rows-head"><h2>Xem hình điểm danh</h2><button id="closeCheckinImage" class="att-btn" type="button">Đóng</button></div><div class="scanner-image-stage"><img id="checkinImage" alt="Hình điểm danh"></div><div class="scanner-zoom-actions"><button id="checkinZoomOut" class="att-btn" type="button">− Thu nhỏ</button><button id="checkinZoomReset" class="att-btn" type="button">100%</button><button id="checkinZoomIn" class="att-btn" type="button">＋ Phóng to</button></div></div></dialog>
 <script src="https://unpkg.com/@zxing/browser@0.1.5/umd/zxing-browser.min.js"></script>
-<script type="module" src="./check-in.mjs?v=6"></script>
+<script type="module" src="./check-in.mjs?v=7"></script>
 </body>
 </html>

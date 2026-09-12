@@ -210,7 +210,8 @@ service cloud.firestore {
     }
 
     match /facultyStudents/{mssv} {
-      allow read: if admin();
+      allow get: if participant();
+      allow list: if admin();
       allow create, update: if highAdmin()
         && request.resource.data.mssv == mssv
         && request.resource.data.name is string
@@ -263,13 +264,14 @@ service cloud.firestore {
         || (leader(resource.data.sessionId)
           && attendanceSession(resource.data.sessionId).status == 'open'
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deletedAt','deletedByUid','deletedByEmail']))
-        || (leader(resource.data.sessionId)
+        || ((leader(resource.data.sessionId)
+            || (assigned(resource.data.sessionId) && resource.data.scannerUid == request.auth.uid))
           && attendanceSession(resource.data.sessionId).status == 'open'
           && resource.data.mssv == ''
           && request.resource.data.mssv is string
           && request.resource.data.mssv.size() >= 8
           && request.resource.data.mssv.size() <= 12
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['mssv']));
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['mssv','name','email','studentUid']));
       allow delete: if highAdmin();
     }
   }

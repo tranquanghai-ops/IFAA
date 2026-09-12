@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
-import { getFirestore, collection, doc, getDoc, getDocs, setDoc, onSnapshot, query, where, serverTimestamp, Timestamp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
+import { getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, onSnapshot, query, where, serverTimestamp, Timestamp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
 import { firebaseConfig, STUDENT_DOMAIN, OWNER_EMAIL } from "../firebase-config.mjs";
 
 const app = initializeApp(firebaseConfig);
@@ -23,13 +23,22 @@ let user = null, session = null, assignment = null, isManager = false, managerNa
 let unsubscribeRows = null, unsubscribeSession = null;
 let cameraStream = null, cameraControls = null, nativeDetector = null, enhancedReader = null;
 let cameraRequest = 0, scanning = false, pendingPhoto = "", lastDecoded = "", lastDecodedAt = 0;
-let rosterCache = new Map(), flushing = false;
+let rosterCache = new Map(), flushing = false, toastTimer = 0, photoPreviewScale = 1, checkinViewerScale = 1;
 
 function notice(text) {
   $("#notice").textContent = text;
   $("#notice").classList.remove("hidden");
   clearTimeout(notice.timer);
   notice.timer = setTimeout(() => $("#notice").classList.add("hidden"), 4500);
+}
+function showToast(type, title, detail = "") {
+  const box = $("#scanToast");
+  box.className = "scan-toast " + (type || "success");
+  box.querySelector("b").textContent = title;
+  box.querySelector("span").textContent = detail;
+  requestAnimationFrame(() => box.classList.add("show"));
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => box.classList.remove("show"), 3000);
 }
 function setScanStatus(type, title, detail = "") {
   const box = $("#scanStatus");
@@ -110,12 +119,12 @@ async function openRearCamera(id = "") {
   if (!candidate) throw firstError;
   return media.getUserMedia({ audio: false, video: { deviceId: { exact: candidate.deviceId } } });
 }
-function captureFrame({ scale = 1, filter = "none", maxWidth = Infinity, cropToFrame = false } = {}) {
+function captureFrame({ scale = 1, filter = "none", maxWidth = Infinity, cropSelector = "" } = {}) {
   const video = $("#video");
   if (!cameraStream || video.readyState < 2) throw Error("Vui lòng bật camera trước.");
   let sx = 0, sy = 0, sw = video.videoWidth, sh = video.videoHeight;
-  if (cropToFrame) {
-    const frame = $(".scanner-frame"), videoRect = video.getBoundingClientRect(), frameRect = frame?.getBoundingClientRect();
+  if (cropSelector) {
+    const frame = $(cropSelector), videoRect = video.getBoundingClientRect(), frameRect = frame?.getBoundingClientRect();
     if (frameRect?.width && videoRect.width && video.videoWidth && video.videoHeight) {
       // The video uses object-fit: cover. Map the visible frame back to source pixels,
       // including the part cropped by the browser at the left/right or top/bottom.
@@ -131,6 +140,30 @@ function captureFrame({ scale = 1, filter = "none", maxWidth = Infinity, cropToF
   const ratio = Math.min(scale, maxWidth / sw), canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(sw * ratio)); canvas.height = Math.max(1, Math.round(sh * ratio));
   const context = canvas.getContext("2d"); context.filter = filter; context.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height); return canvas;
+}
+async function resolveStudent(rawMssv) {
+  const mssv = String(rawMssv || "").trim().toUpperCase();
+  if (!mssv) return { mssv: "", name: "Chưa có dữ liệu", email: "", uid: "" };
+  if (rosterCache.has(mssv)) return rosterCache.get(mssv);
+  try {
+    const snapshot = await getDoc(doc(db, "facultyStudents", mssv));
+    if (snapshot.exists()) {
+      const data = { mssv, ...snapshot.data() };
+      rosterCache.set(mssv, data);
+      return data;
+    }
+  } catch {}
+  return { mssv, name: "Không có dữ liệu", email: mssv.toLowerCase() + "@student.tdtu.edu.vn", uid: "" };
+}
+function encodePhoto(canvas) {
+  for (const quality of [.68, .55, .42]) {
+    const data = canvas.toDataURL("image/jpeg", quality);
+    if (data.length < 820000) return data;
+  }
+  const reduced = document.createElement("canvas"), ratio = Math.min(1, 900 / canvas.width);
+  reduced.width = Math.max(1, Math.round(canvas.width * ratio)); reduced.height = Math.max(1, Math.round(canvas.height * ratio));
+  reduced.getContext("2d").drawImage(canvas, 0, 0, reduced.width, reduced.height);
+  return reduced.toDataURL("image/jpeg", .5);
 }
 async function startNativeDetector(request) {
   if (!("BarcodeDetector" in window)) return;
@@ -188,9 +221,13 @@ function listenRows() {
   const rowsQuery = assignment.role === "leader" || isManager ? query(collection(db, "checkins"), where("sessionId", "==", session.id)) : query(collection(db, "checkins"), where("scannerUid", "==", user.uid));
   unsubscribeRows = onSnapshot(rowsQuery, (snapshot) => {
     const rows = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).filter((item) => item.sessionId === session.id && !item.deletedAt).sort((a, b) => (b.checkedAt?.seconds || 0) - (a.checkedAt?.seconds || 0));
-    $("#rowCount").textContent = rows.length + " lượt";
-    $("#rows").innerHTML = rows.map((item) => `<tr><td>${esc(item.mssv)}</td><td>${esc(item.name)}</td><td>${stamp(item.checkedAt)}</td><td>${(assignment.role === "leader" || isManager) && sessionIsOpen() ? `<button class="att-btn danger" data-delete="${item.id}">Xóa</button>` : ""}</td></tr>`).join("") || '<tr><td colspan="4">Chưa có lượt điểm danh.</td></tr>';
-    if ((assignment.role === "leader" || isManager) && sessionIsOpen()) rows.filter((item) => !item.mssv).forEach((item) => { const tr = [...$("#rows").querySelectorAll("tr")].find((row) => row.textContent.includes(item.name || "Chưa có dữ liệu")); if (!tr) return; const input = document.createElement("input"); input.className = "label-mssv"; input.placeholder = "Nhập MSSV"; input.dataset.labelCheckin = item.id; tr.lastElementChild.appendChild(input); });
+    const pending = rows.filter((item) => !item.mssv && item.photoData);
+    const completed = rows.filter((item) => item.mssv);
+    $("#pendingPhotoSection").classList.toggle("hidden", !pending.length);
+    $("#pendingPhotoCount").textContent = pending.length + " ảnh";
+    $("#pendingPhotoRows").innerHTML = pending.map((item, index) => `<tr><td>${pending.length - index}</td><td><button class="photo-link" data-view-checkin-photo="${item.id}">Xem hình</button></td><td>${esc(item.scannerName || item.scannerMssv || "")}</td><td>${stamp(item.checkedAt)}</td><td><input class="pending-mssv" data-pending-mssv="${item.id}" maxlength="12" placeholder="Nhập MSSV"></td><td><button class="att-btn green" data-label-checkin="${item.id}">Lưu MSSV</button>${(assignment.role === "leader" || isManager) && sessionIsOpen() ? ` <button class="att-btn danger" data-delete="${item.id}">Xóa</button>` : ""}</td></tr>`).join("");
+    $("#rowCount").textContent = completed.length + " lượt";
+    $("#rows").innerHTML = completed.map((item, index) => `<tr><td>${completed.length - index}</td><td>${item.photoData ? `<button class="photo-link" data-view-checkin-photo="${item.id}">${esc(item.mssv)}</button>` : esc(item.mssv)}</td><td>${esc(item.name || "Không có dữ liệu")}</td><td>${stamp(item.checkedAt)}</td><td>${(assignment.role === "leader" || isManager) && sessionIsOpen() ? `<button class="att-btn danger" data-delete="${item.id}">Xóa</button>` : ""}</td></tr>`).join("") || '<tr><td colspan="5">Chưa có lượt điểm danh.</td></tr>';
   }, (error) => notice(error.message));
 }
 function renderSession() {
@@ -214,7 +251,7 @@ async function startSession() {
   }
   try {
     const rosterSnapshot = await getDocs(query(collection(db, "attendanceRoster"), where("sessionId", "==", session.id)));
-    rosterCache = new Map(rosterSnapshot.docs.map((item) => [item.data().mssv, item.data()]));
+    rosterCache = new Map(rosterSnapshot.docs.map((item) => [String(item.data().mssv || "").toUpperCase(), item.data()]));
   } catch {
     // A scanner can still check in students outside the registration/faculty rosters.
     rosterCache = new Map();
@@ -235,20 +272,20 @@ async function startSession() {
   });
 }
 async function submitCheckin(raw) {
-  if (!sessionIsOpen()) return;
+  if (!sessionIsOpen()) return false;
   const mssv = String(raw || "").trim().toUpperCase();
-  if (!mssv && !pendingPhoto) { feedback(false); return setScanStatus("warn", "Chưa có dữ liệu", "Nhập MSSV hoặc chụp hình trước khi lưu."); }
-  if (mssv && !validMssv(mssv)) { feedback(false); return setScanStatus("warn", "MSSV không hợp lệ", "MSSV gồm 8–12 chữ hoặc số."); }
+  if (!mssv && !pendingPhoto) { feedback(false); showToast("warn", "Chưa có dữ liệu", "Nhập MSSV hoặc chụp hình trước khi lưu."); return false; }
+  if (mssv && !validMssv(mssv)) { feedback(false); showToast("warn", "MSSV không hợp lệ", "MSSV gồm 8–12 chữ hoặc số."); return false; }
   try {
-    const student = mssv ? (rosterCache.get(mssv) || { name: "Không có dữ liệu", email: mssv.toLowerCase() + "@student.tdtu.edu.vn", uid: "" }) : { name: "Chưa có dữ liệu", email: "", uid: "" };
+    const student = await resolveStudent(mssv);
     const items = outbox();
-    if (mssv && items.some((item) => item.mssv === mssv)) { feedback(false); return setScanStatus("warn", "Đã nhận mã — chờ gửi", mssv + " · " + (student.name || "")); }
+    if (mssv && items.some((item) => item.mssv === mssv)) { feedback(false); showToast("warn", "Đã nhận mã — chờ gửi", mssv + " · " + (student.name || "")); return false; }
     const requestId = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const record = { requestId, time: new Date().toISOString(), mssv, student: { name: student.name || "", email: student.email || "", uid: student.uid || "" }, photoData: pendingPhoto };
-    saveOutbox([...items, record]); pendingPhoto = ""; $("#photoPreviewBox").classList.add("hidden"); $("#mssv").value = "";
-    setScanStatus("warn", "Đã nhận mã — chờ gửi", mssv + " · " + (student.name || ""));
+    saveOutbox([...items, record]); pendingPhoto = ""; $("#mssv").value = "";
     await flushOutbox();
-  } catch (error) { feedback(false); setScanStatus("error", "Chưa ghi nhận", error.message || "Vui lòng kiểm tra kết nối mạng."); }
+    return true;
+  } catch (error) { feedback(false); showToast("error", "Chưa ghi nhận", error.message || "Vui lòng kiểm tra kết nối mạng."); return false; }
 }
 
 async function flushOutbox() {
@@ -256,26 +293,60 @@ async function flushOutbox() {
   flushing = true;
   try {
     while (outbox().length) {
-      const record = outbox()[0], checkinRef = doc(db, "checkins", session.id + "_" + (record.mssv || "photo_" + record.requestId)), existing = record.mssv ? await getDoc(checkinRef) : { exists: () => false };
+      const record = outbox()[0];
+      let checkinRef = doc(db, "checkins", session.id + "_" + (record.mssv || "photo_" + record.requestId));
+      const existing = record.mssv ? await getDoc(checkinRef) : { exists: () => false };
       if (record.mssv && existing.exists() && !existing.data().deletedAt) {
         saveOutbox(outbox().filter((item) => item.requestId !== record.requestId));
-        feedback(false); setScanStatus("warn", "Đã điểm danh trước đó", record.mssv + " · " + (existing.data().name || ""));
+        feedback(false); showToast("warn", "Đã điểm danh trước đó", record.mssv + " · " + (existing.data().name || ""));
         continue;
       }
+      if (record.mssv && existing.exists() && existing.data().deletedAt) checkinRef = doc(db, "checkins", `${session.id}_${record.mssv}_recheck_${record.requestId}`);
       const student = record.student;
       const data = { sessionId: session.id, eventId: session.eventId || "", mssv: record.mssv, name: student.name || "", email: student.email || "", studentUid: student.uid || "", scannerUid: user.uid, scannerEmail: user.email.toLowerCase(), scannerMssv: user.email.split("@")[0].toUpperCase(), scannerName: assignment.name || user.displayName || user.email, checkedAt: Timestamp.fromDate(new Date(record.time)), requestId: record.requestId, deletedAt: null };
       if (record.photoData) data.photoData = record.photoData;
       await setDoc(checkinRef, data);
       saveOutbox(outbox().filter((item) => item.requestId !== record.requestId));
-      feedback(true); setScanStatus("success", "Điểm danh thành công", record.mssv + " · " + (student.name || ""));
+      feedback(true); showToast("success", record.mssv ? "Điểm danh thành công" : "Đã gửi ảnh chờ nhập MSSV", record.mssv ? record.mssv + " · " + (student.name || "") : "Ảnh đã chuyển đến danh sách quản lý.");
     }
   } catch (error) {
     setScanStatus("warn", "Đã lưu trên điện thoại — chờ gửi", `${outbox().length} lượt đang chờ · ${error.message || "mất kết nối"}`);
   } finally { flushing = false; }
 }
 function capturePhoto() {
-  try { const canvas = captureFrame({ maxWidth: 1400, cropToFrame: true }); pendingPhoto = canvas.toDataURL("image/jpeg", 0.7); $("#photoPreview").src = pendingPhoto; $("#photoPreviewBox").classList.remove("hidden"); notice("Đã chụp hình trong khung. Có thể lưu ngay hoặc nhập MSSV sau."); }
+  try {
+    const canvas = captureFrame({ maxWidth: 1200, cropSelector: ".scanner-video-wrap" });
+    pendingPhoto = encodePhoto(canvas);
+    photoPreviewScale = 1;
+    $("#photoPreview").src = pendingPhoto;
+    $("#photoPreview").style.width = "100%";
+    $("#photoMssv").value = $("#mssv").value.trim().toUpperCase();
+    if (!$("#photoDialog").open) $("#photoDialog").showModal();
+  }
   catch (error) { notice(error.message); }
+}
+function setImageScale(image, value) {
+  const scale = Math.min(3, Math.max(0.5, value));
+  image.style.width = `${scale * 100}%`;
+  return scale;
+}
+async function labelPendingPhoto(id) {
+  const input = document.querySelector(`[data-pending-mssv="${CSS.escape(id)}"]`);
+  const mssv = input?.value.trim().toUpperCase() || "";
+  if (!validMssv(mssv)) return showToast("warn", "MSSV không hợp lệ", "MSSV gồm 8–12 chữ hoặc số.");
+  const canonical = await getDoc(doc(db, "checkins", session.id + "_" + mssv));
+  if (canonical.exists() && !canonical.data().deletedAt) return showToast("warn", "Sinh viên đã điểm danh", mssv + " · " + (canonical.data().name || ""));
+  const student = await resolveStudent(mssv);
+  await updateDoc(doc(db, "checkins", id), { mssv, name: student.name || "Không có dữ liệu", email: student.email || "", studentUid: student.uid || "" });
+  feedback(true); showToast("success", "Đã lưu MSSV", mssv + " · " + (student.name || "Không có dữ liệu"));
+}
+async function openCheckinImage(id) {
+  const snapshot = await getDoc(doc(db, "checkins", id));
+  if (!snapshot.exists() || !snapshot.data().photoData) return showToast("error", "Không tìm thấy hình", "Hình có thể đã bị xóa.");
+  checkinViewerScale = 1;
+  $("#checkinImage").src = snapshot.data().photoData;
+  $("#checkinImage").style.width = "100%";
+  $("#checkinImageDialog").showModal();
 }
 async function login() { try { await signInWithPopup(auth, provider); } catch (error) { if (error?.code !== "auth/popup-closed-by-user") notice(error.message); } }
 
@@ -296,13 +367,27 @@ $("#successSound").value = localStorage.getItem(successKey) || "bell"; $("#dupli
 $("#successSound").onchange = () => localStorage.setItem(successKey, $("#successSound").value); $("#duplicateSound").onchange = () => localStorage.setItem(duplicateKey, $("#duplicateSound").value);
 $("#testSuccess").onclick = () => feedback(true); $("#testDuplicate").onclick = () => feedback(false); $("#loginCardBtn").onclick = login; $("#logoutBtn").onclick = () => signOut(auth);
 $("#startCamera").onclick = startCamera; $("#stopCamera").onclick = () => { releaseCamera(); setScanStatus("", "Đã dừng camera", "Nhấn Bắt đầu quét để tiếp tục."); }; $("#cameraSelect").onchange = () => { if (scanning) void startCamera(); };
-$("#capturePhoto").onclick = capturePhoto; $("#savePhoto").onclick = async () => { await submitCheckin($("#mssv").value); }; $("#retakePhoto").onclick = capturePhoto;
+$("#capturePhoto").onclick = capturePhoto;
+$("#savePhoto").onclick = async () => { if (await submitCheckin($("#photoMssv").value)) $("#photoDialog").close(); };
+$("#retakePhoto").onclick = capturePhoto;
+$("#closePhotoDialog").onclick = () => { pendingPhoto = ""; $("#photoDialog").close(); };
+$("#photoDialog").addEventListener("cancel", () => { pendingPhoto = ""; });
+$("#photoZoomOut").onclick = () => { photoPreviewScale = setImageScale($("#photoPreview"), photoPreviewScale - 0.25); };
+$("#photoZoomReset").onclick = () => { photoPreviewScale = setImageScale($("#photoPreview"), 1); };
+$("#photoZoomIn").onclick = () => { photoPreviewScale = setImageScale($("#photoPreview"), photoPreviewScale + 0.25); };
+$("#closeCheckinImage").onclick = () => $("#checkinImageDialog").close();
+$("#checkinZoomOut").onclick = () => { checkinViewerScale = setImageScale($("#checkinImage"), checkinViewerScale - 0.25); };
+$("#checkinZoomReset").onclick = () => { checkinViewerScale = setImageScale($("#checkinImage"), 1); };
+$("#checkinZoomIn").onclick = () => { checkinViewerScale = setImageScale($("#checkinImage"), checkinViewerScale + 0.25); };
 $("#scanForm").onsubmit = async (event) => { event.preventDefault(); await submitCheckin($("#mssv").value); };
 document.addEventListener("click", async (event) => {
+  const viewButton = event.target.closest("[data-view-checkin-photo]");
+  if (viewButton) return openCheckinImage(viewButton.dataset.viewCheckinPhoto);
+  const labelButton = event.target.closest("[data-label-checkin]");
+  if (labelButton) { try { await labelPendingPhoto(labelButton.dataset.labelCheckin); } catch (error) { showToast("error", "Không thể lưu MSSV", error.message); } return; }
   const button = event.target.closest("[data-delete]"); if (!button || (!isManager && assignment?.role !== "leader") || !sessionIsOpen()) return;
-  await setDoc(doc(db, "checkins", button.dataset.delete), { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email }, { merge: true }); notice("Đã xóa lượt điểm danh.");
+  await setDoc(doc(db, "checkins", button.dataset.delete), { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email }, { merge: true }); showToast("success", "Đã chuyển vào thùng rác", "Sub-admin có thể khôi phục lượt điểm danh.");
 });
-document.addEventListener("change", async (event) => { const input = event.target.closest("[data-label-checkin]"); if (!input) return; const value = input.value.trim().toUpperCase(); if (!validMssv(value)) return notice("MSSV không hợp lệ."); await setDoc(doc(db, "checkins", input.dataset.labelCheckin), { mssv: value }, { merge: true }); notice("Đã bổ sung MSSV cho lượt điểm danh."); });
 window.addEventListener("pagehide", releaseCamera);
 window.addEventListener("online", () => void flushOutbox());
 window.addEventListener("offline", () => setScanStatus("warn", "Mất mạng", "Lượt quét mới sẽ được giữ trên điện thoại và tự gửi lại."));
