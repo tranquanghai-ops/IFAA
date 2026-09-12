@@ -39,7 +39,7 @@ service cloud.firestore {
     match /settings/main {
       allow read: if true;
       allow create, update: if owner();
-      allow delete: if false;
+      allow delete: if highAdmin();
     }
 
     match /admins/{adminEmail} {
@@ -63,7 +63,7 @@ service cloud.firestore {
         && request.resource.data.name is string
         && request.resource.data.phone is string
         && request.resource.data.faculty is string;
-      allow delete: if false;
+      allow delete: if highAdmin();
     }
 
     match /eventGroups/{groupId} {
@@ -206,7 +206,7 @@ service cloud.firestore {
             || request.resource.data.status != 'open'
             || (resource.data.endedAt is timestamp
               && request.time <= resource.data.endedAt + duration.value(5, 'd'))));
-      allow delete: if false;
+      allow delete: if highAdmin();
     }
 
     match /facultyStudents/{mssv} {
@@ -237,8 +237,8 @@ service cloud.firestore {
       allow update: if admin()
         && request.resource.data.sessionId == resource.data.sessionId
         && attendanceSession(resource.data.sessionId).status != 'finalized';
-      allow delete: if admin()
-        && attendanceSession(resource.data.sessionId).status != 'finalized';
+      allow delete: if highAdmin()
+        || (admin() && attendanceSession(resource.data.sessionId).status != 'finalized');
     }
 
     match /attendanceGrants/{grantId} {
@@ -262,7 +262,7 @@ service cloud.firestore {
         || (leader(resource.data.sessionId)
           && attendanceSession(resource.data.sessionId).status == 'open'
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deletedAt','deletedByUid','deletedByEmail']));
-      allow delete: if false;
+      allow delete: if highAdmin();
     }
   }
 }

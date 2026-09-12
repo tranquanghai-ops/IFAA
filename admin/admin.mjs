@@ -393,7 +393,7 @@ function statusLabel(event) {
 }
 
 function showPane(name) {
-  if (name === "trash" && !isOwner) name = "events";
+  if (name === "trash" && !highAdminAccess()) name = "events";
   if (name === "students" && !highAdminAccess()) name = "attendance";
   document.querySelectorAll(".nav-btn").forEach((item) => item.classList.toggle("active", item.dataset.pane === name));
   document.querySelectorAll(".pane").forEach((item) => item.classList.toggle("hidden", item.dataset.paneId !== name));
@@ -501,6 +501,10 @@ function render() {
       : '<tr><td colspan="6" class="empty">Thùng rác đang trống.</td></tr>';
   }
 
+  if ($("#trashAttendanceRows")) {
+    const trashedAttendance = attendanceSessions.filter((item) => item.deletedAt);
+    $("#trashAttendanceRows").innerHTML = highAdminAccess() && trashedAttendance.length ? trashedAttendance.map((item) => { const deletedTime = millis(item.deletedAt), purgeTime = deletedTime ? deletedTime + TRASH_RETENTION_MS : 0; return `<tr><td><b>${safe(item.title)}</b></td><td>${safe(vietnamDate(item.date))}</td><td>${deletedTime ? ts(item.deletedAt) : "—"}</td><td>${purgeTime ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "short" }).format(new Date(purgeTime)) : "—"}</td><td><button class="btn btn-small btn-restore" data-restore-attendance="${item.id}">↶ Khôi phục</button> <button class="btn btn-small btn-danger" data-purge-attendance="${item.id}">Xóa vĩnh viễn</button></td></tr>`; }).join("") : '<tr><td colspan="5" class="empty">Không có phiên điểm danh trong thùng rác.</td></tr>';
+  }
   refreshRegistrationFilters();
   renderRegs();
   if (isOwner) $("#adminRows").innerHTML = admins.map((admin) => `<tr><td>${safe(admin.name || "")}</td><td>${safe(admin.email)}</td><td><select class="admin-role-select" data-admin-role="${safe(admin.email)}"><option value="admin" ${(admin.role || "admin") === "admin" ? "selected" : ""}>Admin</option><option value="subadmin" ${admin.role === "subadmin" ? "selected" : ""}>Sub-admin</option></select></td><td>${ts(admin.addedAt)}</td><td><button class="btn btn-small btn-danger" data-remove-admin="${safe(admin.email)}">Xóa</button></td></tr>`).join("");
@@ -806,6 +810,15 @@ async function permanentlyDeleteGroup(selected) {
   for (const groupedEvent of groupedTrashEvents) await permanentlyDeleteEvent(groupedEvent);
   await deleteDoc(doc(db, "eventGroups", selected.id));
 }
+async function permanentlyDeleteAttendance(selected) {
+  if (!selected || !highAdminAccess()) throw Error("Chỉ Admin cấp cao hoặc Chủ sở hữu được xóa vĩnh viễn.");
+  const collections = ["scannerAssignments", "checkins", "attendanceRoster", "attendanceGrants"];
+  for (const name of collections) {
+    const snap = await getDocs(query(collection(db, name), where("sessionId", "==", selected.id)));
+    for (let offset = 0; offset < snap.docs.length; offset += 450) { const batch = writeBatch(db); snap.docs.slice(offset, offset + 450).forEach((item) => batch.delete(item.ref)); await batch.commit(); }
+  }
+  await deleteDoc(doc(db, "attendanceSessions", selected.id));
+}
 
 async function cleanupExpiredTrash() {
   if (!isOwner) return;
@@ -831,6 +844,9 @@ async function cleanupExpiredTrash() {
     } finally {
       purgingGroupIds.delete(selected.id);
     }
+  }
+  for (const selected of attendanceSessions.filter((item) => item.deletedAt && (millis(item.deletedAt) || Infinity) <= cutoff)) {
+    try { await permanentlyDeleteAttendance(selected); } catch (error) { console.warn("Không thể tự xóa phiên điểm danh hết hạn:", error); }
   }
 }
 
@@ -1743,20 +1759,20 @@ function downloadWorkbook(filename, sheetName, rows) {
 function renderAttendance() {
   const target = $("#attendanceRows");
   if (!target) return;
-  const list = attendanceSessions
+  const list = attendanceSessions.filter((item) => !item.deletedAt)
     .filter((item) => attendanceFilter === "all" || item.status === attendanceFilter)
     .sort((a, b) => (millis(b.createdAt) || 0) - (millis(a.createdAt) || 0));
   target.innerHTML = list.length ? list.map((item) => `<article class="att-row">
     <div><span class="att-badge ${safe(item.status)}">${safe(attendanceStatusLabel(item.status))}</span>
     <h3>${safe(item.title)}</h3><div class="att-meta">${safe(vietnamDate(item.date))} · ${safe(item.location || "")} · ${Number(item.rosterCount || 0)} sinh viên</div></div>
-    <div class="att-actions"><button class="btn" data-attendance-manage="${item.id}">Quản lý điểm danh</button></div>
+    <div class="att-actions"><button class="btn" data-attendance-manage="${item.id}">Quản lý điểm danh</button><button class="btn btn-danger" data-delete-attendance="${item.id}">Xóa</button></div>
   </article>`).join("") : '<div class="card empty">Không có sự kiện điểm danh trong bộ lọc này.</div>';
 }
 
 function populateAttendanceEventOptions(selectedId = "") {
   const select = $("#attendanceSourceEvent");
   if (!select) return;
-  const existing = new Set(attendanceSessions.map((item) => item.eventId));
+    const existing = new Set(attendanceSessions.filter((item) => !item.deletedAt).map((item) => item.eventId));
   const eligible = events.filter((item) => attendanceSourceEligible(item) && !existing.has(item.id));
   select.innerHTML = '<option value="">— Điểm danh độc lập —</option>' + eligible.map((item) =>
     `<option value="${item.id}" ${item.id === selectedId ? "selected" : ""}>${safe(item.title)} · ${safe(vietnamDate(item.date))}</option>`
@@ -2130,6 +2146,22 @@ document.addEventListener("click", async (event) => {
     }
   }
   if (button.dataset.attendanceManage) await openAttendanceManage(button.dataset.attendanceManage);
+  if (button.dataset.deleteAttendance) {
+    const selected = attendanceSessions.find((item) => item.id === button.dataset.deleteAttendance);
+    if (!selected || (isSubAdmin && selected.createdByUid !== user.uid)) return notice("Bạn không có quyền xóa phiên điểm danh này.", "error");
+    if (!(await confirmAction({ title: "Đưa điểm danh vào thùng rác?", message: "Phiên điểm danh sẽ được giữ 30 ngày. Nhập XÓA để tiếp tục.", verification: "XÓA" }))) return;
+    await updateDoc(doc(db, "attendanceSessions", selected.id), { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email });
+    notice("Đã đưa phiên điểm danh vào thùng rác.", "success");
+  }
+  if (button.dataset.restoreAttendance) {
+    const selected = attendanceSessions.find((item) => item.id === button.dataset.restoreAttendance); if (!selected || !highAdminAccess()) return;
+    await updateDoc(doc(db, "attendanceSessions", selected.id), { deletedAt: null, deletedByUid: "", deletedByEmail: "" }); notice("Đã khôi phục phiên điểm danh.", "success");
+  }
+  if (button.dataset.purgeAttendance) {
+    const selected = attendanceSessions.find((item) => item.id === button.dataset.purgeAttendance); if (!selected || !highAdminAccess()) return;
+    if (!(await confirmAction({ title: "Xóa vĩnh viễn?", message: "Toàn bộ dữ liệu điểm danh và danh sách liên quan sẽ bị xóa không thể khôi phục.", verification: "XÓA" }))) return;
+    await permanentlyDeleteAttendance(selected); notice("Đã xóa vĩnh viễn phiên điểm danh.", "success");
+  }
   if (button.dataset.attendanceRemoveScanner) {
     await deleteDoc(doc(db, "scannerAssignments", button.dataset.attendanceRemoveScanner));
     if (highAdminAccess()) await deleteDoc(doc(db, "attendanceGrants", button.dataset.attendanceRemoveScanner));
@@ -2209,7 +2241,7 @@ onAuthStateChanged(auth, async (currentUser) => {
   $("#logoutBtn").classList.remove("hidden");
   $("#adminNav").classList.toggle("hidden", !isOwner);
   $("#settingsNav").classList.toggle("hidden", !isOwner);
-  $("#trashNav").classList.toggle("hidden", !isOwner);
+  $("#trashNav").classList.toggle("hidden", !highAdminAccess());
   $("#studentsNav").classList.toggle("hidden", !highAdminAccess());
   listen();
 });
