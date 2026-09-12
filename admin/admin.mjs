@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
-import { getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit, startAfter, serverTimestamp, Timestamp, runTransaction, writeBatch } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
+import { getFirestore, collection, doc, getDoc, getDocs, getCountFromServer, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit, startAfter, serverTimestamp, Timestamp, runTransaction, writeBatch } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
 import { firebaseConfig, OWNER_EMAIL } from "../firebase-config.mjs";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
@@ -1648,7 +1648,8 @@ function studentRecord(value = {}) {
   return { mssv, name: String(value.name || "").trim().replace(/\s+/g, " "), email: String(value.email || (mssv ? mssv.toLowerCase() + "@student.tdtu.edu.vn" : "")).trim().toLowerCase(), gender: String(value.gender || "").trim(), major: String(value.major || "").trim(), studentClass: String(value.studentClass || value.class || "").trim() };
 }
 function renderFacultyStudents(rows = facultyStudents) {
-  $("#facultyStudentCount").textContent = `${rows.length} đang hiển thị · tổng ${facultyStudentTotal || rows.length} sinh viên${facultyStudentHasNext ? " · còn trang sau" : ""}`;
+  const searching = normalizeSearch($("#facultyStudentSearch")?.value);
+  $("#facultyStudentCount").textContent = searching ? `${rows.length} sinh viên` : `${rows.length} đang hiển thị`;
   $("#facultyStudentTotalTop").textContent = `Tổng: ${facultyStudentTotal || rows.length} sinh viên`;
   $("#facultyStudentRows").innerHTML = rows.map((item) => `<tr><td><b>${safe(item.mssv)}</b></td><td><input class="student-inline" data-student-field="name" data-student-id="${safe(item.mssv)}" value="${safe(item.name)}"></td><td><select class="student-inline" data-student-field="gender" data-student-id="${safe(item.mssv)}"><option value="">—</option><option ${item.gender === "Nam" ? "selected" : ""}>Nam</option><option ${item.gender === "Nữ" ? "selected" : ""}>Nữ</option></select></td><td><select class="student-inline" data-student-field="major" data-student-id="${safe(item.mssv)}"><option value="">— Chọn ngành —</option>${FACULTY_MAJORS.map((v) => `<option ${item.major === v ? "selected" : ""}>${safe(v)}</option>`).join("")}</select></td><td><input class="student-inline" data-student-field="studentClass" data-student-id="${safe(item.mssv)}" value="${safe(item.studentClass)}"></td><td><button class="btn btn-small btn-danger" data-remove-faculty-student="${safe(item.mssv)}">Xóa</button></td></tr>`).join("") || '<tr><td colspan="6" class="empty">Không có sinh viên phù hợp.</td></tr>';
   $("#attendanceStudentOptions").innerHTML = rows.map((item) => `<option value="${safe(item.mssv)}">${safe(item.name)}</option><option value="${safe(item.name)}">${safe(item.mssv)}</option>`).join("");
@@ -1852,6 +1853,7 @@ async function saveFacultyStudents(records) {
   const old = meta.exists() ? meta.data() : {};
   const classesByMajor = { ...(old.classesByMajor || {}) }; unique.forEach((item) => { if (item.major && item.studentClass) classesByMajor[item.major] = [...new Set([...(classesByMajor[item.major] || []), item.studentClass])]; });
   await setDoc(doc(db, "facultyStudentMeta", "current"), {
+    count: (await getCountFromServer(collection(db, "facultyStudents"))).data().count,
     majors: [...new Set([...(old.majors || []), ...unique.map((item) => item.major).filter(Boolean)])],
     classes: [...new Set([...(old.classes || []), ...unique.map((item) => item.studentClass).filter(Boolean)])].sort(), classesByMajor,
     updatedAt: serverTimestamp()
