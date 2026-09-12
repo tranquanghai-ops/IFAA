@@ -1745,7 +1745,7 @@ function mergeAttendancePermissions(records) {
 }
 function renderAttendancePermissions() {
   const sorted = attendancePermissionMembers.slice().sort((a, b) => Number(b.role === "leader") - Number(a.role === "leader"));
-  $("#attendancePermissionRows").innerHTML = sorted.map((item) => `<tr class="${item.role === "leader" ? "attendance-leader-row" : ""}"><td><b>${safe(item.mssv)}</b></td><td>${safe(item.name)}</td><td><select class="attendance-role-select" data-attendance-role="${safe(item.mssv)}"><option value="scanner" ${item.role !== "leader" ? "selected" : ""}>SV quét</option><option value="leader" ${item.role === "leader" ? "selected" : ""}>SV Leader</option></select></td><td><button type="button" class="btn btn-small" data-remove-attendance-permission="${safe(item.mssv)}">Xóa</button></td></tr>`).join("") || '<tr><td colspan="4" class="empty">Chưa cấp quyền cho sinh viên.</td></tr>';
+  $("#attendancePermissionRows").innerHTML = sorted.map((item) => `<tr class="${item.role === "leader" ? "attendance-leader-row" : ""}"><td><b>${safe(item.mssv)}</b></td><td>${safe(item.name)}</td><td><select class="attendance-role-select" data-attendance-role="${safe(item.mssv)}"><option value="scanner" ${item.role !== "leader" ? "selected" : ""}>SV quét</option><option value="leader" ${item.role === "leader" ? "selected" : ""}>SV Leader</option></select></td><td><button type="button" class="btn btn-small btn-danger" data-remove-attendance-permission="${safe(item.mssv)}">Xóa</button></td></tr>`).join("") || '<tr><td colspan="4" class="empty">Chưa cấp quyền cho sinh viên.</td></tr>';
 }
 function populatePermissionCopyOptions() {
   const select = $("#attendanceCopyPermissionsFrom");
@@ -1809,7 +1809,7 @@ async function loadAttendanceManage() {
     const grant = grants.get(item.id) || {};
     return `<tr><td>${safe(data.mssv)}</td><td>${safe(data.name)}</td><td>${data.role === "leader" ? "SV Leader" : "SV quét"}</td>
       <td class="${isSubAdmin ? "hidden" : ""}">${safe(grant.grantedByName || grant.grantedByEmail || "")}</td>
-      <td><button class="btn btn-small" data-attendance-remove-scanner="${item.id}" ${selectedAttendanceSession.status === "finalized" ? "disabled" : ""}>Xóa</button></td></tr>`;
+      <td><button class="btn btn-small btn-danger" data-attendance-remove-scanner="${item.id}" ${selectedAttendanceSession.status === "finalized" ? "disabled" : ""}>Xóa</button></td></tr>`;
   }).join("") || '<tr><td colspan="5" class="empty">Chưa cấp quyền cho sinh viên quét.</td></tr>';
   $("#attendanceCheckinRows").innerHTML = checkinSnapshot.docs.filter((item) => !item.data().deletedAt).map((item) => {
     const data = item.data();
