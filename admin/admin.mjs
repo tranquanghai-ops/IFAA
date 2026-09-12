@@ -5,7 +5,7 @@ import { firebaseConfig, OWNER_EMAIL } from "../firebase-config.mjs";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
 const DEFAULT_PUBLIC_BASE_URL = "https://ifa.tdtu.edu.vn/dang-ky-su-kien";
-const DEFAULT_ATTENDANCE_BASE_URL = "https://ifa-activities.web.app/check-in/";
+const DEFAULT_ATTENDANCE_BASE_URL = "https://ifa.tdtu.edu.vn/check-in";
 const EXTERNAL_CATEGORIES = new Set(["Sự kiện Trường", "Sự kiện Khoa khác"]);
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);

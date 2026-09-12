@@ -9,7 +9,22 @@ const db = getFirestore(app);
 const provider = new GoogleAuthProvider();
 provider.setCustomParameters({ prompt: "select_account" });
 const $ = (selector) => document.querySelector(selector);
-const sessionId = new URLSearchParams(location.search).get("event");
+function resolveSessionId() {
+  const directParams = new URLSearchParams(window.location.search);
+  const directId = directParams.get("event")?.trim();
+  if (directId) return directId;
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#\??/, ""));
+  const hashId = hashParams.get("event")?.trim();
+  if (hashId) return hashId;
+  try {
+    const referringPage = new URL(document.referrer);
+    if (referringPage.hostname === "ifa.tdtu.edu.vn") return referringPage.searchParams.get("event")?.trim() || "";
+  } catch {
+    // Trang được mở trực tiếp hoặc trình duyệt không cung cấp địa chỉ trang chứa iframe.
+  }
+  return "";
+}
+const sessionId = resolveSessionId();
 const esc = (value) => String(value ?? "").replace(/[&<>]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[char]);
 const stamp = (value) => value?.toDate ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "medium" }).format(value.toDate()) : "—";
 const vietnamDate = (value) => {
