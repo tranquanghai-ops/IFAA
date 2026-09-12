@@ -18,7 +18,9 @@ function resolveSessionId() {
   if (hashId) return hashId;
   try {
     const referringPage = new URL(document.referrer);
-    if (referringPage.hostname === "ifa.tdtu.edu.vn") {\n      return (referringPage.searchParams.get("e") || referringPage.searchParams.get("event"))?.trim() || "";\n    }
+    if (referringPage.hostname === "ifa.tdtu.edu.vn") {
+      return (referringPage.searchParams.get("e") || referringPage.searchParams.get("event"))?.trim() || "";
+    }
   } catch {
     // Trang được mở trực tiếp hoặc trình duyệt không cung cấp địa chỉ trang chứa iframe.
   }
@@ -372,7 +374,27 @@ async function openCheckinImage(id) {
   $("#checkinImage").style.width = "100%";
   $("#checkinImageDialog").showModal();
 }
-async function login() {\n  try {\n    await signInWithPopup(auth, provider);\n  } catch (error) {\n    if (["auth/popup-blocked", "auth/popup-timeout", "auth/operation-not-supported-in-this-environment"].includes(error?.code)) {\n      notice("Trình duyệt đang chặn cửa sổ Google. Đang chuyển sang trang đăng nhập an toàn…");\n      try { await signInWithRedirect(auth, provider); } catch (redirectError) { notice(redirectError.message || error.message); }\n      return;\n    }\n    if (error?.code === "auth/unauthorized-domain") {\n      notice("Tên miền này chưa được thêm vào Firebase Authorized domains. Admin cần thêm ifa.tdtu.edu.vn và tên miền Firebase.");\n      return;\n    }\n    if (!["auth/popup-closed-by-user", "auth/cancelled-popup-request"].includes(error?.code)) notice(error.message || "Không thể đăng nhập Google.");\n  }\n}\n\ngetRedirectResult(auth).catch((error) => {\n  if (error?.code === "auth/unauthorized-domain") notice("Tên miền này chưa được thêm vào Firebase Authorized domains. Admin cần thêm ifa.tdtu.edu.vn.");\n  else if (error?.code && error.code !== "auth/popup-closed-by-user") notice(error.message || "Không thể hoàn tất đăng nhập Google.");\n});
+async function login() {
+  try {
+    await signInWithPopup(auth, provider);
+  } catch (error) {
+    if (["auth/popup-blocked", "auth/popup-timeout", "auth/operation-not-supported-in-this-environment"].includes(error?.code)) {
+      notice("Trình duyệt đang chặn cửa sổ Google. Đang chuyển sang trang đăng nhập an toàn…");
+      try { await signInWithRedirect(auth, provider); } catch (redirectError) { notice(redirectError.message || error.message); }
+      return;
+    }
+    if (error?.code === "auth/unauthorized-domain") {
+      notice("Tên miền này chưa được thêm vào Firebase Authorized domains. Admin cần thêm ifa.tdtu.edu.vn và tên miền Firebase.");
+      return;
+    }
+    if (!["auth/popup-closed-by-user", "auth/cancelled-popup-request"].includes(error?.code)) notice(error.message || "Không thể đăng nhập Google.");
+  }
+}
+
+getRedirectResult(auth).catch((error) => {
+  if (error?.code === "auth/unauthorized-domain") notice("Tên miền này chưa được thêm vào Firebase Authorized domains. Admin cần thêm ifa.tdtu.edu.vn.");
+  else if (error?.code && error.code !== "auth/popup-closed-by-user") notice(error.message || "Không thể hoàn tất đăng nhập Google.");
+});
 
 onAuthStateChanged(auth, async (currentUser) => {
   user = currentUser; $("#logoutBtn").classList.toggle("hidden", !currentUser); $("#loginCard").classList.toggle("hidden", !!currentUser); $("#app").classList.add("hidden");
