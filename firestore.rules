@@ -13,6 +13,11 @@ service cloud.firestore {
     function assigned(sessionId){ return signedIn() && exists(assignmentPath(sessionId)) && get(assignmentPath(sessionId)).data.active == true; }
     function leader(sessionId){ return assigned(sessionId) && get(assignmentPath(sessionId)).data.role == 'leader'; }
     function attendanceSession(sessionId){ return get(/databases/$(database)/documents/attendanceSessions/$(sessionId)).data; }
+    function attendanceAccepting(sessionId){
+      return attendanceSession(sessionId).status == 'open'
+        && (!attendanceSession(sessionId).keys().hasAll(['endAt'])
+          || request.time <= attendanceSession(sessionId).endAt);
+    }
     function eventAfter(id){ return getAfter(/databases/$(database)/documents/events/$(id)).data; }
     function eventBefore(id){ return get(/databases/$(database)/documents/events/$(id)).data; }
     function regPath(uid,id){ return /databases/$(database)/documents/registrations/$(uid + '_' + id); }
@@ -254,7 +259,7 @@ service cloud.firestore {
         || (assigned(resource.data.sessionId)
           && attendanceSession(resource.data.sessionId).status != 'finalized');
       allow create: if (admin() || assigned(request.resource.data.sessionId))
-        && attendanceSession(request.resource.data.sessionId).status == 'open'
+        && attendanceAccepting(request.resource.data.sessionId)
         && request.resource.data.mssv is string
         && request.resource.data.mssv.size() <= 12
         && request.resource.data.scannerUid == request.auth.uid
@@ -262,11 +267,11 @@ service cloud.firestore {
       allow update: if (admin()
           && attendanceSession(resource.data.sessionId).status != 'finalized')
         || (leader(resource.data.sessionId)
-          && attendanceSession(resource.data.sessionId).status == 'open'
+          && attendanceAccepting(resource.data.sessionId)
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deletedAt','deletedByUid','deletedByEmail']))
         || ((leader(resource.data.sessionId)
             || (assigned(resource.data.sessionId) && resource.data.scannerUid == request.auth.uid))
-          && attendanceSession(resource.data.sessionId).status == 'open'
+          && attendanceAccepting(resource.data.sessionId)
           && resource.data.mssv == ''
           && request.resource.data.mssv is string
           && request.resource.data.mssv.size() >= 8

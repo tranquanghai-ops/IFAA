@@ -41,6 +41,7 @@ let unsubscribeRows = null, unsubscribeSession = null;
 let cameraStream = null, cameraControls = null, nativeDetector = null, enhancedReader = null;
 let cameraRequest = 0, scanning = false, pendingPhoto = "", lastDecoded = "", lastDecodedAt = 0;
 let rosterCache = new Map(), flushing = false, toastTimer = 0, photoPreviewScale = 1, checkinViewerScale = 1;
+let sessionExpiryTimer = 0;
 
 function notice(text) {
   $("#notice").textContent = text;
@@ -92,10 +93,15 @@ function saveOutbox(items) {
   if (items.length) localStorage.setItem(outboxKey(), JSON.stringify(items));
   else localStorage.removeItem(outboxKey());
 }
+function sessionDeadlineMillis() {
+  const endDate = session?.endDate || session?.date;
+  if (endDate && session?.endTime) return new Date(`${endDate}T${session.endTime}:00`).getTime() + 30 * 60000;
+  if (session?.endAt?.toDate) return session.endAt.toDate().getTime();
+  return endDate ? new Date(endDate + "T23:59:59").getTime() : Infinity;
+}
 function sessionIsOpen() {
   if (session?.status !== "open") return false;
-  const end = session.endAt?.toDate ? session.endAt.toDate() : session.endDate ? new Date(session.endDate + "T23:59:59") : null;
-  return !end || Date.now() <= end.getTime();
+  return Date.now() <= sessionDeadlineMillis();
 }
 function barcodeFormats() { return ["CODE_128", "CODE_39", "CODE_93", "CODABAR", "ITF"].map((name) => window.ZXingBrowser?.BarcodeFormat?.[name]).filter(Number.isInteger); }
 function makeReader() {
@@ -256,6 +262,15 @@ function listenRows() {
 }
 function renderSession() {
   const open = sessionIsOpen();
+  clearTimeout(sessionExpiryTimer);
+  const endMillis = sessionDeadlineMillis();
+  if (session?.status === "open" && Number.isFinite(endMillis) && endMillis > Date.now()) {
+    sessionExpiryTimer = window.setTimeout(() => {
+      renderSession();
+      unsubscribeRows?.(); unsubscribeRows = null;
+      setScanStatus("error", "Điểm danh đã tự đóng", "Đã quá giờ kết thúc 30 phút.");
+    }, Math.min(endMillis - Date.now() + 250, 2147483647));
+  }
   $("#eventStatus").textContent = open ? "Đang mở" : session.status === "finalized" ? "Đã chốt" : "Đã kết thúc";
   $("#eventStatus").className = "att-badge " + (open ? "open" : session.status === "open" ? "ended" : session.status);
   $("#closedMessage").classList.toggle("hidden", open);
