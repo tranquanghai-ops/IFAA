@@ -1743,7 +1743,8 @@ function mergeAttendancePermissions(records) {
   renderAttendancePermissions();
 }
 function renderAttendancePermissions() {
-  $("#attendancePermissionRows").innerHTML = attendancePermissionMembers.map((item) => `<tr><td><b>${safe(item.mssv)}</b></td><td>${safe(item.name)}</td><td>${item.role === "leader" ? "SV Leader" : "SV quét"}</td><td><button type="button" class="btn btn-small" data-remove-attendance-permission="${safe(item.mssv)}">Xóa</button></td></tr>`).join("") || '<tr><td colspan="4" class="empty">Chưa cấp quyền cho sinh viên.</td></tr>';
+  const sorted = attendancePermissionMembers.slice().sort((a, b) => Number(b.role === "leader") - Number(a.role === "leader"));
+  $("#attendancePermissionRows").innerHTML = sorted.map((item) => `<tr class="${item.role === "leader" ? "attendance-leader-row" : ""}"><td><b>${safe(item.mssv)}</b></td><td>${safe(item.name)}</td><td><select class="attendance-role-select" data-attendance-role="${safe(item.mssv)}"><option value="scanner" ${item.role !== "leader" ? "selected" : ""}>SV quét</option><option value="leader" ${item.role === "leader" ? "selected" : ""}>SV Leader</option></select></td><td><button type="button" class="btn btn-small" data-remove-attendance-permission="${safe(item.mssv)}">Xóa</button></td></tr>`).join("") || '<tr><td colspan="4" class="empty">Chưa cấp quyền cho sinh viên.</td></tr>';
 }
 function populatePermissionCopyOptions() {
   const select = $("#attendanceCopyPermissionsFrom");
@@ -2045,6 +2046,10 @@ $("#attendancePermissionRows").onclick = (event) => {
   if (!button) return;
   attendancePermissionMembers = attendancePermissionMembers.filter((item) => item.mssv !== button.dataset.removeAttendancePermission);
   renderAttendancePermissions();
+};
+$("#attendancePermissionRows").onchange = (event) => {
+  const select = event.target.closest("[data-attendance-role]"); if (!select) return;
+  const item = attendancePermissionMembers.find((value) => value.mssv === select.dataset.attendanceRole); if (item) { item.role = select.value === "leader" ? "leader" : "scanner"; renderAttendancePermissions(); }
 };
 $("#attendanceCopyPermissions").onclick = async () => {
   const sessionId = $("#attendanceCopyPermissionsFrom").value;

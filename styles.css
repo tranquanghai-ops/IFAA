@@ -292,6 +292,8 @@
 
 /* V3.7: nút tải danh sách và bảng mô tả nhất quán */
 .btn-download-list{display:inline-flex;align-items:center;justify-content:center;gap:7px;border-color:#137a43;background:#18864b;color:#fff;box-shadow:0 5px 14px rgba(19,122,67,.18)}
+.actions .btn-download-list,.actions label[for="facultyStudentFile"]{font-size:16px;padding:12px 18px;font-weight:850}.actions label[for="facultyStudentFile"]{background:#18864b;border-color:#137a43;color:#fff;cursor:pointer}
+#facultyStudentTemplate{border-color:#137a43;background:#18864b;color:#fff}
 .btn-download-list:hover{border-color:#0f6637;background:#0f713e}
 .btn-download-list:disabled{border-color:#98c9ad;background:#98c9ad;color:#f8fffb;box-shadow:none}
 .sheet-icon{display:inline-grid;place-items:center;width:18px;height:20px;border:1.5px solid currentColor;border-radius:3px;font-size:13px;font-weight:900;line-height:1}
