@@ -34,6 +34,7 @@ const linkParams = resolveLinkParams();
 const linkedCode = linkParams.get("e")?.trim() || "";
 const linkedEventCode = linkParams.get("x")?.trim() || "";
 let eventsLoaded = false;
+let pendingRegistrationId = "";
 
 function shareCode(value) {
   return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/gi, "d").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60).toUpperCase();
@@ -265,7 +266,7 @@ function allowedFaculties(event) {
 }
 
 function facultyAllowed(event) {
-  return !!profile && allowedFaculties(event).includes(profile.faculty);
+  return !profile || allowedFaculties(event).includes(profile.faculty);
 }
 
 function groupStatus(event) {
@@ -275,6 +276,7 @@ function groupStatus(event) {
   const used = stat?.count || 0;
   if (groupInfo?.unlimited) return { text: "", blocked: false };
   const max = Number(groupInfo?.maxRegistrations || event.groupMaxRegistrations || stat?.maxRegistrations || 1);
+  if (!user) return { text: `Giới hạn nhóm: tối đa ${max} sự kiện/người`, blocked: false };
   return { text: `Giới hạn nhóm: Bạn đã đăng ký ${used}/${max} sự kiện`, blocked: used >= max && !myRegs.has(event.id) };
 }
 
@@ -396,8 +398,9 @@ function render() {
   }
   const filterLabels = { available: "Sắp mở & đang mở", mine: linkedMode ? "Đã chọn" : "Đã đăng ký", ended: "Đã kết thúc", all: "Tất cả" };
   document.querySelectorAll("#studentStatusFilters .filter").forEach((button) => {
-    const visible = !linkedMode || ["all", "mine"].includes(button.dataset.filter);
-    button.classList.toggle("hidden", !visible);
+    const visible = button.dataset.filter !== "mine" || !!user;
+    const linkedVisible = !linkedMode || ["all", "mine"].includes(button.dataset.filter);
+    button.classList.toggle("hidden", !visible || !linkedVisible);
     button.textContent = filterLabels[button.dataset.filter] || button.textContent;
     button.style.order = linkedMode ? (button.dataset.filter === "all" ? "0" : "1") : "";
   });
@@ -458,9 +461,14 @@ function render() {
     return;
   }
 
+  const groupCounts = new Map();
+  accessibleEvents.forEach((event) => {
+    if (event.groupId && !isExternalEvent(event)) groupCounts.set(event.groupId, (groupCounts.get(event.groupId) || 0) + 1);
+  });
   const grouped = new Map();
   list.forEach((event) => {
-    const key = isExternalEvent(event) ? "__external__" : (event.groupId || "__ungrouped__");
+    const singleEventGroup = !linkedCode && event.groupId && groupCounts.get(event.groupId) === 1;
+    const key = isExternalEvent(event) ? "__external__" : (singleEventGroup ? "__ungrouped__" : (event.groupId || "__ungrouped__"));
     if (!grouped.has(key)) grouped.set(key, []);
     grouped.get(key).push(event);
   });
@@ -544,7 +552,14 @@ async function loadProfile() {
     const snapshot = await getDoc(doc(db, "profiles", user.uid));
     profile = snapshot.exists() ? snapshot.data() : null;
     showProfileForm(!profile);
-    if (profile) loadData();
+    if (profile) {
+      loadData();
+      if (pendingRegistrationId) {
+        const eventId = pendingRegistrationId;
+        pendingRegistrationId = "";
+        await register(eventId);
+      }
+    }
   } catch (error) {
     show(`Không thể tải dữ liệu: ${error.message}`, "error");
   }
@@ -562,18 +577,20 @@ function loadData() {
     populateFacultyOptions();
     render();
   }, (error) => show(`Không thể tải thiết lập: ${error.message}`, "error")));
-  unsubscribers.push(onSnapshot(query(collection(db, "registrations"), where("uid", "==", user.uid)), (snapshot) => {
-    myRegs = new Map(snapshot.docs.map((item) => [item.data().eventId, { id: item.id, ...item.data() }]));
-    render();
-  }, (error) => show(`Không thể tải đăng ký: ${error.message}`, "error")));
-  unsubscribers.push(onSnapshot(query(collection(db, "checkins"), where("email", "==", user.email)), (snapshot) => {
-    attendanceByEvent = new Map(snapshot.docs.filter((item) => !item.data().deletedAt).map((item) => [item.data().eventId, { id: item.id, ...item.data() }]));
-    render();
-  }, (error) => show(`Không thể tải lịch sử điểm danh: ${error.message}`, "error")));
-  unsubscribers.push(onSnapshot(query(collection(db, "registrationLimits"), where("uid", "==", user.uid)), (snapshot) => {
-    groupLimits = new Map(snapshot.docs.map((item) => [item.data().groupId, item.data()]));
-    render();
-  }, (error) => show(`Không thể tải giới hạn: ${error.message}`, "error")));
+  if (user) {
+    unsubscribers.push(onSnapshot(query(collection(db, "registrations"), where("uid", "==", user.uid)), (snapshot) => {
+      myRegs = new Map(snapshot.docs.map((item) => [item.data().eventId, { id: item.id, ...item.data() }]));
+      render();
+    }, (error) => show(`Không thể tải đăng ký: ${error.message}`, "error")));
+    unsubscribers.push(onSnapshot(query(collection(db, "checkins"), where("email", "==", user.email)), (snapshot) => {
+      attendanceByEvent = new Map(snapshot.docs.filter((item) => !item.data().deletedAt).map((item) => [item.data().eventId, { id: item.id, ...item.data() }]));
+      render();
+    }, (error) => show(`Không thể tải lịch sử điểm danh: ${error.message}`, "error")));
+    unsubscribers.push(onSnapshot(query(collection(db, "registrationLimits"), where("uid", "==", user.uid)), (snapshot) => {
+      groupLimits = new Map(snapshot.docs.map((item) => [item.data().groupId, item.data()]));
+      render();
+    }, (error) => show(`Không thể tải giới hạn: ${error.message}`, "error")));
+  }
   unsubscribers.push(onSnapshot(collection(db, "eventGroups"), (snapshot) => {
     groups = new Map(snapshot.docs.map((item) => [item.id, { id: item.id, ...item.data() }]));
     groupsLoaded = true;
@@ -587,6 +604,12 @@ function loadData() {
 }
 
 async function register(eventId) {
+  if (!user) {
+    pendingRegistrationId = eventId;
+    show("Vui lòng đăng nhập tài khoản TDTU để đăng ký sự kiện.", "error");
+    await beginGoogleLogin();
+    return;
+  }
   if (!profile) return show("Vui lòng lưu thông tin người tham gia trước.", "error");
   const selectedEvent = events.find((item) => item.id === eventId);
   if (isExternalEvent(selectedEvent || {})) return show("Sự kiện này đăng ký tại trang bên ngoài.", "error");
@@ -718,6 +741,11 @@ $("#profileForm").onsubmit = async (event) => {
     profile = { ...previous, ...data };
     showProfileForm(false);
     loadData();
+    if (pendingRegistrationId) {
+      const eventId = pendingRegistrationId;
+      pendingRegistrationId = "";
+      await register(eventId);
+    }
     show("Đã lưu thông tin người tham gia.", "success");
   } catch (error) {
     show(error.message || "Không thể lưu thông tin.", "error");
@@ -732,7 +760,7 @@ function showLoginNotice(message = "") {
   target.classList.toggle("hidden", !message);
 }
 
-$("#loginBtn").onclick = async () => {
+async function beginGoogleLogin() {
   showLoginNotice();
   try {
     await signInWithPopup(auth, provider);
@@ -742,7 +770,8 @@ $("#loginBtn").onclick = async () => {
       showLoginNotice(`Lỗi đăng nhập (${code}): ${error?.message || "Không xác định được nguyên nhân."}`);
     }
   }
-};
+}
+$("#loginBtn").onclick = beginGoogleLogin;
 $("#logoutBtn").onclick = () => signOut(auth);
 $("#editProfileBtn").onclick = () => showProfileForm(true);
 $("#profileFaculty").onchange = () => syncProfileOrganizationFields(false);
@@ -784,10 +813,17 @@ onAuthStateChanged(auth, async (currentUser) => {
   if (!currentUser) {
     user = null;
     profile = null;
+    myRegs = new Map();
+    attendanceByEvent = new Map();
+    groupLimits = new Map();
+    filter = "available";
     $("#loginCard").classList.remove("hidden");
-    $("#studentApp").classList.add("hidden");
+    $("#studentApp").classList.remove("hidden");
+    $("#profilePanel").classList.add("hidden");
+    $("#eventArea").classList.remove("hidden");
     $("#logoutBtn").classList.add("hidden");
     $("#editProfileBtn").classList.add("hidden");
+    loadData();
     return;
   }
   if (!currentUser.emailVerified || !(await participantAccess(currentUser))) {

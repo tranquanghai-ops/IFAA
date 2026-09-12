@@ -70,6 +70,7 @@ let attendanceSessions = [];
 let attendanceFilter = "open";
 let selectedAttendanceSession = null;
 let attendanceRoster = [];
+let attendanceRosterImport = [];
 const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const purgingEventIds = new Set();
 const purgingGroupIds = new Set();
@@ -1636,11 +1637,11 @@ function renderAttendance() {
 }
 
 function populateAttendanceEventOptions(selectedId = "") {
-  const select = $("#attendanceEventId");
+  const select = $("#attendanceSourceEvent");
   if (!select) return;
   const existing = new Set(attendanceSessions.map((item) => item.eventId));
   const eligible = events.filter((item) => !item.deletedAt && !isExternalEvent(item) && !existing.has(item.id));
-  select.innerHTML = '<option value="">— Chọn sự kiện —</option>' + eligible.map((item) =>
+  select.innerHTML = '<option value="">— Điểm danh độc lập —</option>' + eligible.map((item) =>
     `<option value="${item.id}" ${item.id === selectedId ? "selected" : ""}>${safe(item.title)} · ${safe(item.date || "")}</option>`
   ).join("");
 }
@@ -1648,34 +1649,6 @@ function populateAttendanceEventOptions(selectedId = "") {
 function attendanceCode() {
   const values = crypto.getRandomValues(new Uint32Array(2));
   return (values[0].toString(36) + values[1].toString(36)).slice(0, 9).toUpperCase();
-}
-
-async function createAttendanceFromEvent(eventId) {
-  const selectedEvent = events.find((item) => item.id === eventId && !item.deletedAt);
-  if (!selectedEvent || isExternalEvent(selectedEvent)) throw Error("Sự kiện không hợp lệ.");
-  const existing = attendanceSessions.find((item) => item.eventId === eventId);
-  if (existing) {
-    await openAttendanceManage(existing.id);
-    return existing.id;
-  }
-  const sessionId = attendanceCode();
-  const registrationSnapshot = await getDocs(query(collection(db, "registrations"), where("eventId", "==", eventId)));
-  const roster = registrationSnapshot.docs.map((item) => {
-    const data = item.data();
-    return { ...data, mssv: String(data.identifier || data.mssv || "").trim().toUpperCase() };
-  }).filter((item) => item.mssv);
-  const writes = [
-    { ref: doc(db, "attendanceSessions", sessionId), data: { eventId, title: selectedEvent.title, date: selectedEvent.date || "", location: selectedEvent.location || "", status: "open", rosterCount: roster.length, createdByUid: user.uid, createdByEmail: user.email, createdAt: serverTimestamp() } },
-    ...roster.map((item) => ({ ref: doc(db, "attendanceRoster", sessionId + "_" + item.mssv), data: { sessionId, eventId, mssv: item.mssv, name: item.name || "", email: item.email || "", uid: item.uid || "", createdAt: serverTimestamp() } }))
-  ];
-  for (let offset = 0; offset < writes.length; offset += 450) {
-    const batch = writeBatch(db);
-    writes.slice(offset, offset + 450).forEach((entry) => batch.set(entry.ref, entry.data));
-    await batch.commit();
-  }
-  notice(`Đã tạo điểm danh và chuyển ${roster.length} sinh viên đăng ký.`, "success");
-  showPane("attendance");
-  return sessionId;
 }
 
 async function loadAttendanceManage() {
@@ -1717,29 +1690,115 @@ async function openAttendanceManage(sessionId) {
   await loadAttendanceManage();
 }
 
+function normalizeAttendanceHeader(value) {
+  return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/gi, "d").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function attendanceRowsFromSheet(rows) {
+  if (!rows.length) return [];
+  const keys = Object.keys(rows[0]);
+  const byNames = (...names) => keys.find((key) => names.includes(normalizeAttendanceHeader(key)));
+  const mssvKey = byNames("mssv", "masv", "masinhvien", "studentid", "identifier");
+  const nameKey = byNames("hoten", "hovaten", "name", "fullname");
+  const familyKey = byNames("holot", "hovatenlot", "ho");
+  const givenKey = byNames("ten", "tensinhvien");
+  const emailKey = byNames("email", "mail");
+  if (!mssvKey) throw Error("Không tìm thấy cột MSSV hoặc Mã SV trong tệp.");
+  const map = new Map();
+  for (const row of rows) {
+    const mssv = String(row[mssvKey] || "").trim().toUpperCase();
+    if (!/^(?=.{8,12}$)(?=.*\d)[A-Z0-9]+$/.test(mssv)) continue;
+    const name = String(nameKey ? row[nameKey] || "" : [row[familyKey], row[givenKey]].filter(Boolean).join(" ")).trim().replace(/\s+/g, " ");
+    const email = String(emailKey ? row[emailKey] || "" : "").trim().toLowerCase() || mssv.toLowerCase() + "@student.tdtu.edu.vn";
+    map.set(mssv, { mssv, name, email, uid: "" });
+  }
+  return [...map.values()];
+}
+
+async function readAttendanceRosterFile(file) {
+  if (!file) return [];
+  const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  return attendanceRowsFromSheet(XLSX.utils.sheet_to_json(sheet, { defval: "" }));
+}
+
+function fillAttendanceForm(eventId = "") {
+  populateAttendanceEventOptions(eventId);
+  const selected = events.find((item) => item.id === eventId);
+  const today = new Date().toISOString().slice(0, 10);
+  $("#attendanceSourceEvent").value = selected?.id || "";
+  $("#attendanceStandaloneTitle").value = selected?.title || "";
+  $("#attendanceStandaloneDate").value = selected?.date || today;
+  $("#attendanceStandaloneEndDate").value = selected?.date || today;
+  $("#attendanceStandaloneLocation").value = selected?.location || "";
+  $("#attendanceStandaloneStartTime").value = selected?.startTime || "";
+  $("#attendanceStandaloneEndTime").value = selected?.endTime || "";
+  $("#attendanceStandaloneMembers").value = "";
+  attendanceRosterImport = [];
+  $("#attendanceRosterFile").value = "";
+  $("#attendanceRosterFileName").textContent = "Chưa chọn tệp (không bắt buộc)";
+}
+
 async function createStandaloneAttendance() {
+  const eventId = $("#attendanceSourceEvent").value;
   const title = $("#attendanceStandaloneTitle").value.trim();
   const date = $("#attendanceStandaloneDate").value;
+  const endDate = $("#attendanceStandaloneEndDate").value;
   const location = $("#attendanceStandaloneLocation").value.trim();
-  if (!title || !date) throw Error("Vui lòng nhập tên và ngày diễn ra sự kiện.");
+  const startTime = $("#attendanceStandaloneStartTime").value;
+  const endTime = $("#attendanceStandaloneEndTime").value;
+  if (!title || !date || !endDate) throw Error("Vui lòng nhập tên, ngày tổ chức và ngày kết thúc điểm danh.");
+  const startDay = new Date(date + "T12:00:00"), finishDay = new Date(endDate + "T12:00:00");
+  if (finishDay < startDay) throw Error("Ngày kết thúc không được trước ngày tổ chức.");
+  if ((finishDay - startDay) / 86400000 > 5) throw Error("Ngày kết thúc điểm danh tối đa 5 ngày sau ngày tổ chức.");
+  if (startTime && endTime && endTime <= startTime && date === endDate) throw Error("Giờ kết thúc phải sau giờ bắt đầu.");
+  if (eventId && attendanceSessions.some((item) => item.eventId === eventId)) throw Error("Sự kiện này đã có phiên điểm danh.");
   const sessionId = attendanceCode();
-  const profileSnapshot = await getDocs(collection(db, "profiles"));
-  const roster = profileSnapshot.docs.map((item) => {
-    const data = item.data();
-    const email = String(data.email || "").trim().toLowerCase();
-    const mssv = String(data.identifier || data.mssv || (email.endsWith("@student.tdtu.edu.vn") ? email.split("@")[0] : "")).trim().toUpperCase();
-    return { ...data, email, mssv };
-  }).filter((item) => item.mssv && item.email.endsWith("@student.tdtu.edu.vn"));
+  let sourceRoster = [];
+  if (eventId) {
+    const registrationSnapshot = await getDocs(query(collection(db, "registrations"), where("eventId", "==", eventId)));
+    sourceRoster = registrationSnapshot.docs.map((item) => {
+      const data = item.data();
+      return { ...data, mssv: String(data.identifier || data.mssv || "").trim().toUpperCase(), email: String(data.email || "").trim().toLowerCase() };
+    });
+  } else if (!attendanceRosterImport.length) {
+    const profileSnapshot = await getDocs(collection(db, "profiles"));
+    sourceRoster = profileSnapshot.docs.map((item) => {
+      const data = item.data(), email = String(data.email || "").trim().toLowerCase();
+      return { ...data, email, mssv: String(data.identifier || data.mssv || (email.endsWith("@student.tdtu.edu.vn") ? email.split("@")[0] : "")).trim().toUpperCase() };
+    }).filter((item) => item.email.endsWith("@student.tdtu.edu.vn"));
+  }
+  const rosterMap = new Map();
+  [...sourceRoster, ...attendanceRosterImport].forEach((item) => {
+    if (/^(?=.{8,12}$)(?=.*\d)[A-Z0-9]+$/.test(item.mssv || "")) rosterMap.set(item.mssv, { ...rosterMap.get(item.mssv), ...item });
+  });
+  const roster = [...rosterMap.values()];
+  if (!roster.length) throw Error("Danh sách đối chiếu chưa có sinh viên.");
+  const memberTerms = $("#attendanceStandaloneMembers").value.split(/\r?\n/).map((item) => item.trim().toLocaleLowerCase("vi")).filter(Boolean);
+  const leaders = [...new Map(memberTerms.map((term) => roster.find((item) => item.mssv.toLocaleLowerCase("vi") === term || String(item.email || "").toLocaleLowerCase("vi") === term || String(item.name || "").toLocaleLowerCase("vi") === term)).filter(Boolean).map((item) => [item.mssv, item])).values()];
+  if (leaders.length !== memberTerms.length) throw Error("Có người được cấp quyền Leader không nằm trong danh sách đối chiếu.");
   const writes = [
-    { ref: doc(db, "attendanceSessions", sessionId), data: { eventId: "", source: "standalone", title, date, location, status: "open", rosterCount: roster.length, createdByUid: user.uid, createdByEmail: user.email, createdAt: serverTimestamp() } },
-    ...roster.map((item) => ({ ref: doc(db, "attendanceRoster", sessionId + "_" + item.mssv), data: { sessionId, eventId: "", mssv: item.mssv, name: item.name || "", email: item.email, uid: item.uid || "", createdAt: serverTimestamp() } }))
+    { ref: doc(db, "attendanceSessions", sessionId), data: { eventId, source: eventId ? "registration" : "standalone", title, date, endDate, endAt: Timestamp.fromDate(new Date(endDate + "T23:59:59")), location, startTime, endTime, status: "open", rosterCount: roster.length, createdByUid: user.uid, createdByEmail: user.email, createdByName: user.displayName || "", createdAt: serverTimestamp() } },
+    ...roster.map((item) => ({ ref: doc(db, "attendanceRoster", sessionId + "_" + item.mssv), data: { sessionId, eventId, mssv: item.mssv, name: item.name || "", email: item.email || item.mssv.toLowerCase() + "@student.tdtu.edu.vn", uid: item.uid || "", createdAt: serverTimestamp() } }))
   ];
+  const assignmentWrites = leaders.flatMap((item) => {
+      const email = item.email || item.mssv.toLowerCase() + "@student.tdtu.edu.vn", id = sessionId + "_" + email;
+      return [
+        { ref: doc(db, "scannerAssignments", id), data: { sessionId, email, mssv: item.mssv, name: item.name || "", role: "leader", active: true, grantedAt: serverTimestamp() } },
+        { ref: doc(db, "attendanceGrants", id), data: { sessionId, assignmentId: id, grantedAt: serverTimestamp(), grantedByEmail: user.email, grantedByName: user.displayName || user.email } }
+      ];
+    });
   for (let offset = 0; offset < writes.length; offset += 450) {
     const batch = writeBatch(db);
     writes.slice(offset, offset + 450).forEach((entry) => batch.set(entry.ref, entry.data));
     await batch.commit();
   }
-  notice(`Đã tạo sự kiện điểm danh với ${roster.length} sinh viên trong danh sách đối chiếu.`, "success");
+  for (let offset = 0; offset < assignmentWrites.length; offset += 450) {
+    const batch = writeBatch(db);
+    assignmentWrites.slice(offset, offset + 450).forEach((entry) => batch.set(entry.ref, entry.data));
+    await batch.commit();
+  }
+  notice(`Đã tạo điểm danh với ${roster.length} sinh viên và ${leaders.length} Leader.`, "success");
   showPane("attendance");
 }
 
@@ -1755,6 +1814,32 @@ $("#attendanceCreateForm").onsubmit = async (event) => {
     notice(error.message || "Không thể tạo điểm danh.", "error");
   } finally {
     if (submit) submit.disabled = false;
+  }
+};
+
+$("#attendanceSourceEvent").onchange = (event) => {
+  const selected = events.find((item) => item.id === event.target.value);
+  if (!selected) return;
+  $("#attendanceStandaloneTitle").value = selected.title || "";
+  $("#attendanceStandaloneDate").value = selected.date || "";
+  $("#attendanceStandaloneEndDate").value = selected.date || "";
+  $("#attendanceStandaloneLocation").value = selected.location || "";
+  $("#attendanceStandaloneStartTime").value = selected.startTime || "";
+  $("#attendanceStandaloneEndTime").value = selected.endTime || "";
+};
+
+$("#attendanceRosterFile").onchange = async (event) => {
+  const file = event.target.files?.[0];
+  attendanceRosterImport = [];
+  $("#attendanceRosterFileName").textContent = file ? "Đang đọc " + file.name + "…" : "Chưa chọn tệp (không bắt buộc)";
+  if (!file) return;
+  try {
+    attendanceRosterImport = await readAttendanceRosterFile(file);
+    $("#attendanceRosterFileName").textContent = `${file.name} · ${attendanceRosterImport.length} sinh viên`;
+  } catch (error) {
+    event.target.value = "";
+    $("#attendanceRosterFileName").textContent = "Không đọc được tệp";
+    notice(error.message, "error");
   }
 };
 
@@ -1777,7 +1862,7 @@ document.addEventListener("click", async (event) => {
   if (!button) return;
   if (button.id === "newAttendanceBtn") {
     $("#attendanceCreateForm").reset();
-    $("#attendanceStandaloneDate").value = new Date().toISOString().slice(0, 10);
+    fillAttendanceForm();
     $("#attendanceCreateDialog").showModal();
   }
   if (button.dataset.closeAttendanceCreate !== undefined) $("#attendanceCreateDialog").close();
@@ -1791,10 +1876,8 @@ document.addEventListener("click", async (event) => {
     const existing = attendanceSessions.find((item) => item.eventId === button.dataset.attendanceEvent);
     if (existing) await openAttendanceManage(existing.id);
     else {
-      button.disabled = true;
-      try { await createAttendanceFromEvent(button.dataset.attendanceEvent); }
-      catch (error) { notice(error.message || "Không thể tạo điểm danh.", "error"); }
-      finally { button.disabled = false; }
+      fillAttendanceForm(button.dataset.attendanceEvent);
+      $("#attendanceCreateDialog").showModal();
     }
   }
   if (button.dataset.attendanceManage) await openAttendanceManage(button.dataset.attendanceManage);
