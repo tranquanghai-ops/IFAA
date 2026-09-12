@@ -1919,7 +1919,6 @@ function fillAttendanceForm(eventId = "") {
   renderAttendancePermissions();
   populatePermissionCopyOptions();
   $("#attendancePermissionLookup").value = "";
-  $("#attendanceManualPermission").classList.add("hidden");
   attendanceRosterImport = [];
   $("#attendanceRosterFile").value = "";
   $("#attendanceRosterFileName").textContent = "Chưa chọn tệp (không bắt buộc)";
@@ -2025,23 +2024,21 @@ $("#attendanceRosterFile").onchange = async (event) => {
   }
 };
 
-$("#attendancePermissionAdd").onclick = () => {
-  const student = resolveFacultyStudent($("#attendancePermissionLookup").value);
+async function resolvePermissionStudent(value) {
+  const key = String(value || "").trim().toUpperCase();
+  if (validStudentId(key)) {
+    const snap = await getDoc(doc(db, "facultyStudents", key));
+    return snap.exists() ? studentRecord({ ...snap.data(), mssv: snap.id }) : null;
+  }
+  return resolveFacultyStudent(value);
+}
+$("#attendancePermissionAdd").onclick = async () => {
+  const student = await resolvePermissionStudent($("#attendancePermissionLookup").value);
   if (!student) {
-    $("#attendanceManualPermission").classList.remove("hidden");
-    const raw = $("#attendancePermissionLookup").value.trim();
-    if (validStudentId(raw)) $("#attendanceManualMssv").value = raw.toUpperCase(); else $("#attendanceManualName").value = raw;
-    return notice("Không tìm thấy duy nhất một sinh viên. Vui lòng nhập thủ công hoặc nhập đầy đủ MSSV/họ tên.", "error");
+    return notice("Không tìm thấy MSSV trong danh sách SV khoa. Hãy kiểm tra lại mã sinh viên.", "error");
   }
   mergeAttendancePermissions([{ ...student, role: $("#attendancePermissionRole").value }]);
   $("#attendancePermissionLookup").value = "";
-};
-$("#attendanceShowManual").onclick = () => $("#attendanceManualPermission").classList.toggle("hidden");
-$("#attendanceManualAdd").onclick = () => {
-  const item = studentRecord({ mssv: $("#attendanceManualMssv").value, name: $("#attendanceManualName").value });
-  if (!validStudentId(item.mssv) || !item.name) return notice("Nhập MSSV hợp lệ và họ tên sinh viên.", "error");
-  mergeAttendancePermissions([{ ...item, role: $("#attendanceManualRole").value }]);
-  $("#attendanceManualMssv").value = ""; $("#attendanceManualName").value = ""; $("#attendanceManualPermission").classList.add("hidden");
 };
 $("#attendancePermissionRows").onclick = (event) => {
   const button = event.target.closest("[data-remove-attendance-permission]");
