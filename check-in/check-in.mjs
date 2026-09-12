@@ -260,6 +260,8 @@ function renderSession() {
   $("#scannerArea").classList.toggle("hidden", !open);
   $("#roleText").classList.toggle("hidden", !open);
   $("#capturePhoto").disabled = !open;
+  $("#startCamera").disabled = !open || scanning;
+  if (!open) $("#stopCamera").disabled = true;
   if (!open) releaseCamera();
 }
 async function startSession() {
