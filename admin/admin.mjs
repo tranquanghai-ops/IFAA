@@ -78,7 +78,7 @@ let attendanceRosterImport = [];
 let attendancePermissionMembers = [];
 let facultyStudents = [];
 const FACULTY_MAJORS = ["Thiết kế đồ họa", "Thiết kế công nghiệp", "Thiết kế nội thất", "Thiết kế thời trang", "Nghệ thuật số"];
-let facultyStudentPage = 1, facultyStudentCursor = null, facultyStudentHasNext = false;
+let facultyStudentPage = 1, facultyStudentCursor = null, facultyStudentHasNext = false, facultyStudentTotal = 0;
 const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const purgingEventIds = new Set();
 const purgingGroupIds = new Set();
@@ -1648,7 +1648,7 @@ function studentRecord(value = {}) {
   return { mssv, name: String(value.name || "").trim().replace(/\s+/g, " "), email: String(value.email || (mssv ? mssv.toLowerCase() + "@student.tdtu.edu.vn" : "")).trim().toLowerCase(), gender: String(value.gender || "").trim(), major: String(value.major || "").trim(), studentClass: String(value.studentClass || value.class || "").trim() };
 }
 function renderFacultyStudents(rows = facultyStudents) {
-  $("#facultyStudentCount").textContent = `${rows.length} sinh viên${facultyStudentHasNext ? " · còn trang sau" : ""}`;
+  $("#facultyStudentCount").textContent = `${rows.length} đang hiển thị · tổng ${facultyStudentTotal || rows.length} sinh viên${facultyStudentHasNext ? " · còn trang sau" : ""}`;
   $("#facultyStudentRows").innerHTML = rows.map((item) => `<tr><td><b>${safe(item.mssv)}</b></td><td>${safe(item.name)}</td><td>${safe(item.gender)}</td><td>${safe(item.major)}</td><td>${safe(item.studentClass)}</td><td><button class="btn btn-small btn-danger" data-remove-faculty-student="${safe(item.mssv)}">Xóa</button></td></tr>`).join("") || '<tr><td colspan="6" class="empty">Không có sinh viên phù hợp.</td></tr>';
   $("#attendanceStudentOptions").innerHTML = rows.map((item) => `<option value="${safe(item.mssv)}">${safe(item.name)}</option><option value="${safe(item.name)}">${safe(item.mssv)}</option>`).join("");
   $("#facultyStudentPageInfo").textContent = `Trang ${facultyStudentPage}`;
@@ -1661,12 +1661,16 @@ async function loadFacultyStudentMeta() {
   if (!snap.exists() && highAdminAccess()) {
     const existing = await getDocs(collection(db, "facultyStudents"));
     const rows = existing.docs.map((item) => studentRecord({ ...item.data(), mssv: item.id }));
-    data = { count: rows.length, majors: rows.map((item) => item.major).filter(Boolean), classes: rows.map((item) => item.studentClass).filter(Boolean) };
+    const classesByMajor = {}; rows.forEach((item) => { if (item.major && item.studentClass) (classesByMajor[item.major] ||= []).push(item.studentClass); });
+    data = { count: rows.length, majors: rows.map((item) => item.major).filter(Boolean), classes: rows.map((item) => item.studentClass).filter(Boolean), classesByMajor };
     await setDoc(doc(db, "facultyStudentMeta", "current"), { ...data, updatedAt: serverTimestamp() }, { merge: true });
   }
+  facultyStudentTotal = Number(data.count || 0);
   const majors = [...new Set([...FACULTY_MAJORS, ...(data.majors || [])])].sort();
+  const byMajor = data.classesByMajor || {};
   const classes = [...new Set(data.classes || [])].sort();
   $("#facultyStudentMajorFilter").innerHTML = '<option value="">Tất cả ngành</option>' + majors.map((v) => `<option>${safe(v)}</option>`).join("");
+  $("#facultyStudentMajorFilter").onchange = () => { const selected = $("#facultyStudentMajorFilter").value; const filtered = selected && byMajor[selected] ? byMajor[selected] : classes; $("#facultyStudentClassFilter").innerHTML = '<option value="">Tất cả lớp</option>' + [...new Set(filtered)].sort().map((v) => `<option>${safe(v)}</option>`).join(""); };
   $("#facultyStudentClassFilter").innerHTML = '<option value="">Tất cả lớp</option>' + classes.map((v) => `<option>${safe(v)}</option>`).join("");
 }
 async function loadFacultyStudentPage(reset = false) {
@@ -1675,7 +1679,7 @@ async function loadFacultyStudentPage(reset = false) {
   if (search && validStudentId(search.toUpperCase())) {
     const snap = await getDoc(doc(db, "facultyStudents", search.toUpperCase())); facultyStudents = snap.exists() ? [studentRecord({ ...snap.data(), mssv: snap.id })] : []; facultyStudentHasNext = false;
   } else {
-    const constraints = []; if (studentClass) constraints.push(where("studentClass", "==", studentClass)); else if (major) constraints.push(where("major", "==", major)); constraints.push(orderBy("mssv"), limit(size)); if (facultyStudentCursor) constraints.push(startAfter(facultyStudentCursor));
+    const constraints = []; if (studentClass) constraints.push(where("studentClass", "==", studentClass)); else if (major) constraints.push(where("major", "==", major)); constraints.push(limit(size)); if (facultyStudentCursor) constraints.push(startAfter(facultyStudentCursor));
     const snap = await getDocs(query(collection(db, "facultyStudents"), ...constraints)); facultyStudents = snap.docs.map((item) => studentRecord({ ...item.data(), mssv: item.id })).filter((item) => !major || item.major === major); facultyStudentCursor = snap.docs.at(-1) || null; facultyStudentHasNext = snap.docs.length === size;
     if (search) facultyStudents = facultyStudents.filter((item) => normalizeSearch(item.name).includes(search));
   }
@@ -1845,9 +1849,10 @@ async function saveFacultyStudents(records) {
   }
   const meta = await getDoc(doc(db, "facultyStudentMeta", "current"));
   const old = meta.exists() ? meta.data() : {};
+  const classesByMajor = { ...(old.classesByMajor || {}) }; unique.forEach((item) => { if (item.major && item.studentClass) classesByMajor[item.major] = [...new Set([...(classesByMajor[item.major] || []), item.studentClass])]; });
   await setDoc(doc(db, "facultyStudentMeta", "current"), {
     majors: [...new Set([...(old.majors || []), ...unique.map((item) => item.major).filter(Boolean)])],
-    classes: [...new Set([...(old.classes || []), ...unique.map((item) => item.studentClass).filter(Boolean)])].sort(),
+    classes: [...new Set([...(old.classes || []), ...unique.map((item) => item.studentClass).filter(Boolean)])].sort(), classesByMajor,
     updatedAt: serverTimestamp()
   }, { merge: true });
   await loadFacultyStudentMeta();
