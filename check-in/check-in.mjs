@@ -175,6 +175,7 @@ function listenRows() {
     const rows = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).filter((item) => item.sessionId === session.id && !item.deletedAt).sort((a, b) => (b.checkedAt?.seconds || 0) - (a.checkedAt?.seconds || 0));
     $("#rowCount").textContent = rows.length + " lượt";
     $("#rows").innerHTML = rows.map((item) => `<tr><td>${esc(item.mssv)}</td><td>${esc(item.name)}</td><td>${stamp(item.checkedAt)}</td><td>${(assignment.role === "leader" || isManager) && sessionIsOpen() ? `<button class="att-btn danger" data-delete="${item.id}">Xóa</button>` : ""}</td></tr>`).join("") || '<tr><td colspan="4">Chưa có lượt điểm danh.</td></tr>';
+    if ((assignment.role === "leader" || isManager) && sessionIsOpen()) rows.filter((item) => !item.mssv).forEach((item) => { const tr = [...$("#rows").querySelectorAll("tr")].find((row) => row.textContent.includes(item.name || "Chưa có dữ liệu")); if (!tr) return; const input = document.createElement("input"); input.className = "label-mssv"; input.placeholder = "Nhập MSSV"; input.dataset.labelCheckin = item.id; tr.lastElementChild.appendChild(input); });
   }, (error) => notice(error.message));
 }
 function renderSession() {
@@ -216,10 +217,10 @@ async function startSession() {
 async function submitCheckin(raw) {
   if (!sessionIsOpen()) return;
   const mssv = String(raw || "").trim().toUpperCase();
-  if (!validMssv(mssv)) { feedback(false); return setScanStatus("warn", "MSSV không hợp lệ", "MSSV gồm 8–12 chữ hoặc số."); }
+  if (!mssv && !pendingPhoto) { feedback(false); return setScanStatus("warn", "Chưa có dữ liệu", "Nhập MSSV hoặc chụp hình trước khi lưu."); }
+  if (mssv && !validMssv(mssv)) { feedback(false); return setScanStatus("warn", "MSSV không hợp lệ", "MSSV gồm 8–12 chữ hoặc số."); }
   try {
-    const student = rosterCache.get(mssv);
-    if (!student) { feedback(false); return setScanStatus("error", "Không tìm thấy sinh viên", "MSSV không có trong danh sách đối chiếu."); }
+    const student = mssv ? (rosterCache.get(mssv) || { name: "Không có dữ liệu", email: mssv.toLowerCase() + "@student.tdtu.edu.vn", uid: "" }) : { name: "Chưa có dữ liệu", email: "", uid: "" };
     const items = outbox();
     if (items.some((item) => item.mssv === mssv)) { feedback(false); return setScanStatus("warn", "Đã nhận mã — chờ gửi", mssv + " · " + (student.name || "")); }
     const requestId = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -235,8 +236,8 @@ async function flushOutbox() {
   flushing = true;
   try {
     while (outbox().length) {
-      const record = outbox()[0], checkinRef = doc(db, "checkins", session.id + "_" + record.mssv), existing = await getDoc(checkinRef);
-      if (existing.exists() && !existing.data().deletedAt) {
+      const record = outbox()[0], checkinRef = doc(db, "checkins", session.id + "_" + (record.mssv || "photo_" + record.requestId)), existing = record.mssv ? await getDoc(checkinRef) : { exists: () => false };
+      if (record.mssv && existing.exists() && !existing.data().deletedAt) {
         saveOutbox(outbox().filter((item) => item.requestId !== record.requestId));
         feedback(false); setScanStatus("warn", "Đã điểm danh trước đó", record.mssv + " · " + (existing.data().name || ""));
         continue;
@@ -253,7 +254,7 @@ async function flushOutbox() {
   } finally { flushing = false; }
 }
 function capturePhoto() {
-  try { const canvas = captureFrame({ maxWidth: 1400 }); pendingPhoto = canvas.toDataURL("image/jpeg", 0.7); $("#photoPreview").src = pendingPhoto; $("#photoPreviewBox").classList.remove("hidden"); notice("Đã chụp hình. Nhập MSSV để lưu kèm ảnh."); }
+  try { const canvas = captureFrame({ maxWidth: 1400 }); pendingPhoto = canvas.toDataURL("image/jpeg", 0.7); $("#photoPreview").src = pendingPhoto; $("#photoPreviewBox").classList.remove("hidden"); notice("Đã chụp hình. Có thể lưu ngay hoặc nhập MSSV sau."); }
   catch (error) { notice(error.message); }
 }
 async function login() { try { await signInWithPopup(auth, provider); } catch (error) { if (error?.code !== "auth/popup-closed-by-user") notice(error.message); } }
@@ -281,6 +282,7 @@ document.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-delete]"); if (!button || (!isManager && assignment?.role !== "leader") || !sessionIsOpen()) return;
   await setDoc(doc(db, "checkins", button.dataset.delete), { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email }, { merge: true }); notice("Đã xóa lượt điểm danh.");
 });
+document.addEventListener("change", async (event) => { const input = event.target.closest("[data-label-checkin]"); if (!input) return; const value = input.value.trim().toUpperCase(); if (!validMssv(value)) return notice("MSSV không hợp lệ."); await setDoc(doc(db, "checkins", input.dataset.labelCheckin), { mssv: value }, { merge: true }); notice("Đã bổ sung MSSV cho lượt điểm danh."); });
 window.addEventListener("pagehide", releaseCamera);
 window.addEventListener("online", () => void flushOutbox());
 window.addEventListener("offline", () => setScanStatus("warn", "Mất mạng", "Lượt quét mới sẽ được giữ trên điện thoại và tự gửi lại."));

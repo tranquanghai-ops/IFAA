@@ -285,8 +285,9 @@ function notice(message, type = "") {
   const element = $("#adminNotice");
   element.textContent = message;
   element.className = `notice ${type}`;
+  if (element.showPopover) { element.setAttribute("popover", "manual"); try { element.showPopover(); } catch {} }
   element.classList.remove("hidden");
-  setTimeout(() => element.classList.add("hidden"), 5000);
+  setTimeout(() => { element.classList.add("hidden"); try { element.hidePopover?.(); } catch {} }, 5000);
 }
 
 async function accessRole(currentUser) {
@@ -1766,7 +1767,7 @@ function renderAttendance() {
   target.innerHTML = list.length ? list.map((item) => `<article class="att-row">
     <div><span class="att-badge ${safe(item.status)}">${safe(attendanceStatusLabel(item.status))}</span>
     <h3>${safe(item.title)}</h3><div class="att-meta">${safe(vietnamDate(item.date))} · ${safe(item.location || "")} · ${Number(item.rosterCount || 0)} sinh viên</div></div>
-    <div class="att-actions"><button class="btn" data-attendance-manage="${item.id}">Quản lý điểm danh</button><button class="btn btn-danger" data-delete-attendance="${item.id}">Xóa</button></div>
+    <div class="att-actions"><button class="btn" data-attendance-manage="${item.id}">Quản lý điểm danh</button><button class="btn" data-attendance-edit="${item.id}">Chỉnh sửa</button><button class="btn btn-danger" data-delete-attendance="${item.id}">Xóa</button></div>
   </article>`).join("") : '<div class="card empty">Không có sự kiện điểm danh trong bộ lọc này.</div>';
 }
 
@@ -1827,6 +1828,13 @@ async function openAttendanceManage(sessionId) {
   $("#attendanceScannerForm").classList.toggle("hidden", selectedAttendanceSession.status !== "open");
   $("#attendanceManageDialog").showModal();
   await loadAttendanceManage();
+}
+function openAttendanceEdit(sessionId) {
+  const item = attendanceSessions.find((value) => value.id === sessionId); if (!item || (isSubAdmin && item.createdByUid !== user.uid)) return notice("Bạn không có quyền chỉnh sửa phiên điểm danh này.", "error");
+  $("#attendanceEditTitle").value = item.title || ""; $("#attendanceEditDate").value = item.date || ""; $("#attendanceEditEndDate").value = item.endDate || item.date || ""; $("#attendanceEditLocation").value = item.location || ""; $("#attendanceEditStartTime").value = item.startTime || ""; $("#attendanceEditEndTime").value = item.endTime || "";
+  const linked = !!item.eventId; $("#attendanceEditHint").textContent = linked ? "Phiên lấy từ sự kiện đăng ký: chỉ được sửa thời gian điểm danh và danh sách SV hỗ trợ quét." : "Có thể sửa thông tin phiên điểm danh tự tạo.";
+  ["#attendanceEditTitle", "#attendanceEditLocation"].forEach((selector) => { $(selector).disabled = linked; });
+  $("#attendanceEditDialog").dataset.sessionId = sessionId; $("#attendanceEditDialog").showModal();
 }
 
 function normalizeAttendanceHeader(value) {
@@ -2132,6 +2140,7 @@ document.addEventListener("click", async (event) => {
   }
   if (button.dataset.closeAttendanceCreate !== undefined) $("#attendanceCreateDialog").close();
   if (button.dataset.closeAttendanceManage !== undefined) $("#attendanceManageDialog").close();
+  if (button.dataset.closeAttendanceEdit !== undefined) $("#attendanceEditDialog").close();
   if (button.dataset.attendanceFilter) {
     attendanceFilter = button.dataset.attendanceFilter;
     document.querySelectorAll(".attendance-filter").forEach((item) => item.classList.toggle("active", item === button));
@@ -2148,6 +2157,7 @@ document.addEventListener("click", async (event) => {
     }
   }
   if (button.dataset.attendanceManage) await openAttendanceManage(button.dataset.attendanceManage);
+  if (button.dataset.attendanceEdit) openAttendanceEdit(button.dataset.attendanceEdit);
   if (button.dataset.deleteAttendance) {
     const selected = attendanceSessions.find((item) => item.id === button.dataset.deleteAttendance);
     if (!selected || (isSubAdmin && selected.createdByUid !== user.uid)) return notice("Bạn không có quyền xóa phiên điểm danh này.", "error");
@@ -2173,6 +2183,13 @@ document.addEventListener("click", async (event) => {
 
 $("#attendanceCopyLink").onclick = async () => {
   await copyText(attendanceShareUrl(selectedAttendanceSession.id), "Đã sao chép link quét điểm danh.");
+};
+$("#attendanceEditForm").onsubmit = async (event) => {
+  event.preventDefault(); const id = $("#attendanceEditDialog").dataset.sessionId, item = attendanceSessions.find((value) => value.id === id); if (!item) return;
+  const date = $("#attendanceEditDate").value, endDate = $("#attendanceEditEndDate").value; if (endDate < date) return notice("Ngày kết thúc không được trước ngày tổ chức.", "error");
+  const update = { date, endDate, startTime: $("#attendanceEditStartTime").value, endTime: $("#attendanceEditEndTime").value, endAt: Timestamp.fromDate(new Date(endDate + "T23:59:59")), updatedAt: serverTimestamp() };
+  if (!item.eventId) { update.title = $("#attendanceEditTitle").value.trim(); update.location = $("#attendanceEditLocation").value.trim(); }
+  await updateDoc(doc(db, "attendanceSessions", id), update); $("#attendanceEditDialog").close(); notice("Đã lưu thay đổi phiên điểm danh.", "success");
 };
 $("#attendanceEnd").onclick = async () => {
   const approved = await confirmAction({ title: "Kết thúc sự kiện?", message: "Sau khi kết thúc, sinh viên sẽ không thể quét thêm. Chủ sở hữu/Admin cấp cao luôn có thể mở lại; Sub-admin có 5 ngày để mở lại sự kiện do mình tạo." });
