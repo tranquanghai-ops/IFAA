@@ -1636,6 +1636,7 @@ function attendanceStatusLabel(status) {
 
 function validStudentId(value) { return /^(?=.{8,12}$)(?=.*\d)[A-Z0-9]+$/.test(String(value || "").trim().toUpperCase()); }
 function normalizeSearch(value) { return String(value || "").trim().toLocaleLowerCase("vi"); }
+const MAJOR_BY_CLASS_CODE = { "101": "Thiết kế đồ họa", "102": "Thiết kế công nghiệp", "103": "Thiết kế nội thất", "105": "Nghệ thuật số" };
 function highAdminAccess() { return isOwner || currentRole === "admin"; }
 function canReopenAttendance(item) {
   if (!item || item.status !== "ended") return false;
@@ -1645,7 +1646,10 @@ function canReopenAttendance(item) {
 }
 function studentRecord(value = {}) {
   const mssv = String(value.mssv || value.identifier || "").trim().toUpperCase();
-  return { mssv, name: String(value.name || "").trim().replace(/\s+/g, " "), email: String(value.email || (mssv ? mssv.toLowerCase() + "@student.tdtu.edu.vn" : "")).trim().toLowerCase(), gender: String(value.gender || "").trim(), major: String(value.major || "").trim(), studentClass: String(value.studentClass || value.class || "").trim() };
+  const studentClass = String(value.studentClass || value.class || "").trim();
+  const classCode = /^\d{6,}$/.test(studentClass) ? studentClass.slice(3, 6) : "";
+  const yy = /^1\d{7,}$/.test(mssv) ? Number(mssv.slice(1, 3)) : null;
+  return { mssv, name: String(value.name || "").trim().replace(/\s+/g, " "), email: String(value.email || (mssv ? mssv.toLowerCase() + "@student.tdtu.edu.vn" : "")).trim().toLowerCase(), gender: String(value.gender || "").trim(), major: String(value.major || "").trim() || MAJOR_BY_CLASS_CODE[classCode] || "", studentClass, admissionYear: value.admissionYear || (yy !== null ? 2000 + yy : ""), course: value.course || (yy !== null ? yy + 4 : "") };
 }
 function renderFacultyStudents(rows = facultyStudents) {
   const searching = normalizeSearch($("#facultyStudentSearch")?.value);
