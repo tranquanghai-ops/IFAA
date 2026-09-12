@@ -110,12 +110,27 @@ async function openRearCamera(id = "") {
   if (!candidate) throw firstError;
   return media.getUserMedia({ audio: false, video: { deviceId: { exact: candidate.deviceId } } });
 }
-function captureFrame({ scale = 1, filter = "none", maxWidth = Infinity } = {}) {
+function captureFrame({ scale = 1, filter = "none", maxWidth = Infinity, cropToFrame = false } = {}) {
   const video = $("#video");
   if (!cameraStream || video.readyState < 2) throw Error("Vui lòng bật camera trước.");
-  const ratio = Math.min(scale, maxWidth / video.videoWidth), canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(video.videoWidth * ratio)); canvas.height = Math.max(1, Math.round(video.videoHeight * ratio));
-  const context = canvas.getContext("2d"); context.filter = filter; context.drawImage(video, 0, 0, canvas.width, canvas.height); return canvas;
+  let sx = 0, sy = 0, sw = video.videoWidth, sh = video.videoHeight;
+  if (cropToFrame) {
+    const frame = $(".scanner-frame"), videoRect = video.getBoundingClientRect(), frameRect = frame?.getBoundingClientRect();
+    if (frameRect?.width && videoRect.width && video.videoWidth && video.videoHeight) {
+      // The video uses object-fit: cover. Map the visible frame back to source pixels,
+      // including the part cropped by the browser at the left/right or top/bottom.
+      const fitScale = Math.max(videoRect.width / video.videoWidth, videoRect.height / video.videoHeight);
+      const renderedWidth = video.videoWidth * fitScale, renderedHeight = video.videoHeight * fitScale;
+      const offsetX = (renderedWidth - videoRect.width) / 2, offsetY = (renderedHeight - videoRect.height) / 2;
+      sx = Math.max(0, (offsetX + frameRect.left - videoRect.left) / fitScale);
+      sy = Math.max(0, (offsetY + frameRect.top - videoRect.top) / fitScale);
+      sw = Math.min(video.videoWidth - sx, frameRect.width / fitScale);
+      sh = Math.min(video.videoHeight - sy, frameRect.height / fitScale);
+    }
+  }
+  const ratio = Math.min(scale, maxWidth / sw), canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(sw * ratio)); canvas.height = Math.max(1, Math.round(sh * ratio));
+  const context = canvas.getContext("2d"); context.filter = filter; context.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height); return canvas;
 }
 async function startNativeDetector(request) {
   if (!("BarcodeDetector" in window)) return;
@@ -197,8 +212,13 @@ async function startSession() {
     const assignmentSnapshot = await getDoc(doc(db, "scannerAssignments", sessionId + "_" + user.email.toLowerCase()));
     assignment = assignmentSnapshot.data(); if (!assignment?.active) throw Error("Bạn chưa được cấp quyền quét sự kiện này.");
   }
-  const rosterSnapshot = await getDocs(query(collection(db, "attendanceRoster"), where("sessionId", "==", session.id)));
-  rosterCache = new Map(rosterSnapshot.docs.map((item) => [item.data().mssv, item.data()]));
+  try {
+    const rosterSnapshot = await getDocs(query(collection(db, "attendanceRoster"), where("sessionId", "==", session.id)));
+    rosterCache = new Map(rosterSnapshot.docs.map((item) => [item.data().mssv, item.data()]));
+  } catch {
+    // A scanner can still check in students outside the registration/faculty rosters.
+    rosterCache = new Map();
+  }
   $("#loginCard").classList.add("hidden"); $("#app").classList.remove("hidden"); $("#title").textContent = session.title;
   $("#meta").textContent = [vietnamDate(session.date), session.startTime && session.endTime ? session.startTime + "–" + session.endTime : session.startTime || session.endTime, session.location].filter(Boolean).join(" · ");
   $("#roleText").textContent = isManager ? "Quản trị hệ thống" : assignment.role === "leader" ? "SV Leader" : "SV quét";
@@ -222,7 +242,7 @@ async function submitCheckin(raw) {
   try {
     const student = mssv ? (rosterCache.get(mssv) || { name: "Không có dữ liệu", email: mssv.toLowerCase() + "@student.tdtu.edu.vn", uid: "" }) : { name: "Chưa có dữ liệu", email: "", uid: "" };
     const items = outbox();
-    if (items.some((item) => item.mssv === mssv)) { feedback(false); return setScanStatus("warn", "Đã nhận mã — chờ gửi", mssv + " · " + (student.name || "")); }
+    if (mssv && items.some((item) => item.mssv === mssv)) { feedback(false); return setScanStatus("warn", "Đã nhận mã — chờ gửi", mssv + " · " + (student.name || "")); }
     const requestId = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const record = { requestId, time: new Date().toISOString(), mssv, student: { name: student.name || "", email: student.email || "", uid: student.uid || "" }, photoData: pendingPhoto };
     saveOutbox([...items, record]); pendingPhoto = ""; $("#photoPreviewBox").classList.add("hidden"); $("#mssv").value = "";
@@ -254,13 +274,13 @@ async function flushOutbox() {
   } finally { flushing = false; }
 }
 function capturePhoto() {
-  try { const canvas = captureFrame({ maxWidth: 1400 }); pendingPhoto = canvas.toDataURL("image/jpeg", 0.7); $("#photoPreview").src = pendingPhoto; $("#photoPreviewBox").classList.remove("hidden"); notice("Đã chụp hình. Có thể lưu ngay hoặc nhập MSSV sau."); }
+  try { const canvas = captureFrame({ maxWidth: 1400, cropToFrame: true }); pendingPhoto = canvas.toDataURL("image/jpeg", 0.7); $("#photoPreview").src = pendingPhoto; $("#photoPreviewBox").classList.remove("hidden"); notice("Đã chụp hình trong khung. Có thể lưu ngay hoặc nhập MSSV sau."); }
   catch (error) { notice(error.message); }
 }
 async function login() { try { await signInWithPopup(auth, provider); } catch (error) { if (error?.code !== "auth/popup-closed-by-user") notice(error.message); } }
 
 onAuthStateChanged(auth, async (currentUser) => {
-  user = currentUser; $("#loginBtn").classList.toggle("hidden", !!currentUser); $("#logoutBtn").classList.toggle("hidden", !currentUser); $("#loginCard").classList.toggle("hidden", !!currentUser); $("#app").classList.add("hidden");
+  user = currentUser; $("#logoutBtn").classList.toggle("hidden", !currentUser); $("#loginCard").classList.toggle("hidden", !!currentUser); $("#app").classList.add("hidden");
   releaseCamera(); unsubscribeRows?.(); unsubscribeSession?.();
   if (!currentUser) { $("#account").textContent = "Vui lòng đăng nhập để quét điểm danh."; return; }
   try {
@@ -274,9 +294,9 @@ onAuthStateChanged(auth, async (currentUser) => {
 
 $("#successSound").value = localStorage.getItem(successKey) || "bell"; $("#duplicateSound").value = localStorage.getItem(duplicateKey) || "low";
 $("#successSound").onchange = () => localStorage.setItem(successKey, $("#successSound").value); $("#duplicateSound").onchange = () => localStorage.setItem(duplicateKey, $("#duplicateSound").value);
-$("#testSuccess").onclick = () => feedback(true); $("#testDuplicate").onclick = () => feedback(false); $("#loginBtn").onclick = login; $("#loginCardBtn").onclick = login; $("#logoutBtn").onclick = () => signOut(auth);
+$("#testSuccess").onclick = () => feedback(true); $("#testDuplicate").onclick = () => feedback(false); $("#loginCardBtn").onclick = login; $("#logoutBtn").onclick = () => signOut(auth);
 $("#startCamera").onclick = startCamera; $("#stopCamera").onclick = () => { releaseCamera(); setScanStatus("", "Đã dừng camera", "Nhấn Bắt đầu quét để tiếp tục."); }; $("#cameraSelect").onchange = () => { if (scanning) void startCamera(); };
-$("#capturePhoto").onclick = capturePhoto; $("#discardPhoto").onclick = () => { pendingPhoto = ""; $("#photoPreviewBox").classList.add("hidden"); };
+$("#capturePhoto").onclick = capturePhoto; $("#savePhoto").onclick = async () => { await submitCheckin($("#mssv").value); }; $("#retakePhoto").onclick = capturePhoto;
 $("#scanForm").onsubmit = async (event) => { event.preventDefault(); await submitCheckin($("#mssv").value); };
 document.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-delete]"); if (!button || (!isManager && assignment?.role !== "leader") || !sessionIsOpen()) return;

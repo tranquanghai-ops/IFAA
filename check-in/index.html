@@ -11,12 +11,12 @@
 <main class="att-shell scanner-box">
   <header class="att-head">
     <div><h1>IFA+ Check-in</h1><p id="account" class="att-meta">Vui lòng đăng nhập để quét điểm danh.</p></div>
-    <div class="att-actions"><button id="loginBtn" class="att-btn primary">Đăng nhập Google</button><button id="logoutBtn" class="att-btn hidden">Đăng xuất</button></div>
+    <div class="att-actions"><button id="logoutBtn" class="att-btn hidden">Đăng xuất</button></div>
   </header>
   <div id="notice" class="att-notice hidden"></div>
   <section id="loginCard" class="att-card scanner-login">
     <h2>Đăng nhập tài khoản TDTU</h2>
-    <p>Chỉ Admin hoặc sinh viên đã được cấp quyền quét cho sự kiện này mới có thể sử dụng camera.</p>
+    <p>Chỉ Admin hoặc sinh viên đã được cấp quyền quét cho sự kiện này mới có thể sử dụng.</p>
     <button id="loginCardBtn" class="att-btn primary">Đăng nhập để tiếp tục</button>
   </section>
   <section id="app" class="att-card hidden">
@@ -30,11 +30,10 @@
         <label class="camera-select-label">Camera sau<select id="cameraSelect"><option value="">Tự động chọn camera sau</option></select></label>
       </section>
       <form id="scanForm" class="att-form manual-scan-form"><input id="mssv" class="scan-input" autocomplete="off" autocapitalize="characters" placeholder="Nhập MSSV thủ công (có thể bổ sung sau)"><button class="att-btn green">Lưu điểm danh</button></form>
-      <div id="photoPreviewBox" class="photo-preview-box hidden"><img id="photoPreview" alt="Hình vừa chụp"><div><b>Đã chụp hình</b><p>Nhập MSSV rồi bấm Điểm danh để lưu kèm hình.</p><button id="discardPhoto" class="att-btn" type="button">Bỏ hình</button></div></div>
-      <details class="scanner-settings"><summary>Âm thanh và phản hồi</summary><div class="settings-grid"><label>Quét thành công<select id="successSound"><option value="bell">Chuông cao</option><option value="double">Hai tiếng</option><option value="soft">Âm nhẹ</option></select></label><label>Quét trùng/lỗi<select id="duplicateSound"><option value="low">Âm trầm</option><option value="double-low">Hai tiếng trầm</option><option value="off">Tắt âm</option></select></label></div><div class="att-actions"><button id="testSuccess" class="att-btn" type="button">Thử thành công</button><button id="testDuplicate" class="att-btn" type="button">Thử cảnh báo</button></div></details>
-      <div class="scanner-guide"><b>Mẹo quét nhanh</b><ul><li>Đặt mã vạch ngang và nằm trọn trong khung.</li><li>Giữ điện thoại cách thẻ khoảng 15–25 cm, tránh phản sáng.</li><li>Nếu camera chưa nhận, có thể nhập MSSV thủ công hoặc chụp hình.</li></ul></div>
+      <div id="photoPreviewBox" class="photo-preview-box hidden"><img id="photoPreview" alt="Hình vừa chụp"><div><b>Đã chụp hình</b><p>Có thể lưu hình ngay hoặc bổ sung MSSV sau.</p><div class="att-actions"><button id="savePhoto" class="att-btn green" type="button">Lưu hình</button><button id="retakePhoto" class="att-btn photo" type="button">Chụp lại</button></div></div></div>
       <div class="rows-head"><h2>Danh sách điểm danh</h2><span id="rowCount" class="att-badge">0 lượt</span></div>
       <div class="table-scroll"><table class="att-table"><thead><tr><th>MSSV</th><th>Họ tên</th><th>Thời gian</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
+      <details class="scanner-settings"><summary>Âm thanh và phản hồi</summary><div class="settings-grid"><label>Quét thành công<select id="successSound"><option value="bell">Chuông cao</option><option value="double">Hai tiếng</option><option value="soft">Âm nhẹ</option></select></label><label>Quét trùng/lỗi<select id="duplicateSound"><option value="low">Âm trầm</option><option value="double-low">Hai tiếng trầm</option><option value="off">Tắt âm</option></select></label></div><div class="att-actions"><button id="testSuccess" class="att-btn" type="button">Thử thành công</button><button id="testDuplicate" class="att-btn" type="button">Thử cảnh báo</button></div></details>
     </div>
   </section>
 </main>

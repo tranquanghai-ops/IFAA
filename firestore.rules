@@ -254,7 +254,8 @@ service cloud.firestore {
           && attendanceSession(resource.data.sessionId).status != 'finalized');
       allow create: if (admin() || assigned(request.resource.data.sessionId))
         && attendanceSession(request.resource.data.sessionId).status == 'open'
-        && (request.resource.data.mssv == '' || exists(/databases/$(database)/documents/attendanceRoster/$(request.resource.data.sessionId + '_' + request.resource.data.mssv)))
+        && request.resource.data.mssv is string
+        && request.resource.data.mssv.size() <= 12
         && request.resource.data.scannerUid == request.auth.uid
         && request.resource.data.scannerEmail == email();
       allow update: if (admin()
