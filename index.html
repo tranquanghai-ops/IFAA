@@ -6,23 +6,15 @@
   <meta name="theme-color" content="#a71930">
   <title>IFA+A — Đăng ký sự kiện</title>
   <meta name="description" content="Hệ thống đăng ký sự kiện Khoa Mỹ thuật Công nghiệp">
-  <link rel="stylesheet" href="./styles.css?v=3.0">
+  <link rel="stylesheet" href="./styles.css?v=4.0">
 </head>
 <body>
 <main class="shell">
   <header class="topbar">
     <div class="brand"><div class="mark logo-mark" aria-label="Logo Khoa Mỹ thuật Công nghiệp">IFA</div><div><h1>IFA+A</h1><p>Đăng ký sự kiện · Khoa Mỹ thuật Công nghiệp</p></div></div>
-    <div class="account"><span id="accountEmail" class="account-email"></span><button id="editProfileBtn" class="btn btn-small btn-account btn-account-edit hidden">Sửa thông tin</button><button id="logoutBtn" class="btn btn-small btn-account btn-account-logout hidden">Đăng xuất</button></div>
+    <div class="account"><span id="accountEmail" class="account-email"></span><button id="loginBtn" class="btn btn-small btn-account btn-account-login">Đăng nhập</button><button id="editProfileBtn" class="btn btn-small btn-account btn-account-edit hidden">Sửa thông tin</button><button id="logoutBtn" class="btn btn-small btn-account btn-account-logout hidden">Đăng xuất</button></div>
   </header>
-
-  <section id="loginCard" class="card login-card">
-    <div class="mark logo-mark" aria-label="Logo Khoa Mỹ thuật Công nghiệp">IFA</div>
-    <h2>Khám phá sự kiện IFA+A</h2>
-    <p>Mọi người đều có thể xem sự kiện. Chỉ cần đăng nhập tài khoản TDTU khi muốn đăng ký.</p>
-    <div id="loginNotice" class="login-graphic-notice hidden" role="alert"><span class="login-notice-icon" aria-hidden="true">!</span><div><b>Không thể đăng nhập</b><p id="loginNoticeText"></p></div></div>
-    <button id="loginBtn" class="btn btn-primary">Đăng nhập để đăng ký</button>
-    <p class="helper-text">Việc xem thông tin sự kiện không yêu cầu đăng nhập.</p>
-  </section>
+  <div id="loginNotice" class="login-graphic-notice hidden" role="alert"><span class="login-notice-icon" aria-hidden="true">!</span><div><b>Không thể đăng nhập</b><p id="loginNoticeText"></p></div></div>
 
   <div id="studentApp" class="hidden">
     <div id="notice" class="notice hidden"></div>
@@ -47,12 +39,14 @@
       <section id="eventGrid" class="event-list"></section>
     </div>
   </div>
-  <footer class="foot">IFA+A · Khoa Mỹ thuật Công nghiệp · V3.0<br>Built by: Trần Quang Hải</footer>
+  <footer class="foot">IFA+A · Khoa Mỹ thuật Công nghiệp · V4.0<br>Built by: Trần Quang Hải</footer>
 </main>
+
+<dialog id="quickEditDialog"><form id="quickEditForm" class="modal"><div class="modal-head"><div><h2>Sửa nhanh sự kiện</h2><p>Chỉnh các thông tin thường gặp ngay tại trang chính.</p></div><button type="button" class="btn btn-small" data-close-quick-edit>Đóng</button></div><input id="quickEditId" type="hidden"><div class="form-grid"><div class="field span-2"><label>Tên sự kiện</label><input id="quickEditTitle" maxlength="160" required></div><div class="field"><label>Ngày sự kiện</label><input id="quickEditDate" type="date" required></div><div class="field"><label>Địa điểm</label><input id="quickEditLocation" maxlength="200" required></div><div class="field"><label>Giờ bắt đầu</label><input id="quickEditStartTime" type="time"></div><div class="field"><label>Giờ kết thúc</label><input id="quickEditEndTime" type="time"></div><div class="field span-2"><label>Trạng thái</label><select id="quickEditStatus"><option value="open">Hiển thị/đang mở</option><option value="closed">Kết thúc đăng ký</option><option value="hidden">Ẩn sự kiện</option></select></div></div><div class="modal-actions"><button type="button" class="btn" data-close-quick-edit>Hủy</button><button class="btn btn-primary">Lưu thay đổi</button></div></form></dialog>
 
 <dialog id="studentConfirmDialog" class="confirm-dialog"><div class="confirm-card"><span class="confirm-symbol">?</span><h2 id="studentConfirmTitle">Xác nhận</h2><p id="studentConfirmMessage"></p><div class="confirm-actions"><button id="studentConfirmCancel" class="btn" type="button">Hủy</button><button id="studentConfirmOk" class="btn btn-danger" type="button">Xác nhận</button></div></div></dialog>
 
 <dialog id="detailDialog"><div class="modal"><div class="modal-head"><h2 id="detailTitle"></h2><button class="btn btn-small" data-close>Đóng</button></div><div id="detailBody"></div><div class="modal-actions"><button class="btn" data-close>Hủy</button><button id="detailCalendarBtn" class="btn btn-calendar hidden" type="button">＋ Thêm vào Google Lịch</button><button id="confirmBtn" class="btn btn-register">Xác nhận đăng ký</button></div></div></dialog>
-<script type="module" src="./student.mjs?v=3.0"></script>
+<script type="module" src="./student.mjs?v=4.0"></script>
 </body>
 </html>

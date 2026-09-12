@@ -75,7 +75,7 @@ service cloud.firestore {
         && request.resource.data.maxRegistrations is int
         && request.resource.data.maxRegistrations >= 1
         && request.resource.data.maxRegistrations <= 20;
-      allow update: if admin()
+      allow update: if (highAdmin() || (admin() && resource.data.createdByUid == request.auth.uid))
         && request.resource.data.createdByUid == resource.data.createdByUid
         && request.resource.data.createdByEmail == resource.data.createdByEmail
         && request.resource.data.createdAt == resource.data.createdAt
@@ -94,7 +94,7 @@ service cloud.firestore {
         && request.resource.data.allowedFaculties is list
         && request.resource.data.allowedFaculties.size() >= 1
         && validEventGroup(request.resource.data);
-      allow update: if (admin()
+      allow update: if ((highAdmin() || (admin() && resource.data.createdByUid == request.auth.uid))
         && request.resource.data.createdByUid == resource.data.createdByUid
         && request.resource.data.createdByEmail == resource.data.createdByEmail
         && request.resource.data.createdAt == resource.data.createdAt

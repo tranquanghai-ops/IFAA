@@ -1,7 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
-import { getFirestore, collection, doc, getDoc, setDoc, onSnapshot, query, where, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
-import { firebaseConfig, STUDENT_DOMAIN } from "./firebase-config.mjs";
+import { getFirestore, collection, doc, getDoc, setDoc, updateDoc, onSnapshot, query, where, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
+import { firebaseConfig, STUDENT_DOMAIN, OWNER_EMAIL } from "./firebase-config.mjs";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
 const DEFAULT_CATEGORY = "Sự kiện Khoa";
@@ -116,6 +116,7 @@ function sanitizeRichHtml(value) {
 
 let user = null;
 let profile = null;
+let adminRole = "";
 let events = [];
 let myRegs = new Map();
 let attendanceByEvent = new Map();
@@ -140,6 +141,14 @@ const participantType = (email) => String(email || "").toLowerCase().endsWith(ST
 async function participantAccess(currentUser) {
   if (tdtuEmail(currentUser.email)) return true;
   return (await getDoc(doc(db, "admins", currentUser.email.toLowerCase()))).exists();
+}
+
+async function resolveAdminRole(currentUser) {
+  const email = String(currentUser?.email || "").toLowerCase();
+  if (email === OWNER_EMAIL.toLowerCase()) return "owner";
+  const snapshot = await getDoc(doc(db, "admins", email));
+  if (!snapshot.exists()) return "";
+  return snapshot.data().role === "subadmin" ? "subadmin" : "admin";
 }
 
 function show(message, type = "") {
@@ -316,7 +325,8 @@ function eventCard(event) {
   } else {
     actionButton = `<button class="btn ${state === "full" ? "btn-full" : ["closed", "ended"].includes(state) ? "btn-expired" : "btn-register"}" data-register="${event.id}" ${disabled || registered ? "disabled" : ""}>${registered ? "Đã đăng ký" : state === "full" ? "Đã đủ" : ["closed", "ended"].includes(state) ? "Hết thời gian đăng ký" : group.blocked ? "Đã đạt giới hạn đăng ký" : state === "upcoming" ? "Chưa đến giờ" : "Đăng ký"}</button>`;
   }
-  return `<article class="card event event-${state} ${external ? "event-external" : ""} ${registered ? "event-registered" : ""}"><div class="event-top"><div><span class="tag event-category">${safe(category)}</span><span class="tag ${tagClass}">${label}</span>${hotTag}${newTag}${external ? '<span class="tag external">ĐĂNG KÝ BÊN NGOÀI</span>' : ""}${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}<h3>${safe(event.title)}</h3></div></div><div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(event, state))}</span>${groupLine}</div>${capacityHtml}<div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${attendanceByEvent.has(event.id) ? `<button class="btn" data-history="${event.id}">Xem lịch sử điểm danh</button>` : ""}${STUDENT_CALENDAR_ENABLED && registered ? `<button class="btn btn-calendar" data-calendar="${event.id}">＋ Google Lịch</button>` : ""}${actionButton}</div></article>`;
+  const canEdit = adminRole === "owner" || adminRole === "admin" || (adminRole === "subadmin" && event.createdByUid === user?.uid);
+  return `<article class="card event event-${state} ${external ? "event-external" : ""} ${registered ? "event-registered" : ""}">${canEdit ? `<div class="quick-edit-row"><button class="btn btn-small btn-quick-edit" data-quick-edit="${event.id}">✎ Edit</button></div>` : ""}<div class="event-top"><div><span class="tag event-category">${safe(category)}</span><span class="tag ${tagClass}">${label}</span>${hotTag}${newTag}${external ? '<span class="tag external">ĐĂNG KÝ BÊN NGOÀI</span>' : ""}${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}<h3>${safe(event.title)}</h3></div></div><div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(event, state))}</span>${groupLine}</div>${capacityHtml}<div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${attendanceByEvent.has(event.id) ? `<button class="btn" data-history="${event.id}">Xem lịch sử điểm danh</button>` : ""}${STUDENT_CALENDAR_ENABLED && registered ? `<button class="btn btn-calendar" data-calendar="${event.id}">＋ Google Lịch</button>` : ""}${actionButton}</div></article>`;
 }
 function linkedEventPage(event) {
   const state = eventState(event);
@@ -344,8 +354,9 @@ function linkedEventPage(event) {
     const message = full ? "Đã đủ" : state === "upcoming" ? "Chưa đến giờ đăng ký" : state === "ended" ? "Hết thời gian đăng ký" : group.blocked ? "Đã đạt giới hạn đăng ký" : "Đã đóng đăng ký";
     action = `<button class="btn linked-primary-action unavailable" disabled>${message}</button>`;
   }
+  const canEdit = adminRole === "owner" || adminRole === "admin" || (adminRole === "subadmin" && event.createdByUid === user?.uid);
   return `<article class="linked-event-form">
-    <header class="linked-event-header"><div class="linked-event-tags"><span class="tag ${safe(state)}">${safe(statusLabel)}</span>${event.isHot ? '<span class="tag hot">🔥 HOT</span>' : ""}${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}</div><h2>${safe(event.title)}</h2></header>
+    <header class="linked-event-header">${canEdit ? `<div class="quick-edit-row"><button class="btn btn-small btn-quick-edit" data-quick-edit="${event.id}">✎ Edit</button></div>` : ""}<div class="linked-event-tags"><span class="tag ${safe(state)}">${safe(statusLabel)}</span>${event.isHot ? '<span class="tag hot">🔥 HOT</span>' : ""}${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}</div><h2>${safe(event.title)}</h2></header>
     <section class="linked-event-info"><p><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</p><p><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</p><p class="countdown">${safe(timingStatus(event, state))}</p>${group.text && !external ? `<p><b>${safe(group.text)}</b></p>` : ""}</section>
     <section class="linked-event-description rich-content">${description}</section>
     ${availability}
@@ -462,7 +473,7 @@ function render() {
   }
 
   const groupCounts = new Map();
-  accessibleEvents.forEach((event) => {
+  list.forEach((event) => {
     if (event.groupId && !isExternalEvent(event)) groupCounts.set(event.groupId, (groupCounts.get(event.groupId) || 0) + 1);
   });
   const grouped = new Map();
@@ -771,6 +782,35 @@ async function beginGoogleLogin() {
     }
   }
 }
+
+function openQuickEdit(eventId) {
+  const selected = events.find((item) => item.id === eventId);
+  const allowed = selected && (adminRole === "owner" || adminRole === "admin" || (adminRole === "subadmin" && selected.createdByUid === user?.uid));
+  if (!allowed) return show("Bạn không có quyền sửa sự kiện này.", "error");
+  $("#quickEditId").value = selected.id;
+  $("#quickEditTitle").value = selected.title || "";
+  $("#quickEditDate").value = selected.date || "";
+  $("#quickEditLocation").value = selected.location || "";
+  $("#quickEditStartTime").value = selected.startTime || "";
+  $("#quickEditEndTime").value = selected.endTime || "";
+  $("#quickEditStatus").value = ["open", "closed", "hidden"].includes(selected.status) ? selected.status : "open";
+  $("#quickEditDialog").showModal();
+}
+
+$("#quickEditForm").onsubmit = async (event) => {
+  event.preventDefault();
+  const selected = events.find((item) => item.id === $("#quickEditId").value);
+  const allowed = selected && (adminRole === "owner" || adminRole === "admin" || (adminRole === "subadmin" && selected.createdByUid === user?.uid));
+  if (!allowed) return show("Bạn không có quyền sửa sự kiện này.", "error");
+  const startTime = $("#quickEditStartTime").value, endTime = $("#quickEditEndTime").value;
+  if (startTime && endTime && endTime <= startTime) return show("Giờ kết thúc phải sau giờ bắt đầu.", "error");
+  const submit = event.submitter; if (submit) submit.disabled = true;
+  try {
+    await updateDoc(doc(db, "events", selected.id), { title: $("#quickEditTitle").value.trim(), date: $("#quickEditDate").value, location: $("#quickEditLocation").value.trim(), startTime, endTime, status: $("#quickEditStatus").value, updatedAt: serverTimestamp() });
+    $("#quickEditDialog").close(); show("Đã cập nhật sự kiện.", "success");
+  } catch (error) { show(error.message || "Không thể cập nhật sự kiện.", "error"); }
+  finally { if (submit) submit.disabled = false; }
+};
 $("#loginBtn").onclick = beginGoogleLogin;
 $("#logoutBtn").onclick = () => signOut(auth);
 $("#editProfileBtn").onclick = () => showProfileForm(true);
@@ -781,6 +821,8 @@ document.addEventListener("click", async (event) => {
   const button = event.target.closest("button");
   if (!button) return;
   if (button.dataset.close !== undefined) $("#detailDialog").close();
+  if (button.dataset.closeQuickEdit !== undefined) $("#quickEditDialog").close();
+  if (button.dataset.quickEdit) openQuickEdit(button.dataset.quickEdit);
   if (button.dataset.view) openDetail(button.dataset.view);
   if (button.dataset.register) openDetail(button.dataset.register);
   if (button.dataset.directRegister) register(button.dataset.directRegister);
@@ -813,20 +855,23 @@ onAuthStateChanged(auth, async (currentUser) => {
   if (!currentUser) {
     user = null;
     profile = null;
+    adminRole = "";
     myRegs = new Map();
     attendanceByEvent = new Map();
     groupLimits = new Map();
     filter = "available";
-    $("#loginCard").classList.remove("hidden");
     $("#studentApp").classList.remove("hidden");
     $("#profilePanel").classList.add("hidden");
     $("#eventArea").classList.remove("hidden");
     $("#logoutBtn").classList.add("hidden");
+    $("#loginBtn").classList.remove("hidden");
+    $("#accountEmail").textContent = "";
     $("#editProfileBtn").classList.add("hidden");
     loadData();
     return;
   }
-  if (!currentUser.emailVerified || !(await participantAccess(currentUser))) {
+  adminRole = currentUser.emailVerified ? await resolveAdminRole(currentUser) : "";
+  if (!currentUser.emailVerified || !(tdtuEmail(currentUser.email) || adminRole)) {
     await signOut(auth);
     showLoginNotice("Chỉ chấp nhận tài khoản TDTU.");
     return;
@@ -834,8 +879,8 @@ onAuthStateChanged(auth, async (currentUser) => {
   showLoginNotice();
   user = currentUser;
   $("#accountEmail").textContent = `${currentUser.email} · ${participantType(currentUser.email)}`;
-  $("#loginCard").classList.add("hidden");
   $("#studentApp").classList.remove("hidden");
+  $("#loginBtn").classList.add("hidden");
   $("#logoutBtn").classList.remove("hidden");
   await loadProfile();
 });
