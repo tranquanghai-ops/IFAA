@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
 import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, setDoc, updateDoc, onSnapshot, query, where, serverTimestamp, Timestamp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
 import { firebaseConfig, STUDENT_DOMAIN, OWNER_EMAIL } from "../firebase-config.mjs";
 
@@ -372,7 +372,7 @@ async function openCheckinImage(id) {
   $("#checkinImage").style.width = "100%";
   $("#checkinImageDialog").showModal();
 }
-async function login() { try { await signInWithPopup(auth, provider); } catch (error) { if (error?.code !== "auth/popup-closed-by-user") notice(error.message); } }
+async function login() {\n  try {\n    await signInWithPopup(auth, provider);\n  } catch (error) {\n    if (["auth/popup-blocked", "auth/popup-timeout", "auth/operation-not-supported-in-this-environment"].includes(error?.code)) {\n      notice("Trình duyệt đang chặn cửa sổ Google. Đang chuyển sang trang đăng nhập an toàn…");\n      try { await signInWithRedirect(auth, provider); } catch (redirectError) { notice(redirectError.message || error.message); }\n      return;\n    }\n    if (error?.code === "auth/unauthorized-domain") {\n      notice("Tên miền này chưa được thêm vào Firebase Authorized domains. Admin cần thêm ifa.tdtu.edu.vn và tên miền Firebase.");\n      return;\n    }\n    if (!["auth/popup-closed-by-user", "auth/cancelled-popup-request"].includes(error?.code)) notice(error.message || "Không thể đăng nhập Google.");\n  }\n}\n\ngetRedirectResult(auth).catch((error) => {\n  if (error?.code === "auth/unauthorized-domain") notice("Tên miền này chưa được thêm vào Firebase Authorized domains. Admin cần thêm ifa.tdtu.edu.vn.");\n  else if (error?.code && error.code !== "auth/popup-closed-by-user") notice(error.message || "Không thể hoàn tất đăng nhập Google.");\n});
 
 onAuthStateChanged(auth, async (currentUser) => {
   user = currentUser; $("#logoutBtn").classList.toggle("hidden", !currentUser); $("#loginCard").classList.toggle("hidden", !!currentUser); $("#app").classList.add("hidden");
