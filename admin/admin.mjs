@@ -1657,7 +1657,13 @@ function renderFacultyStudents(rows = facultyStudents) {
 }
 async function loadFacultyStudentMeta() {
   const snap = await getDoc(doc(db, "facultyStudentMeta", "current"));
-  const data = snap.exists() ? snap.data() : {};
+  let data = snap.exists() ? snap.data() : {};
+  if (!snap.exists() && highAdminAccess()) {
+    const existing = await getDocs(collection(db, "facultyStudents"));
+    const rows = existing.docs.map((item) => studentRecord({ ...item.data(), mssv: item.id }));
+    data = { count: rows.length, majors: rows.map((item) => item.major).filter(Boolean), classes: rows.map((item) => item.studentClass).filter(Boolean) };
+    await setDoc(doc(db, "facultyStudentMeta", "current"), { ...data, updatedAt: serverTimestamp() }, { merge: true });
+  }
   const majors = [...new Set([...FACULTY_MAJORS, ...(data.majors || [])])].sort();
   const classes = [...new Set(data.classes || [])].sort();
   $("#facultyStudentMajorFilter").innerHTML = '<option value="">Tất cả ngành</option>' + majors.map((v) => `<option>${safe(v)}</option>`).join("");
