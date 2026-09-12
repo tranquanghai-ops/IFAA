@@ -23,7 +23,7 @@ service firebase.storage {
     match /datasets/{datasetFile} {
       allow read: if participant();
       allow create, update: if highAdmin()
-        && datasetFile.matches('^faculty-students-[0-9]+\\.json\\.gz$')
+        && datasetFile == 'faculty-students.json.gz'
         && request.resource.size < 12 * 1024 * 1024
         && request.resource.contentType == 'application/gzip';
       allow delete: if owner();

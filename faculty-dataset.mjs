@@ -91,7 +91,7 @@ export async function publishFacultyDataset(storage, records, version = Date.now
   const rows = normalizeRows(records);
   const payload = JSON.stringify({ schemaVersion: 1, version, students: rows });
   const compressed = await gzip(payload);
-  const path = `datasets/faculty-students-${version}.json.gz`;
+  const path = FACULTY_DATASET_PATH;
   await uploadBytes(ref(storage, path), compressed, {
     contentType: "application/gzip",
     cacheControl: "private, max-age=0, no-cache",
