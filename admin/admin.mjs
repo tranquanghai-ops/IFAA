@@ -77,6 +77,8 @@ let attendanceRoster = [];
 let attendanceRosterImport = [];
 let attendancePermissionMembers = [];
 let facultyStudents = [];
+const FACULTY_MAJORS = ["Thiết kế đồ họa", "Thiết kế công nghiệp", "Thiết kế nội thất", "Thiết kế thời trang", "Nghệ thuật số"];
+let facultyStudentPage = 1, facultyStudentCursor = null, facultyStudentHasNext = false;
 const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const purgingEventIds = new Set();
 const purgingGroupIds = new Set();
@@ -865,10 +867,7 @@ function listen() {
     render();
   }, (error) => notice("Không thể tải dữ liệu điểm danh: " + error.message, "error"));
 
-  onSnapshot(collection(db, "facultyStudents"), (snapshot) => {
-    facultyStudents = snapshot.docs.map((item) => studentRecord({ ...item.data(), mssv: item.id })).sort((a, b) => a.mssv.localeCompare(b.mssv, undefined, { numeric: true }));
-    renderFacultyStudents();
-  }, (error) => notice("Không thể tải danh sách SV khoa: " + error.message, "error"));
+  loadFacultyStudentMeta();
 
   // Danh sách đăng ký chỉ được truy vấn sau khi Admin chọn một sự kiện.
 
@@ -1648,12 +1647,33 @@ function studentRecord(value = {}) {
   const mssv = String(value.mssv || value.identifier || "").trim().toUpperCase();
   return { mssv, name: String(value.name || "").trim().replace(/\s+/g, " "), email: String(value.email || (mssv ? mssv.toLowerCase() + "@student.tdtu.edu.vn" : "")).trim().toLowerCase(), gender: String(value.gender || "").trim(), major: String(value.major || "").trim(), studentClass: String(value.studentClass || value.class || "").trim() };
 }
-function renderFacultyStudents() {
-  const search = normalizeSearch($("#facultyStudentSearch")?.value);
-  const rows = facultyStudents.filter((item) => !search || [item.mssv, item.name, item.major, item.studentClass].some((value) => normalizeSearch(value).includes(search)));
-  $("#facultyStudentCount").textContent = `${rows.length}/${facultyStudents.length} sinh viên`;
+function renderFacultyStudents(rows = facultyStudents) {
+  $("#facultyStudentCount").textContent = `${rows.length} sinh viên${facultyStudentHasNext ? " · còn trang sau" : ""}`;
   $("#facultyStudentRows").innerHTML = rows.map((item) => `<tr><td><b>${safe(item.mssv)}</b></td><td>${safe(item.name)}</td><td>${safe(item.gender)}</td><td>${safe(item.major)}</td><td>${safe(item.studentClass)}</td><td><button class="btn btn-small btn-danger" data-remove-faculty-student="${safe(item.mssv)}">Xóa</button></td></tr>`).join("") || '<tr><td colspan="6" class="empty">Không có sinh viên phù hợp.</td></tr>';
-  $("#attendanceStudentOptions").innerHTML = facultyStudents.map((item) => `<option value="${safe(item.mssv)}">${safe(item.name)}</option><option value="${safe(item.name)}">${safe(item.mssv)}</option>`).join("");
+  $("#attendanceStudentOptions").innerHTML = rows.map((item) => `<option value="${safe(item.mssv)}">${safe(item.name)}</option><option value="${safe(item.name)}">${safe(item.mssv)}</option>`).join("");
+  $("#facultyStudentPageInfo").textContent = `Trang ${facultyStudentPage}`;
+  $("#facultyStudentPrev").disabled = facultyStudentPage <= 1;
+  $("#facultyStudentNext").disabled = !facultyStudentHasNext;
+}
+async function loadFacultyStudentMeta() {
+  const snap = await getDoc(doc(db, "facultyStudentMeta", "current"));
+  const data = snap.exists() ? snap.data() : {};
+  const majors = [...new Set([...FACULTY_MAJORS, ...(data.majors || [])])].sort();
+  const classes = [...new Set(data.classes || [])].sort();
+  $("#facultyStudentMajorFilter").innerHTML = '<option value="">Tất cả ngành</option>' + majors.map((v) => `<option>${safe(v)}</option>`).join("");
+  $("#facultyStudentClassFilter").innerHTML = '<option value="">Tất cả lớp</option>' + classes.map((v) => `<option>${safe(v)}</option>`).join("");
+}
+async function loadFacultyStudentPage(reset = false) {
+  if (reset) { facultyStudentPage = 1; facultyStudentCursor = null; }
+  const search = normalizeSearch($("#facultyStudentSearch").value), major = $("#facultyStudentMajorFilter").value, studentClass = $("#facultyStudentClassFilter").value, size = Number($("#facultyStudentPageSize").value || 15);
+  if (search && validStudentId(search.toUpperCase())) {
+    const snap = await getDoc(doc(db, "facultyStudents", search.toUpperCase())); facultyStudents = snap.exists() ? [studentRecord({ ...snap.data(), mssv: snap.id })] : []; facultyStudentHasNext = false;
+  } else {
+    const constraints = []; if (studentClass) constraints.push(where("studentClass", "==", studentClass)); else if (major) constraints.push(where("major", "==", major)); constraints.push(orderBy("mssv"), limit(size)); if (facultyStudentCursor) constraints.push(startAfter(facultyStudentCursor));
+    const snap = await getDocs(query(collection(db, "facultyStudents"), ...constraints)); facultyStudents = snap.docs.map((item) => studentRecord({ ...item.data(), mssv: item.id })).filter((item) => !major || item.major === major); facultyStudentCursor = snap.docs.at(-1) || null; facultyStudentHasNext = snap.docs.length === size;
+    if (search) facultyStudents = facultyStudents.filter((item) => normalizeSearch(item.name).includes(search));
+  }
+  $("#facultyStudentPrompt").classList.add("hidden"); $("#facultyStudentTableWrap").classList.remove("hidden"); renderFacultyStudents();
 }
 function resolveFacultyStudent(value) {
   const key = normalizeSearch(value);
@@ -1814,9 +1834,17 @@ async function saveFacultyStudents(records) {
   const unique = [...new Map(records.map(studentRecord).filter((item) => validStudentId(item.mssv) && item.name).map((item) => [item.mssv, item])).values()];
   for (let offset = 0; offset < unique.length; offset += 450) {
     const batch = writeBatch(db);
-    unique.slice(offset, offset + 450).forEach((item) => batch.set(doc(db, "facultyStudents", item.mssv), { ...item, updatedByUid: user.uid, updatedByEmail: user.email, updatedAt: serverTimestamp() }, { merge: true }));
+    unique.slice(offset, offset + 450).forEach((item) => batch.set(doc(db, "facultyStudents", item.mssv), { ...item, nameLower: normalizeSearch(item.name), updatedByUid: user.uid, updatedByEmail: user.email, updatedAt: serverTimestamp() }, { merge: true }));
     await batch.commit();
   }
+  const meta = await getDoc(doc(db, "facultyStudentMeta", "current"));
+  const old = meta.exists() ? meta.data() : {};
+  await setDoc(doc(db, "facultyStudentMeta", "current"), {
+    majors: [...new Set([...(old.majors || []), ...unique.map((item) => item.major).filter(Boolean)])],
+    classes: [...new Set([...(old.classes || []), ...unique.map((item) => item.studentClass).filter(Boolean)])].sort(),
+    updatedAt: serverTimestamp()
+  }, { merge: true });
+  await loadFacultyStudentMeta();
   return unique.length;
 }
 
@@ -1865,7 +1893,8 @@ async function createStandaloneAttendance() {
       return { ...data, mssv: String(data.identifier || data.mssv || "").trim().toUpperCase(), email: String(data.email || "").trim().toLowerCase() };
     });
   } else if (!attendanceRosterImport.length) {
-    sourceRoster = facultyStudents;
+    const studentSnapshot = await getDocs(collection(db, "facultyStudents"));
+    sourceRoster = studentSnapshot.docs.map((item) => studentRecord({ ...item.data(), mssv: item.id }));
   }
   const rosterMap = new Map();
   [...sourceRoster, ...attendanceRosterImport].forEach((item) => {
@@ -1979,7 +2008,11 @@ $("#attendancePermissionFile").onchange = async (event) => {
 };
 $("#attendancePermissionTemplate").onclick = () => downloadWorkbook("MAU_DANH_SACH_CAP_QUYEN_QUET.xlsx", "Cap quyen quet", [{ MSSV: "12300325", "Họ và tên": "Nguyễn Văn A", "Vai trò (scanner/leader)": "scanner" }, { MSSV: "12300326", "Họ và tên": "Trần Văn B", "Vai trò (scanner/leader)": "leader" }]);
 
-$("#facultyStudentSearch").oninput = renderFacultyStudents;
+$("#facultyStudentSearchBtn").onclick = () => loadFacultyStudentPage(true).catch((error) => notice(error.message, "error"));
+$("#facultyStudentLoadBtn").onclick = () => loadFacultyStudentPage(true).catch((error) => notice(error.message, "error"));
+$("#facultyStudentNext").onclick = () => { facultyStudentPage += 1; loadFacultyStudentPage().catch((error) => notice(error.message, "error")); };
+$("#facultyStudentPrev").onclick = () => { if (facultyStudentPage > 1) { facultyStudentPage -= 1; facultyStudentCursor = null; loadFacultyStudentPage(true).catch((error) => notice(error.message, "error")); } };
+$("#facultyStudentResetBtn").onclick = () => { $("#facultyStudentSearch").value = ""; $("#facultyStudentMajorFilter").value = ""; $("#facultyStudentClassFilter").value = ""; facultyStudentPage = 1; facultyStudentCursor = null; $("#facultyStudentTableWrap").classList.add("hidden"); $("#facultyStudentPrompt").classList.remove("hidden"); $("#facultyStudentCount").textContent = "0 sinh viên"; };
 $("#facultyStudentForm").onsubmit = async (event) => {
   event.preventDefault();
   try {

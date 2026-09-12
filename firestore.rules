@@ -218,6 +218,10 @@ service cloud.firestore {
         && request.resource.data.name.size() <= 150;
       allow delete: if highAdmin();
     }
+    match /facultyStudentMeta/{metaId} {
+      allow read: if admin();
+      allow create, update, delete: if highAdmin();
+    }
 
     match /attendanceRoster/{rosterId} {
       allow read: if admin() || assigned(resource.data.sessionId);
