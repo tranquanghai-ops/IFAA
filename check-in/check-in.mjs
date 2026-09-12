@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
-import { getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, onSnapshot, query, where, serverTimestamp, Timestamp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
+import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, setDoc, updateDoc, onSnapshot, query, where, serverTimestamp, Timestamp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
 import { firebaseConfig, STUDENT_DOMAIN, OWNER_EMAIL } from "../firebase-config.mjs";
 
 const app = initializeApp(firebaseConfig);
@@ -159,16 +159,23 @@ function captureFrame({ scale = 1, filter = "none", maxWidth = Infinity, cropSel
 async function resolveStudent(rawMssv) {
   const mssv = String(rawMssv || "").trim().toUpperCase();
   if (!mssv) return { mssv: "", name: "Chưa có dữ liệu", email: "", uid: "" };
-  if (rosterCache.has(mssv)) return rosterCache.get(mssv);
+  const cached = rosterCache.get(mssv);
+  const cachedName = String(cached?.name || "").trim().toLocaleLowerCase("vi");
+  if (cached && cachedName && !["không có dữ liệu", "chưa có dữ liệu"].includes(cachedName)) return cached;
   try {
-    const snapshot = await getDoc(doc(db, "facultyStudents", mssv));
+    const reference = doc(db, "facultyStudents", mssv);
+    let snapshot;
+    try { snapshot = await getDocFromServer(reference); }
+    catch { snapshot = await getDoc(reference); }
     if (snapshot.exists()) {
       const data = { mssv, ...snapshot.data() };
       rosterCache.set(mssv, data);
       return data;
     }
-  } catch {}
-  return { mssv, name: "Không có dữ liệu", email: mssv.toLowerCase() + "@student.tdtu.edu.vn", uid: "" };
+  } catch (error) {
+    showToast("error", "Không đọc được danh sách SV khoa", error.message || "Vui lòng kiểm tra kết nối hoặc quyền truy cập.");
+  }
+  return cached || { mssv, name: "Không có dữ liệu", email: mssv.toLowerCase() + "@student.tdtu.edu.vn", uid: "" };
 }
 function encodePhoto(canvas) {
   for (const quality of [.68, .55, .42]) {

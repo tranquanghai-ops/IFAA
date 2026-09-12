@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
-import { getFirestore, collection, doc, getDoc, getDocs, getCountFromServer, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit, startAfter, serverTimestamp, Timestamp, runTransaction, writeBatch } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
+import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, getCountFromServer, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit, startAfter, serverTimestamp, Timestamp, runTransaction, writeBatch } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
 import { firebaseConfig, OWNER_EMAIL } from "../firebase-config.mjs";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
@@ -1795,6 +1795,39 @@ function attendanceCode() {
   return (values[0].toString(36) + values[1].toString(36)).slice(0, 9).toUpperCase();
 }
 
+function attendanceNameMissing(value) {
+  const name = normalizeSearch(value);
+  return !name || name === "không có dữ liệu" || name === "chưa có dữ liệu";
+}
+async function enrichAttendanceStudentNames() {
+  const rows = attendanceManageRows.filter((item) => item.mssv && attendanceNameMissing(item.name));
+  if (!rows.length) return;
+  const directory = new Map(attendanceRoster.filter((item) => item.mssv && !attendanceNameMissing(item.name)).map((item) => [String(item.mssv).toUpperCase(), item]));
+  const missingIds = [...new Set(rows.map((item) => String(item.mssv).trim().toUpperCase()).filter((mssv) => !directory.has(mssv)))];
+  for (let offset = 0; offset < missingIds.length; offset += 25) {
+    const results = await Promise.all(missingIds.slice(offset, offset + 25).map(async (mssv) => {
+      try {
+        const snapshot = await getDocFromServer(doc(db, "facultyStudents", mssv));
+        return snapshot.exists() ? [mssv, studentRecord({ ...snapshot.data(), mssv: snapshot.id })] : null;
+      } catch { return null; }
+    }));
+    results.filter(Boolean).forEach(([mssv, student]) => directory.set(mssv, student));
+  }
+  const repaired = [];
+  rows.forEach((item) => {
+    const student = directory.get(String(item.mssv).trim().toUpperCase());
+    if (!student?.name) return;
+    item.name = student.name; item.email = student.email || item.email || ""; item.studentUid = student.uid || item.studentUid || "";
+    repaired.push(item);
+  });
+  if (!repaired.length || selectedAttendanceSession?.status === "finalized") return;
+  for (let offset = 0; offset < repaired.length; offset += 450) {
+    const batch = writeBatch(db);
+    repaired.slice(offset, offset + 450).forEach((item) => batch.update(doc(db, "checkins", item.id), { name: item.name, email: item.email || "", studentUid: item.studentUid || "" }));
+    try { await batch.commit(); } catch {}
+  }
+}
+
 async function loadAttendanceManage() {
   if (!selectedAttendanceSession) return;
   const sessionId = selectedAttendanceSession.id;
@@ -1806,6 +1839,7 @@ async function loadAttendanceManage() {
   ]);
   attendanceRoster = rosterSnapshot.docs.map((item) => item.data());
   attendanceManageRows = checkinSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+  await enrichAttendanceStudentNames();
   const grants = new Map(grantSnapshot.docs.map((item) => [item.id, item.data()]));
   $("#attendanceGrantedByHead").classList.toggle("hidden", isSubAdmin);
   $("#attendanceScannerRows").innerHTML = assignmentSnapshot.docs.map((item) => {
