@@ -78,7 +78,7 @@ let attendanceRosterImport = [];
 let attendancePermissionMembers = [];
 let facultyStudents = [];
 const FACULTY_MAJORS = ["Thiết kế đồ họa", "Thiết kế công nghiệp", "Thiết kế nội thất", "Thiết kế thời trang", "Nghệ thuật số"];
-let facultyStudentPage = 1, facultyStudentCursor = null, facultyStudentHasNext = false, facultyStudentTotal = 0;
+let facultyStudentPage = 1, facultyStudentCursor = null, facultyStudentHasNext = false, facultyStudentTotal = 0, expiredFacultyStudents = [];
 const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const purgingEventIds = new Set();
 const purgingGroupIds = new Set();
@@ -1636,7 +1636,7 @@ function attendanceStatusLabel(status) {
 
 function validStudentId(value) { return /^(?=.{8,12}$)(?=.*\d)[A-Z0-9]+$/.test(String(value || "").trim().toUpperCase()); }
 function normalizeSearch(value) { return String(value || "").trim().toLocaleLowerCase("vi"); }
-const MAJOR_BY_CLASS_CODE = { "101": "Thiết kế đồ họa", "102": "Thiết kế công nghiệp", "103": "Thiết kế nội thất", "105": "Nghệ thuật số" };
+const MAJOR_BY_CLASS_CODE = { "101": "Thiết kế đồ họa", "102": "Thiết kế công nghiệp", "103": "Thiết kế nội thất", "104": "Thiết kế thời trang", "105": "Nghệ thuật số" };
 function highAdminAccess() { return isOwner || currentRole === "admin"; }
 function canReopenAttendance(item) {
   if (!item || item.status !== "ended") return false;
@@ -1681,6 +1681,19 @@ async function loadFacultyStudentMeta() {
   $("#facultyStudentMajorFilter").innerHTML = '<option value="">Tất cả ngành</option>' + majors.map((v) => `<option>${safe(v)}</option>`).join("");
   $("#facultyStudentMajorFilter").onchange = () => { const selected = $("#facultyStudentMajorFilter").value; const filtered = selected && byMajor[selected] ? byMajor[selected] : classes; $("#facultyStudentClassFilter").innerHTML = '<option value="">Tất cả lớp</option>' + [...new Set(filtered)].sort().map((v) => `<option>${safe(v)}</option>`).join(""); };
   $("#facultyStudentClassFilter").innerHTML = '<option value="">Tất cả lớp</option>' + classes.map((v) => `<option>${safe(v)}</option>`).join("");
+  await loadExpiredFacultyStudents();
+}
+function studentTrainingExpired(item) { const year = Number(item.admissionYear); return year > 0 && new Date().getFullYear() > year + 7; }
+async function loadExpiredFacultyStudents() {
+  try {
+    const snapshot = await getDocs(collection(db, "facultyStudents"));
+    expiredFacultyStudents = snapshot.docs.map((item) => studentRecord({ ...item.data(), mssv: item.id })).filter(studentTrainingExpired);
+    const notice = $("#facultyStudentExpiredNotice");
+    if (!expiredFacultyStudents.length) { notice.classList.add("hidden"); $("#facultyStudentExpiredPanel").classList.add("hidden"); return; }
+    notice.textContent = `Có ${expiredFacultyStudents.length} sinh viên đã hết hạn đào tạo`;
+    notice.classList.remove("hidden");
+    $("#facultyStudentExpiredRows").innerHTML = expiredFacultyStudents.map((item) => `<tr><td><b>${safe(item.mssv)}</b></td><td>${safe(item.name)}</td><td>${safe(item.admissionYear)}</td><td>K${safe(item.course)}</td><td><button class="btn btn-small btn-danger" data-remove-expired-student="${safe(item.mssv)}">Xóa</button></td></tr>`).join("");
+  } catch (error) { notice("Không thể kiểm tra sinh viên hết hạn: " + error.message, "error"); }
 }
 async function loadFacultyStudentPage(reset = false) {
   if (reset) { facultyStudentPage = 1; facultyStudentCursor = null; }
@@ -2064,6 +2077,17 @@ $("#facultyStudentRows").onclick = async (event) => {
   const button = event.target.closest("[data-remove-faculty-student]"); if (!button) return;
   const approved = await confirmAction({ title: "Xóa sinh viên?", message: `Xóa MSSV ${button.dataset.removeFacultyStudent} khỏi danh sách SV khoa?` });
   if (approved) await deleteDoc(doc(db, "facultyStudents", button.dataset.removeFacultyStudent));
+};
+$("#facultyStudentExpiredNotice").onclick = () => $("#facultyStudentExpiredPanel").classList.toggle("hidden");
+$("#facultyStudentExpiredRows").onclick = async (event) => {
+  const button = event.target.closest("[data-remove-expired-student]"); if (!button) return;
+  if (!(await confirmAction({ title: "Xóa sinh viên hết hạn?", message: `Xóa MSSV ${button.dataset.removeExpiredStudent} khỏi danh sách khoa?` }))) return;
+  await deleteDoc(doc(db, "facultyStudents", button.dataset.removeExpiredStudent)); await loadExpiredFacultyStudents();
+};
+$("#facultyStudentExpiredDeleteAll").onclick = async () => {
+  if (!expiredFacultyStudents.length || !(await confirmAction({ title: "Xóa toàn bộ sinh viên hết hạn?", message: `Xóa ${expiredFacultyStudents.length} sinh viên hết hạn khỏi danh sách khoa?` }))) return;
+  for (let offset = 0; offset < expiredFacultyStudents.length; offset += 450) { const batch = writeBatch(db); expiredFacultyStudents.slice(offset, offset + 450).forEach((item) => batch.delete(doc(db, "facultyStudents", item.mssv))); await batch.commit(); }
+  await loadExpiredFacultyStudents(); await loadFacultyStudentMeta(); notice("Đã xóa danh sách sinh viên hết hạn.", "success");
 };
 
 $("#attendanceScannerForm").onsubmit = async (event) => {
