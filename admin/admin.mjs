@@ -21,7 +21,28 @@ const vietnamDate = (value) => {
   return match ? `${match[3]}/${match[2]}/${match[1]}` : String(value || "");
 };
 
-function confirmAction({ title, message, verification = "" }) {
+const parseVietnamDate = (value) => {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  let year, month, day;
+  let match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (match) [, year, month, day] = match;
+  else {
+    match = text.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/);
+    if (!match) return "";
+    [, day, month, year] = match;
+  }
+  const date = new Date(Number(year), Number(month) - 1, Number(day));
+  if (date.getFullYear() !== Number(year) || date.getMonth() !== Number(month) - 1 || date.getDate() !== Number(day)) return "";
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+};
+
+document.querySelectorAll(".date-vn").forEach((input) => input.addEventListener("blur", () => {
+  const iso = parseVietnamDate(input.value);
+  if (iso) input.value = vietnamDate(iso);
+}));
+
+function confirmAction({ title, message, verification = "", confirmLabel = "Xác nhận" }) {
   return new Promise((resolve) => {
     const dialog = $("#confirmDialog");
     const form = $("#confirmActionForm");
@@ -32,6 +53,7 @@ function confirmAction({ title, message, verification = "" }) {
 
     $("#confirmActionTitle").textContent = title;
     $("#confirmActionMessage").textContent = message;
+    submit.textContent = confirmLabel;
     field.classList.toggle("hidden", !verification);
     input.value = "";
     submit.disabled = Boolean(verification);
@@ -913,22 +935,22 @@ const dateTimeValue = (date, time) => date && validTime24(time) ? new Date(`${da
 
 function openEvent(event = null, copy = false) {
   $("#eventForm").reset();
-  delete $("#saveEventBtn").dataset.warningSignature;
   delete $("#saveEventBtn").dataset.immediateOpenBase;
   $("#saveEventBtn").textContent = "Lưu sự kiện";
   $("#descriptionEditor").innerHTML = event?.descriptionHtml || (event?.description ? `<p>${safe(event.description).replace(/\n/g, "<br>")}</p>` : "");
   $("#eventFormError").classList.add("hidden");
   $("#eventId").value = copy ? "" : (event?.id || "");
   $("#eventDialogTitle").textContent = copy ? "Sao chép sự kiện" : event ? "Chỉnh sửa sự kiện" : "Tạo sự kiện";
-  for (const key of ["title", "category", "date", "location", "startTime", "endTime", "capacity", "status"]) if (event && $("#" + key)) $("#" + key).value = event[key] ?? "";
+  for (const key of ["title", "category", "location", "startTime", "endTime", "capacity", "status"]) if (event && $("#" + key)) $("#" + key).value = event[key] ?? "";
+  $("#date").value = event ? vietnamDate(event.date) : "";
   if (!$("#category").value) $("#category").value = "Sự kiện Khoa";
   if (event?.status === "draft") $("#status").value = "hidden";
   if (event) {
     const opens = inputDateTimeParts(event.openAt);
     const closes = inputDateTimeParts(event.closeAt);
-    $("#openDate").value = opens.date;
+    $("#openDate").value = vietnamDate(opens.date);
     $("#openTime").value = opens.time;
-    $("#closeDate").value = closes.date;
+    $("#closeDate").value = vietnamDate(closes.date);
     $("#closeTime").value = closes.time;
   } else {
     $("#status").value = "open";
@@ -938,19 +960,21 @@ function openEvent(event = null, copy = false) {
   $("#eventHot").checked = !!event?.isHot;
   $("#eventShowAsNew").checked = copy ? true : event ? event.showAsNew !== false : true;
   $("#eventCreateShareLink").checked = copy ? false : !!event?.shareCode;
-  $("#eventCreateShareLink").disabled = !copy && !!event?.shareCode;
+  $("#eventCreateShareLink").dataset.locked = !copy && !!event?.shareCode ? "true" : "";
+  $("#eventHideFromPublic").checked = copy ? false : !!event?.linkOnly;
   $("#eventShareLinkHelp").textContent = !copy && event?.shareCode ? `Mã liên kết hiện tại: ${shareCode(event.shareCode)}` : "Có thể tạo ngay hoặc tạo sau tại trang quản lý sự kiện.";
   $("#unlimitedCapacity").checked = !!event?.unlimitedCapacity;
   $("#hideRegistrationCount").checked = !!event?.hideRegistrationCount;
   if (event?.unlimitedCapacity) $("#capacity").value = "";
   $("#registrationUrl").value = event?.registrationUrl || "";
-  const storedCloseMode = event?.closeMode || (event ? "manual" : "after24");
-  const closeMode = copy ? (event?.closeMode || "manual") : storedCloseMode;
+  const storedCloseMode = event?.closeMode === "endOfDay" ? "beforeEvent" : (event?.closeMode || (event ? "manual" : "after24"));
+  const closeMode = copy ? (event ? storedCloseMode : "manual") : storedCloseMode;
   const closeModeInput = document.querySelector(`input[name="closeMode"][value="${closeMode}"]`) || document.querySelector('input[name="closeMode"][value="after24"]');
   if (closeModeInput) closeModeInput.checked = true;
   toggleExternalEventFields();
   setCapacityState();
   setCloseModeState();
+  syncEventVisibilityOptions();
   refreshGroupOptions(event?.groupId || "");
   $("#groupId").disabled = !copy && !!event && (event.registeredCount || 0) > 0;
   $("#newGroupFields").classList.add("hidden");
@@ -1006,12 +1030,20 @@ function setCloseModeState() {
   const help = {
     after12: "Hệ thống sẽ đóng đăng ký sau 12 giờ tính từ lúc mở.",
     after24: "Hệ thống sẽ đóng đăng ký sau 24 giờ tính từ lúc mở.",
-    endOfDay: "Hệ thống sẽ đóng lúc 23:59 của ngày diễn ra sự kiện.",
+    beforeEvent: "Hệ thống sẽ đóng đăng ký ngay trước giờ bắt đầu sự kiện.",
     admin: "Đăng ký tiếp tục mở cho đến khi Admin chuyển trạng thái sang kết thúc.",
     manual: "Nhập chính xác ngày và giờ đóng đăng ký."
   };
   $("#closeModeHelp").textContent = help[mode] || help.after24;
 }
+
+function syncEventVisibilityOptions() {
+  const hidden = $("#eventHideFromPublic").checked;
+  if (hidden) $("#eventCreateShareLink").checked = true;
+  $("#eventCreateShareLink").disabled = hidden || $("#eventCreateShareLink").dataset.locked === "true";
+}
+
+$("#eventHideFromPublic").onchange = syncEventVisibilityOptions;
 
 $("#category").onchange = () => { toggleExternalEventFields(); setCapacityState(); };
 $("#unlimitedCapacity").onchange = setCapacityState;
@@ -1074,20 +1106,21 @@ $("#eventForm").onsubmit = async (event) => {
   event.preventDefault();
   const submit = event.submitter || $("#saveEventBtn");
   const error = $("#eventFormError");
-  let keepWarningAction = false;
   submit.disabled = true;
   submit.textContent = "Đang lưu…";
   error.classList.add("hidden");
   const id = $("#eventId").value;
   const data = {};
-  for (const key of ["title", "category", "date", "location", "startTime", "endTime", "status"]) data[key] = $("#" + key).value.trim();
+  for (const key of ["title", "category", "location", "startTime", "endTime", "status"]) data[key] = $("#" + key).value.trim();
+  data.date = parseVietnamDate($("#date").value);
   data.descriptionHtml = $("#descriptionEditor").innerHTML.trim();
   data.description = $("#descriptionEditor").innerText.trim();
   const existingEvent = id ? events.find((item) => item.id === id) : null;
-  data.shareCode = existingEvent?.shareCode || ($("#eventCreateShareLink").checked ? createUniqueEventCode() : "");
-  const openDateText = $("#openDate").value;
+  data.linkOnly = $("#eventHideFromPublic").checked;
+  data.shareCode = existingEvent?.shareCode || ($("#eventCreateShareLink").checked || data.linkOnly ? createUniqueEventCode() : "");
+  const openDateText = parseVietnamDate($("#openDate").value);
   const openTimeText = $("#openTime").value.trim();
-  const closeDateText = $("#closeDate").value;
+  const closeDateText = parseVietnamDate($("#closeDate").value);
   const closeTimeText = $("#closeTime").value.trim();
   data.openAt = null;
   data.closeAt = null;
@@ -1125,7 +1158,7 @@ $("#eventForm").onsubmit = async (event) => {
     if (!data.openAt) submit.dataset.immediateOpenBase = String(immediateOpenBase);
     if (data.closeMode === "after12") data.closeAt = Timestamp.fromMillis(immediateOpenBase + 12 * 60 * 60 * 1000);
     else if (data.closeMode === "after24") data.closeAt = Timestamp.fromMillis(immediateOpenBase + 24 * 60 * 60 * 1000);
-    else if (data.closeMode === "endOfDay") data.closeAt = Timestamp.fromDate(new Date(`${data.date}T23:59:00`));
+    else if (data.closeMode === "beforeEvent") data.closeAt = Timestamp.fromDate(new Date(`${data.date}T${data.startTime || "00:00"}:00`));
     else if (data.closeMode === "manual") data.closeAt = Timestamp.fromDate(manualCloseValue);
     else data.closeAt = null;
     const warnings = [];
@@ -1134,16 +1167,8 @@ $("#eventForm").onsubmit = async (event) => {
     if (!id && eventStart <= now) warnings.push("Ngày và giờ bắt đầu sự kiện đã ở trong quá khứ.");
     if (data.openAt && data.closeAt && data.openAt.toMillis() >= data.closeAt.toMillis()) warnings.push("Thời gian đóng đăng ký đang trước hoặc bằng thời gian mở đăng ký.");
     if (!id && data.closeAt && data.closeAt.toMillis() <= now) warnings.push("Thời gian đóng đăng ký đã ở trong quá khứ.");
-    if (data.closeAt && data.closeMode !== "endOfDay" && data.closeAt.toMillis() > eventStart) warnings.push("Thời gian đóng đăng ký đang sau giờ bắt đầu sự kiện.");
-    const warningSignature = [id, data.date, data.startTime, data.endTime, data.openAt?.toMillis() || "immediate", data.closeAt?.toMillis() || "admin", data.closeMode, ...warnings].join("|");
-    if (warnings.length && submit.dataset.warningSignature !== warningSignature) {
-      error.innerHTML = `<b>Cảnh báo ngày giờ chưa hợp lý:</b><ul>${warnings.map((message) => `<li>${safe(message)}</li>`).join("")}</ul><b>Nếu thông tin này là chủ ý, bấm “Vẫn lưu sự kiện”.</b>`;
-      error.className = "notice warning";
-      submit.dataset.warningSignature = warningSignature;
-      submit.textContent = "Vẫn lưu sự kiện";
-      keepWarningAction = true;
-      return;
-    }
+    if (data.closeAt && data.closeAt.toMillis() > eventStart) warnings.push("Thời gian đóng đăng ký đang sau giờ bắt đầu sự kiện.");
+    if (warnings.length && !(await confirmAction({ title: "Cảnh báo ngày giờ chưa hợp lý", message: warnings.map((message) => `• ${message}`).join("\n"), confirmLabel: "Vẫn lưu sự kiện" }))) return;
     if (!data.allowedFaculties.length) throw Error("Vui lòng chọn ít nhất một khoa/đơn vị.");
     if (new Blob([JSON.stringify(data)]).size > 900000) throw Error("Nội dung mô tả hoặc hình ảnh quá lớn. Vui lòng giảm kích thước hình.");
     let selectedGroup = $("#groupId").value;
@@ -1207,11 +1232,8 @@ $("#eventForm").onsubmit = async (event) => {
     error.classList.remove("hidden");
   } finally {
     submit.disabled = false;
-    if (!keepWarningAction) {
-      submit.textContent = "Lưu sự kiện";
-      delete submit.dataset.warningSignature;
-      delete submit.dataset.immediateOpenBase;
-    }
+    submit.textContent = "Lưu sự kiện";
+    delete submit.dataset.immediateOpenBase;
   }
 };
 
@@ -1941,7 +1963,7 @@ async function openAttendanceManage(sessionId) {
 }
 function populateAttendanceEditForm(item) {
   if (!item) return;
-  $("#attendanceEditTitle").value = item.title || ""; $("#attendanceEditDate").value = item.date || ""; $("#attendanceEditEndDate").value = item.endDate || item.date || ""; $("#attendanceEditLocation").value = item.location || ""; $("#attendanceEditStartTime").value = item.startTime || ""; $("#attendanceEditEndTime").value = item.endTime || "";
+  $("#attendanceEditTitle").value = item.title || ""; $("#attendanceEditDate").value = vietnamDate(item.date); $("#attendanceEditEndDate").value = vietnamDate(item.endDate || item.date); $("#attendanceEditLocation").value = item.location || ""; $("#attendanceEditStartTime").value = item.startTime || ""; $("#attendanceEditEndTime").value = item.endTime || "";
   const linked = !!item.eventId; $("#attendanceEditHint").textContent = linked ? "Phiên lấy từ sự kiện đăng ký: chỉ được sửa thời gian điểm danh và danh sách SV hỗ trợ quét." : "Có thể sửa thông tin phiên điểm danh tự tạo.";
   ["#attendanceEditTitle", "#attendanceEditDate", "#attendanceEditLocation"].forEach((selector) => { $(selector).disabled = linked; });
 }
@@ -2028,8 +2050,8 @@ function fillAttendanceForm(eventId = "") {
   const today = new Date().toISOString().slice(0, 10);
   $("#attendanceSourceEvent").value = selected?.id || "";
   $("#attendanceStandaloneTitle").value = selected?.title || "";
-  $("#attendanceStandaloneDate").value = selected?.date || today;
-  $("#attendanceStandaloneEndDate").value = selected?.date || today;
+  $("#attendanceStandaloneDate").value = vietnamDate(selected?.date || today);
+  $("#attendanceStandaloneEndDate").value = vietnamDate(selected?.date || today);
   $("#attendanceStandaloneLocation").value = selected?.location || "";
   $("#attendanceStandaloneStartTime").value = selected?.startTime || "";
   $("#attendanceStandaloneEndTime").value = selected?.endTime || "";
@@ -2045,8 +2067,8 @@ function fillAttendanceForm(eventId = "") {
 async function createStandaloneAttendance() {
   const eventId = $("#attendanceSourceEvent").value;
   const title = $("#attendanceStandaloneTitle").value.trim();
-  const date = $("#attendanceStandaloneDate").value;
-  const endDate = $("#attendanceStandaloneEndDate").value;
+  const date = parseVietnamDate($("#attendanceStandaloneDate").value);
+  const endDate = parseVietnamDate($("#attendanceStandaloneEndDate").value);
   const location = $("#attendanceStandaloneLocation").value.trim();
   const startTime = $("#attendanceStandaloneStartTime").value;
   const endTime = $("#attendanceStandaloneEndTime").value;
@@ -2117,8 +2139,8 @@ $("#attendanceSourceEvent").onchange = (event) => {
   const selected = events.find((item) => item.id === event.target.value);
   if (!selected) return;
   $("#attendanceStandaloneTitle").value = selected.title || "";
-  $("#attendanceStandaloneDate").value = selected.date || "";
-  $("#attendanceStandaloneEndDate").value = selected.date || "";
+  $("#attendanceStandaloneDate").value = vietnamDate(selected.date);
+  $("#attendanceStandaloneEndDate").value = vietnamDate(selected.date);
   $("#attendanceStandaloneLocation").value = selected.location || "";
   $("#attendanceStandaloneStartTime").value = selected.startTime || "";
   $("#attendanceStandaloneEndTime").value = selected.endTime || "";
@@ -2364,7 +2386,7 @@ $("#attendanceImageZoomIn").onclick = () => setAttendanceImageScale(attendanceVi
 $("#attendanceEditForm").onsubmit = async (event) => {
   event.preventDefault(); const item = selectedAttendanceSession; if (!item || (isSubAdmin && item.createdByUid !== user.uid)) return notice("Bạn không có quyền chỉnh sửa phiên điểm danh này.", "error");
   const id = item.id;
-  const date = $("#attendanceEditDate").value, endDate = $("#attendanceEditEndDate").value; if (endDate < date) return notice("Ngày kết thúc không được trước ngày tổ chức.", "error");
+  const date = parseVietnamDate($("#attendanceEditDate").value), endDate = parseVietnamDate($("#attendanceEditEndDate").value); if (!date || !endDate) return notice("Ngày không hợp lệ. Vui lòng nhập theo dạng ngày/tháng/năm.", "error"); if (endDate < date) return notice("Ngày kết thúc không được trước ngày tổ chức.", "error");
   const endTime = $("#attendanceEditEndTime").value;
   const update = { date, endDate, startTime: $("#attendanceEditStartTime").value, endTime, endAt: attendanceEndTimestamp(endDate, endTime), updatedAt: serverTimestamp() };
   if (!item.eventId) { update.title = $("#attendanceEditTitle").value.trim(); update.location = $("#attendanceEditLocation").value.trim(); }

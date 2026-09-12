@@ -433,7 +433,7 @@ function render() {
     if (filter === "mine") return myRegs.has(event.id) && (!linkedCode || event.groupId === focusedGroup?.id);
     if (eventState(event) === "hidden") return false;
     if (linkedCode) return event.groupId === focusedGroup?.id;
-    return !groups.get(event.groupId)?.linkOnly;
+    return !event.linkOnly && !groups.get(event.groupId)?.linkOnly;
   });
   refreshStudentFilters(accessibleEvents, focusedGroup);
 
@@ -789,7 +789,7 @@ function openQuickEdit(eventId) {
   if (!allowed) return show("Bạn không có quyền sửa sự kiện này.", "error");
   $("#quickEditId").value = selected.id;
   $("#quickEditTitle").value = selected.title || "";
-  $("#quickEditDate").value = selected.date || "";
+  $("#quickEditDate").value = formatDate(selected.date);
   $("#quickEditLocation").value = selected.location || "";
   $("#quickEditStartTime").value = selected.startTime || "";
   $("#quickEditEndTime").value = selected.endTime || "";
@@ -806,7 +806,12 @@ $("#quickEditForm").onsubmit = async (event) => {
   if (startTime && endTime && endTime <= startTime) return show("Giờ kết thúc phải sau giờ bắt đầu.", "error");
   const submit = event.submitter; if (submit) submit.disabled = true;
   try {
-    await updateDoc(doc(db, "events", selected.id), { title: $("#quickEditTitle").value.trim(), date: $("#quickEditDate").value, location: $("#quickEditLocation").value.trim(), startTime, endTime, status: $("#quickEditStatus").value, updatedAt: serverTimestamp() });
+    const dateParts = $("#quickEditDate").value.trim().match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/);
+    if (!dateParts) throw Error("Ngày không hợp lệ. Vui lòng nhập theo dạng ngày/tháng/năm.");
+    const date = `${dateParts[3]}-${dateParts[2].padStart(2, "0")}-${dateParts[1].padStart(2, "0")}`;
+    const parsedDate = new Date(Number(dateParts[3]), Number(dateParts[2]) - 1, Number(dateParts[1]));
+    if (parsedDate.getFullYear() !== Number(dateParts[3]) || parsedDate.getMonth() !== Number(dateParts[2]) - 1 || parsedDate.getDate() !== Number(dateParts[1])) throw Error("Ngày không tồn tại. Vui lòng kiểm tra lại.");
+    await updateDoc(doc(db, "events", selected.id), { title: $("#quickEditTitle").value.trim(), date, location: $("#quickEditLocation").value.trim(), startTime, endTime, status: $("#quickEditStatus").value, updatedAt: serverTimestamp() });
     $("#quickEditDialog").close(); show("Đã cập nhật sự kiện.", "success");
   } catch (error) { show(error.message || "Không thể cập nhật sự kiện.", "error"); }
   finally { if (submit) submit.disabled = false; }
