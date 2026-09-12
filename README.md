@@ -1,4 +1,4 @@
-# IFA+A (IFAA) V3.0
+# IFA+A (IFAA) V3.6
 
 Hệ thống đăng ký sự kiện dành cho Khoa Mỹ thuật Công nghiệp, TDTU.
 
@@ -22,9 +22,12 @@ Hệ thống đăng ký sự kiện dành cho Khoa Mỹ thuật Công nghiệp, 
 ## Điểm danh
 
 - Phiên điểm danh có thể lấy danh sách từ một sự kiện đã đăng ký hoặc từ Excel/CSV.
-- Form tạo phiên gồm tên, ngày tổ chức/kết thúc, địa điểm, giờ bắt đầu/kết thúc và danh sách SV Leader.
+- Form tạo phiên gồm tên, ngày tổ chức/kết thúc, địa điểm, giờ bắt đầu/kết thúc và danh sách SV quét/Leader.
 - Admin và sinh viên đã được cấp quyền phải đăng nhập Google trước khi quét.
 - Trang quét hỗ trợ camera sau, nhiều cơ chế nhận diện barcode, nhập MSSV thủ công, âm thanh/rung và chụp ảnh.
+- Khi sự kiện kết thúc, trang quét chỉ hiển thị thông tin sự kiện và thông báo kết thúc.
+- Chủ sở hữu/Admin cấp cao luôn được mở lại; Sub-admin được mở lại sự kiện tự tạo trong 5 ngày kể từ lúc kết thúc.
+- Danh sách SV khoa dùng chung hỗ trợ đối chiếu MSSV/họ tên, nhập Excel, tải file mẫu và copy danh sách cấp quyền từ sự kiện khác.
 
 ## Hoàn tất Firebase
 

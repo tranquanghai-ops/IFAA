@@ -201,8 +201,22 @@ service cloud.firestore {
         || (admin()
           && resource.data.createdByUid == request.auth.uid
           && resource.data.status != 'finalized'
-          && request.resource.data.status != 'finalized');
+          && request.resource.data.status != 'finalized'
+          && (resource.data.status != 'ended'
+            || request.resource.data.status != 'open'
+            || (resource.data.endedAt is timestamp
+              && request.time <= resource.data.endedAt + duration.value(5, 'd'))));
       allow delete: if false;
+    }
+
+    match /facultyStudents/{mssv} {
+      allow read: if admin();
+      allow create, update: if highAdmin()
+        && request.resource.data.mssv == mssv
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 150;
+      allow delete: if highAdmin();
     }
 
     match /attendanceRoster/{rosterId} {

@@ -12,6 +12,10 @@ const $ = (selector) => document.querySelector(selector);
 const sessionId = new URLSearchParams(location.search).get("event");
 const esc = (value) => String(value ?? "").replace(/[&<>]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[char]);
 const stamp = (value) => value?.toDate ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "medium" }).format(value.toDate()) : "—";
+const vietnamDate = (value) => {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : String(value || "");
+};
 const successKey = "ifaa-checkin-success-sound";
 const duplicateKey = "ifaa-checkin-duplicate-sound";
 
@@ -169,7 +173,10 @@ function renderSession() {
   const open = sessionIsOpen();
   $("#eventStatus").textContent = open ? "Đang mở" : session.status === "finalized" ? "Đã chốt" : "Đã kết thúc";
   $("#eventStatus").className = "att-badge " + (open ? "open" : session.status === "open" ? "ended" : session.status);
-  $("#closedMessage").classList.toggle("hidden", open); $("#scanForm").classList.toggle("hidden", !open); $(".camera-card").classList.toggle("hidden", !open); $("#capturePhoto").disabled = !open;
+  $("#closedMessage").classList.toggle("hidden", open);
+  $("#scannerArea").classList.toggle("hidden", !open);
+  $("#roleText").classList.toggle("hidden", !open);
+  $("#capturePhoto").disabled = !open;
   if (!open) releaseCamera();
 }
 async function startSession() {
@@ -184,10 +191,19 @@ async function startSession() {
   const rosterSnapshot = await getDocs(query(collection(db, "attendanceRoster"), where("sessionId", "==", session.id)));
   rosterCache = new Map(rosterSnapshot.docs.map((item) => [item.data().mssv, item.data()]));
   $("#loginCard").classList.add("hidden"); $("#app").classList.remove("hidden"); $("#title").textContent = session.title;
-  $("#meta").textContent = [session.date, session.startTime && session.endTime ? session.startTime + "–" + session.endTime : session.startTime || session.endTime, session.location].filter(Boolean).join(" · ");
+  $("#meta").textContent = [vietnamDate(session.date), session.startTime && session.endTime ? session.startTime + "–" + session.endTime : session.startTime || session.endTime, session.location].filter(Boolean).join(" · ");
   $("#roleText").textContent = isManager ? "Quản trị hệ thống" : assignment.role === "leader" ? "SV Leader" : "SV quét";
-  renderSession(); listenRows(); void flushOutbox(); unsubscribeSession?.();
-  unsubscribeSession = onSnapshot(doc(db, "attendanceSessions", sessionId), (live) => { if (live.exists()) { session = { id: live.id, ...live.data() }; renderSession(); } });
+  renderSession();
+  if (sessionIsOpen()) { listenRows(); void flushOutbox(); }
+  unsubscribeSession?.();
+  unsubscribeSession = onSnapshot(doc(db, "attendanceSessions", sessionId), (live) => {
+    if (!live.exists()) return;
+    const wasOpen = sessionIsOpen();
+    session = { id: live.id, ...live.data() };
+    renderSession();
+    if (!wasOpen && sessionIsOpen()) { listenRows(); void flushOutbox(); }
+    if (!sessionIsOpen()) { unsubscribeRows?.(); unsubscribeRows = null; }
+  });
 }
 async function submitCheckin(raw) {
   if (!sessionIsOpen()) return;
