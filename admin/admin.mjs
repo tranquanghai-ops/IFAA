@@ -1,7 +1,9 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
 import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, getCountFromServer, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit, startAfter, serverTimestamp, Timestamp, runTransaction, writeBatch } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
+import { getStorage } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
 import { firebaseConfig, OWNER_EMAIL } from "../firebase-config.mjs";
+import { loadFacultyDataset, publishFacultyDataset } from "../faculty-dataset.mjs";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
 const DEFAULT_PUBLIC_BASE_URL = "https://ifa.tdtu.edu.vn/dang-ky-su-kien";
@@ -10,6 +12,7 @@ const EXTERNAL_CATEGORIES = new Set(["Sự kiện Trường", "Sự kiện Khoa 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const storage = getStorage(app);
 const provider = new GoogleAuthProvider();
 provider.setCustomParameters({ prompt: "select_account" });
 const $ = (selector) => document.querySelector(selector);
@@ -110,6 +113,7 @@ let attendanceExpiryTimer = 0;
 let attendanceRosterUnsubscribe = null;
 let facultyStudents = [];
 let facultyNameSearchCache = null;
+let facultyStudentDatasetMeta = {};
 const FACULTY_MAJORS = ["Thiết kế đồ họa", "Thiết kế công nghiệp", "Thiết kế nội thất", "Thiết kế thời trang", "Nghệ thuật số"];
 let facultyStudentPage = 1, facultyStudentCursor = null, facultyStudentHasNext = false, facultyStudentTotal = 0, expiredFacultyStudents = [];
 const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -1742,6 +1746,67 @@ function studentRecord(value = {}) {
   const yy = /^1\d{7,}$/.test(mssv) ? Number(mssv.slice(1, 3)) : null;
   return { mssv, name: String(value.name || "").trim().replace(/\s+/g, " "), email: String(value.email || (mssv ? mssv.toLowerCase() + "@student.tdtu.edu.vn" : "")).trim().toLowerCase(), gender: String(value.gender || "").trim(), major: String(value.major || "").trim() || MAJOR_BY_CLASS_CODE[classCode] || "", studentClass, admissionYear: value.admissionYear || (yy !== null ? 2000 + yy : ""), course: value.course || (yy !== null ? yy + 4 : "") };
 }
+function facultyDatasetSummary(rows) {
+  const classesByMajor = {};
+  rows.forEach((item) => {
+    if (item.major && item.studentClass) (classesByMajor[item.major] ||= []).push(item.studentClass);
+  });
+  Object.keys(classesByMajor).forEach((major) => { classesByMajor[major] = [...new Set(classesByMajor[major])].sort(); });
+  return {
+    count: rows.length,
+    majors: [...new Set(rows.map((item) => item.major).filter(Boolean))].sort(),
+    classes: [...new Set(rows.map((item) => item.studentClass).filter(Boolean))].sort(),
+    classesByMajor
+  };
+}
+function showFacultyDatasetStatus(text, state = "") {
+  const target = $("#facultyDatasetStatus");
+  if (!target) return;
+  target.textContent = text;
+  target.dataset.state = state;
+}
+async function facultyDatasetBaseRows() {
+  if (Number(facultyStudentDatasetMeta.datasetVersion || 0)) {
+    try { return (await loadFacultyDataset(storage, facultyStudentDatasetMeta)).map(studentRecord); }
+    catch (error) { console.warn("Không tải được dữ liệu SV nén, tạo lại từ Firestore:", error); }
+  }
+  const snapshot = await getDocs(collection(db, "facultyStudents"));
+  return snapshot.docs.map((item) => studentRecord({ ...item.data(), mssv: item.id }));
+}
+async function publishFacultyRows(records, message = "Đang cập nhật dữ liệu nén…") {
+  showFacultyDatasetStatus(message, "loading");
+  const rows = [...new Map(records.map(studentRecord).filter((item) => validStudentId(item.mssv) && item.name).map((item) => [item.mssv, item])).values()];
+  const result = await publishFacultyDataset(storage, rows);
+  const summary = facultyDatasetSummary(rows);
+  const metadata = { ...summary, datasetVersion: result.version, datasetPath: result.path, datasetEncoding: "gzip", datasetBytes: result.bytes, datasetUpdatedAt: serverTimestamp(), updatedAt: serverTimestamp() };
+  await setDoc(doc(db, "facultyStudentMeta", "current"), metadata, { merge: true });
+  facultyStudentDatasetMeta = { ...facultyStudentDatasetMeta, ...metadata };
+  facultyStudentTotal = rows.length;
+  facultyNameSearchCache = rows;
+  showFacultyDatasetStatus(`Dữ liệu nén: ${rows.length} SV · ${(result.bytes / 1024).toFixed(1)} KB`, "success");
+  return rows;
+}
+async function updateFacultyDataset(transform, message = "Đang cập nhật dữ liệu nén…") {
+  const current = await facultyDatasetBaseRows();
+  return publishFacultyRows(await transform(current), message);
+}
+async function updateFacultyDatasetAfterWrite(transform) {
+  try { return await updateFacultyDataset(transform); }
+  catch (error) {
+    facultyStudentDatasetMeta = { ...facultyStudentDatasetMeta, datasetVersion: 0 };
+    try {
+      await setDoc(doc(db, "facultyStudentMeta", "current"), { datasetVersion: 0, datasetPath: "", datasetSyncError: String(error.message || error).slice(0, 300), updatedAt: serverTimestamp() }, { merge: true });
+    } catch {}
+    showFacultyDatasetStatus("Dữ liệu nén cần tạo lại; trang quét đang dùng chế độ tra từng MSSV.", "error");
+    throw error;
+  }
+}
+async function rebuildFacultyDataset() {
+  showFacultyDatasetStatus("Đang đọc danh sách Firestore để tạo file nén…", "loading");
+  const snapshot = await getDocs(collection(db, "facultyStudents"));
+  const rows = snapshot.docs.map((item) => studentRecord({ ...item.data(), mssv: item.id }));
+  return publishFacultyRows(rows, "Đang tải file nén lên Cloud Storage…");
+}
 function renderFacultyStudents(rows = facultyStudents) {
   const searching = normalizeSearch($("#facultyStudentSearch")?.value);
   $("#facultyStudentCount").textContent = searching ? `${rows.length} sinh viên` : `${rows.length} đang hiển thị`;
@@ -1757,15 +1822,16 @@ async function loadFacultyStudentMeta() {
   const snap = await getDoc(doc(db, "facultyStudentMeta", "current"));
   let data = snap.exists() ? snap.data() : {};
   if (!snap.exists() && highAdminAccess()) {
-    const existing = await getDocs(collection(db, "facultyStudents"));
-    const rows = existing.docs.map((item) => studentRecord({ ...item.data(), mssv: item.id }));
-    const classesByMajor = {}; rows.forEach((item) => { if (item.major && item.studentClass) (classesByMajor[item.major] ||= []).push(item.studentClass); });
-    data = { count: rows.length, majors: rows.map((item) => item.major).filter(Boolean), classes: rows.map((item) => item.studentClass).filter(Boolean), classesByMajor };
+    const count = (await getCountFromServer(collection(db, "facultyStudents"))).data().count;
+    data = { count, majors: [], classes: [], classesByMajor: {} };
     await setDoc(doc(db, "facultyStudentMeta", "current"), { ...data, updatedAt: serverTimestamp() }, { merge: true });
   }
+  facultyStudentDatasetMeta = data;
   facultyStudentTotal = Number(data.count || 0);
   try { facultyStudentTotal = (await getCountFromServer(collection(db, "facultyStudents"))).data().count; } catch {}
   $("#facultyStudentTotalTop").textContent = `Tổng: ${facultyStudentTotal} sinh viên`;
+  if (data.datasetVersion) showFacultyDatasetStatus(`Dữ liệu nén: ${Number(data.count || 0)} SV · ${data.datasetBytes ? (Number(data.datasetBytes) / 1024).toFixed(1) + " KB" : "đã sẵn sàng"}`, "success");
+  else showFacultyDatasetStatus("Chưa tạo dữ liệu nén cho trang điểm danh.", "warn");
   const majors = [...new Set([...FACULTY_MAJORS, ...(data.majors || [])])].sort();
   const byMajor = data.classesByMajor || {};
   const classes = [...new Set(data.classes || [])].sort();
@@ -1794,8 +1860,11 @@ async function loadFacultyStudentPage(reset = false) {
   } else {
     if (search) {
       if (!facultyNameSearchCache) {
-        const all = await getDocs(query(collection(db, "facultyStudents"), limit(5000)));
-        facultyNameSearchCache = all.docs.map((item) => studentRecord({ ...item.data(), mssv: item.id }));
+        try { facultyNameSearchCache = (await loadFacultyDataset(storage, facultyStudentDatasetMeta)).map(studentRecord); }
+        catch {
+          const all = await getDocs(query(collection(db, "facultyStudents"), limit(5000)));
+          facultyNameSearchCache = all.docs.map((item) => studentRecord({ ...item.data(), mssv: item.id }));
+        }
       }
       facultyStudents = facultyNameSearchCache.filter((item) => normalizeSearch(item.name).includes(search) && (!major || item.major === major) && (!studentClass || item.studentClass === studentClass));
       facultyStudentHasNext = false;
@@ -1906,6 +1975,12 @@ async function enrichAttendanceStudentNames() {
   const rows = attendanceManageRows.filter((item) => item.mssv && attendanceNameMissing(item.name));
   if (!rows.length) return;
   const directory = new Map(attendanceRoster.filter((item) => item.mssv && !attendanceNameMissing(item.name)).map((item) => [String(item.mssv).toUpperCase(), item]));
+  try {
+    const dataset = await loadFacultyDataset(storage, facultyStudentDatasetMeta);
+    dataset.forEach((item) => { if (item.mssv && item.name) directory.set(String(item.mssv).toUpperCase(), item); });
+  } catch {
+    // Nếu chưa có file nén, chỉ tra các MSSV còn thiếu ở Firestore bên dưới.
+  }
   const missingIds = [...new Set(rows.map((item) => String(item.mssv).trim().toUpperCase()).filter((mssv) => !directory.has(mssv)))];
   for (let offset = 0; offset < missingIds.length; offset += 25) {
     const results = await Promise.all(missingIds.slice(offset, offset + 25).map(async (mssv) => {
@@ -2087,15 +2162,11 @@ async function saveFacultyStudents(records) {
     unique.slice(offset, offset + 450).forEach((item) => batch.set(doc(db, "facultyStudents", item.mssv), { ...item, nameLower: normalizeSearch(item.name), updatedByUid: user.uid, updatedByEmail: user.email, updatedAt: serverTimestamp() }, { merge: true }));
     await batch.commit();
   }
-  const meta = await getDoc(doc(db, "facultyStudentMeta", "current"));
-  const old = meta.exists() ? meta.data() : {};
-  const classesByMajor = { ...(old.classesByMajor || {}) }; unique.forEach((item) => { if (item.major && item.studentClass) classesByMajor[item.major] = [...new Set([...(classesByMajor[item.major] || []), item.studentClass])]; });
-  await setDoc(doc(db, "facultyStudentMeta", "current"), {
-    count: (await getCountFromServer(collection(db, "facultyStudents"))).data().count,
-    majors: [...new Set([...(old.majors || []), ...unique.map((item) => item.major).filter(Boolean)])],
-    classes: [...new Set([...(old.classes || []), ...unique.map((item) => item.studentClass).filter(Boolean)])].sort(), classesByMajor,
-    updatedAt: serverTimestamp()
-  }, { merge: true });
+  await updateFacultyDatasetAfterWrite((current) => {
+    const map = new Map(current.map((item) => [item.mssv, item]));
+    unique.forEach((item) => map.set(item.mssv, { ...map.get(item.mssv), ...item }));
+    return [...map.values()];
+  });
   await loadFacultyStudentMeta();
   return unique.length;
 }
@@ -2264,31 +2335,61 @@ $("#facultyStudentForm").onsubmit = async (event) => {
 };
 $("#facultyStudentFile").onchange = async (event) => {
   const file = event.target.files?.[0]; if (!file) return;
-  try { const rows = await readFacultyStudentFile(file), count = await saveFacultyStudents(rows); facultyNameSearchCache = null; notice(`Đã cập nhật ${count} sinh viên vào danh sách khoa.`, "success"); }
+  try { const rows = await readFacultyStudentFile(file), count = await saveFacultyStudents(rows); notice(`Đã cập nhật ${count} sinh viên và dữ liệu nén cho trang điểm danh.`, "success"); }
   catch (error) { notice(error.message, "error"); }
   event.target.value = "";
 };
+$("#facultyDatasetRebuild").onclick = async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const rows = await rebuildFacultyDataset();
+    await loadFacultyStudentMeta();
+    notice(`Đã tạo lại dữ liệu nén cho ${rows.length} sinh viên.`, "success");
+  } catch (error) { showFacultyDatasetStatus("Không thể tạo dữ liệu nén.", "error"); notice(error.message, "error"); }
+  finally { button.disabled = false; }
+};
 $("#facultyStudentTemplate").onclick = () => downloadWorkbook("MAU_DANH_SACH_SV_KHOA.xlsx", "Danh sach SV khoa", [{ MSSV: "12300325", "Họ và tên": "Nguyễn Văn A", "Giới tính": "Nam", "Ngành": "Thiết kế nội thất", "Lớp": "230H0101" }]);
-$("#facultyStudentExport").onclick = () => downloadWorkbook("DANH_SACH_SV_KHOA.xlsx", "Danh sach SV khoa", facultyStudents.map((item, index) => ({ STT: index + 1, MSSV: item.mssv, "Họ và tên": item.name, "Giới tính": item.gender, "Ngành": item.major, "Lớp": item.studentClass })));
+$("#facultyStudentExport").onclick = async () => {
+  try {
+    const rows = await facultyDatasetBaseRows();
+    downloadWorkbook("DANH_SACH_SV_KHOA.xlsx", "Danh sach SV khoa", rows.map((item, index) => ({ STT: index + 1, MSSV: item.mssv, "Họ và tên": item.name, "Giới tính": item.gender, "Ngành": item.major, "Lớp": item.studentClass })));
+  } catch (error) { notice(error.message, "error"); }
+};
 $("#facultyStudentRows").onchange = async (event) => {
   const field = event.target.closest("[data-student-field]"); if (!field) return;
-  try { await setDoc(doc(db, "facultyStudents", field.dataset.studentId), { [field.dataset.studentField]: field.value.trim(), ...(field.dataset.studentField === "name" ? { nameLower: normalizeSearch(field.value) } : {}), updatedByUid: user.uid, updatedAt: serverTimestamp() }, { merge: true }); notice("Đã tự lưu thông tin sinh viên.", "success"); }
+  try {
+    const mssv = field.dataset.studentId, key = field.dataset.studentField, value = field.value.trim();
+    await setDoc(doc(db, "facultyStudents", mssv), { [key]: value, ...(key === "name" ? { nameLower: normalizeSearch(value) } : {}), updatedByUid: user.uid, updatedAt: serverTimestamp() }, { merge: true });
+    await updateFacultyDatasetAfterWrite((rows) => rows.map((item) => item.mssv === mssv ? { ...item, [key]: value } : item));
+    notice("Đã tự lưu thông tin sinh viên và cập nhật dữ liệu nén.", "success");
+  }
   catch (error) { notice("Không thể tự lưu: " + error.message, "error"); }
 };
 $("#facultyStudentRows").onclick = async (event) => {
   const button = event.target.closest("[data-remove-faculty-student]"); if (!button) return;
   const approved = await confirmAction({ title: "Xóa sinh viên?", message: `Xóa MSSV ${button.dataset.removeFacultyStudent} khỏi danh sách SV khoa?` });
-  if (approved) await deleteDoc(doc(db, "facultyStudents", button.dataset.removeFacultyStudent));
+  if (approved) {
+    const mssv = button.dataset.removeFacultyStudent;
+    await deleteDoc(doc(db, "facultyStudents", mssv));
+    await updateFacultyDatasetAfterWrite((rows) => rows.filter((item) => item.mssv !== mssv));
+    notice("Đã xóa sinh viên và cập nhật dữ liệu nén.", "success");
+  }
 };
 $("#facultyStudentExpiredNotice").onclick = () => $("#facultyStudentExpiredPanel").classList.toggle("hidden");
 $("#facultyStudentExpiredRows").onclick = async (event) => {
   const button = event.target.closest("[data-remove-expired-student]"); if (!button) return;
   if (!(await confirmAction({ title: "Xóa sinh viên hết hạn?", message: `Xóa MSSV ${button.dataset.removeExpiredStudent} khỏi danh sách khoa?` }))) return;
-  await deleteDoc(doc(db, "facultyStudents", button.dataset.removeExpiredStudent)); await loadExpiredFacultyStudents();
+  const mssv = button.dataset.removeExpiredStudent;
+  await deleteDoc(doc(db, "facultyStudents", mssv));
+  await updateFacultyDatasetAfterWrite((rows) => rows.filter((item) => item.mssv !== mssv));
+  await loadExpiredFacultyStudents();
 };
 $("#facultyStudentExpiredDeleteAll").onclick = async () => {
   if (!expiredFacultyStudents.length || !(await confirmAction({ title: "Xóa toàn bộ sinh viên hết hạn?", message: `Xóa ${expiredFacultyStudents.length} sinh viên hết hạn khỏi danh sách khoa?` }))) return;
   for (let offset = 0; offset < expiredFacultyStudents.length; offset += 450) { const batch = writeBatch(db); expiredFacultyStudents.slice(offset, offset + 450).forEach((item) => batch.delete(doc(db, "facultyStudents", item.mssv))); await batch.commit(); }
+  const expiredIds = new Set(expiredFacultyStudents.map((item) => item.mssv));
+  await updateFacultyDatasetAfterWrite((rows) => rows.filter((item) => !expiredIds.has(item.mssv)));
   await loadExpiredFacultyStudents(); await loadFacultyStudentMeta(); notice("Đã xóa danh sách sinh viên hết hạn.", "success");
 };
 

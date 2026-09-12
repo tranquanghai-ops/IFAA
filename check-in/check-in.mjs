@@ -1,11 +1,14 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
 import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, setDoc, updateDoc, onSnapshot, query, where, serverTimestamp, Timestamp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
+import { getStorage } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
 import { firebaseConfig, STUDENT_DOMAIN, OWNER_EMAIL } from "../firebase-config.mjs";
+import { loadFacultyDataset } from "../faculty-dataset.mjs";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const storage = getStorage(app);
 const provider = new GoogleAuthProvider();
 provider.setCustomParameters({ prompt: "select_account" });
 const $ = (selector) => document.querySelector(selector);
@@ -164,6 +167,16 @@ function captureFrame({ scale = 1, filter = "none", maxWidth = Infinity, cropSel
   canvas.width = Math.max(1, Math.round(sw * ratio)); canvas.height = Math.max(1, Math.round(sh * ratio));
   const context = canvas.getContext("2d"); context.filter = filter; context.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height); return canvas;
 }
+async function prepareFacultyDataset() {
+  try {
+    const metadataSnapshot = await getDoc(doc(db, "facultyStudentMeta", "current"));
+    if (!metadataSnapshot.exists() || !metadataSnapshot.data().datasetVersion) return;
+    const rows = await loadFacultyDataset(storage, metadataSnapshot.data());
+    rows.forEach((item) => rosterCache.set(String(item.mssv || "").toUpperCase(), item));
+  } catch (error) {
+    console.warn("Không tải được dữ liệu SV khoa đã nén; sẽ tra từng MSSV từ Firestore.", error);
+  }
+}
 async function resolveStudent(rawMssv) {
   const mssv = String(rawMssv || "").trim().toUpperCase();
   if (!mssv) return { mssv: "", name: "Chưa có dữ liệu", email: "", uid: "" };
@@ -301,6 +314,7 @@ async function startSession() {
     assignment = assignmentSnapshot.data(); if (!assignment?.active) throw Error("Bạn chưa được cấp quyền quét sự kiện này.");
   }
   rosterCache = new Map();
+  await prepareFacultyDataset();
   $("#loginCard").classList.add("hidden"); $("#app").classList.remove("hidden"); $("#title").textContent = session.title;
   $("#meta").textContent = [vietnamDate(session.date), session.startTime && session.endTime ? session.startTime + "–" + session.endTime : session.startTime || session.endTime, session.location].filter(Boolean).join(" · ");
   $("#roleText").textContent = isManager ? "Quản trị hệ thống" : assignment.role === "leader" ? "SV Leader" : "SV quét";

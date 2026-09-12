@@ -225,7 +225,7 @@ service cloud.firestore {
       allow delete: if highAdmin();
     }
     match /facultyStudentMeta/{metaId} {
-      allow read: if admin();
+      allow read: if participant();
       allow create, update, delete: if highAdmin();
     }
 

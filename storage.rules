@@ -1,0 +1,36 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+    function email() {
+      return request.auth.token.email;
+    }
+    function owner() {
+      return signedIn() && email() == 'tranquanghai@tdtu.edu.vn';
+    }
+    function participant() {
+      return signedIn() && (email().matches('^[^@]+@(student\\.)?tdtu\\.edu\\.vn$')
+        || firestore.exists(/databases/(default)/documents/admins/$(request.auth.token.email)));
+    }
+    function highAdmin() {
+      return owner() || (signedIn()
+        && firestore.exists(/databases/(default)/documents/admins/$(email()))
+        && firestore.get(/databases/(default)/documents/admins/$(email())).data.role == 'admin');
+    }
+
+    match /datasets/{datasetFile} {
+      allow read: if participant();
+      allow create, update: if highAdmin()
+        && datasetFile.matches('^faculty-students-[0-9]+\\.json\\.gz$')
+        && request.resource.size < 12 * 1024 * 1024
+        && request.resource.contentType == 'application/gzip';
+      allow delete: if owner();
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

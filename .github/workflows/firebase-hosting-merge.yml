@@ -28,6 +28,9 @@ jobs:
       - name: Deploy Firestore Rules
         run: npx --yes firebase-tools@latest deploy --only firestore:rules --project ifa-activities --non-interactive
 
+      - name: Deploy Storage Rules
+        run: npx --yes firebase-tools@latest deploy --only storage --project ifa-activities --non-interactive
+
       - name: Deploy to Firebase Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
