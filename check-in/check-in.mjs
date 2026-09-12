@@ -75,7 +75,7 @@ function barcodeFormats() { return ["CODE_128", "CODE_39", "CODE_93", "CODABAR",
 function makeReader() {
   const formats = barcodeFormats();
   const hints = window.ZXingBrowser?.DecodeHintType ? new Map([[ZXingBrowser.DecodeHintType.POSSIBLE_FORMATS, formats], [ZXingBrowser.DecodeHintType.TRY_HARDER, true]]) : undefined;
-  return new ZXingBrowser.BrowserMultiFormatReader(hints);
+  const reader = new ZXingBrowser.BrowserMultiFormatReader(hints); reader.possibleFormats = formats; return reader;
 }
 function releaseCamera() {
   cameraRequest += 1; scanning = false;
@@ -96,12 +96,19 @@ async function listCameras() {
   } catch {}
 }
 async function openRearCamera(id = "") {
+  const media = navigator.mediaDevices;
+  let firstError;
   try {
-    return await navigator.mediaDevices.getUserMedia({ audio: false, video: id ? { deviceId: { exact: id } } : { facingMode: { exact: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
+    return await media.getUserMedia({ audio: false, video: id ? { deviceId: { exact: id }, facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } } : { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
   } catch (error) {
-    if (id) throw error;
-    return navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
+    firstError = error;
+    if (!id && !["OverconstrainedError", "NotFoundError", "DevicesNotFoundError"].includes(error.name)) throw error;
   }
+  const devices = await media.enumerateDevices();
+  const rear = devices.filter((item) => item.kind === "videoinput" && /back|rear|environment|sau|arrière|rück/i.test(item.label || "") && !/front|user|trước|selfie/i.test(item.label || ""));
+  const candidate = rear.find((item) => item.deviceId === id) || rear[0];
+  if (!candidate) throw firstError;
+  return media.getUserMedia({ audio: false, video: { deviceId: { exact: candidate.deviceId } } });
 }
 function captureFrame({ scale = 1, filter = "none", maxWidth = Infinity } = {}) {
   const video = $("#video");
@@ -137,18 +144,19 @@ function startEnhancedDetector(request) {
 async function startCamera() {
   if (!sessionIsOpen()) return;
   if (!navigator.mediaDevices?.getUserMedia) return setScanStatus("error", "Không dùng được camera", "Hãy mở trang bằng HTTPS trong Chrome.");
-  if (!window.ZXingBrowser) return setScanStatus("error", "Không tải được bộ đọc mã vạch", "Kiểm tra mạng rồi tải lại trang.");
   releaseCamera(); const request = ++cameraRequest;
   try {
     $("#startCamera").disabled = true; $("#cameraSelect").disabled = true;
     setScanStatus("", "Đang mở camera sau…", "Cho phép quyền camera nếu trình duyệt hỏi.");
     cameraStream = await openRearCamera($("#cameraSelect").value); if (request !== cameraRequest) return;
     const video = $("#video"); video.srcObject = cameraStream; await video.play(); scanning = true;
-    const reader = makeReader();
-    cameraControls = await reader.decodeFromStream(cameraStream, video, (result) => { if (result && request === cameraRequest) handleDecoded(result.getText()); });
+    if (window.ZXingBrowser) {
+      const reader = makeReader();
+      cameraControls = await reader.decodeFromStream(cameraStream, video, (result) => { if (result && request === cameraRequest) handleDecoded(result.getText()); });
+    }
     $("#stopCamera").disabled = false; $("#cameraSelect").disabled = false;
     setScanStatus("success", "Camera sau đang quét", "Đưa mã vạch trên thẻ vào khung.");
-    await listCameras(); void startNativeDetector(request); startEnhancedDetector(request);
+    await listCameras(); void startNativeDetector(request); if (window.ZXingBrowser) startEnhancedDetector(request);
   } catch (error) {
     releaseCamera();
     const details = { NotAllowedError: "Hãy cấp quyền camera cho trang.", NotReadableError: "Camera đang được ứng dụng khác sử dụng.", NotFoundError: "Không tìm thấy camera sau.", OverconstrainedError: "Camera sau không hỗ trợ cấu hình yêu cầu." };
