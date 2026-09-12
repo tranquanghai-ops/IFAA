@@ -1651,7 +1651,8 @@ function renderFacultyStudents(rows = facultyStudents) {
   const searching = normalizeSearch($("#facultyStudentSearch")?.value);
   $("#facultyStudentCount").textContent = searching ? `${rows.length} sinh viên` : `${rows.length} đang hiển thị`;
   $("#facultyStudentTotalTop").textContent = `Tổng: ${facultyStudentTotal || rows.length} sinh viên`;
-  $("#facultyStudentRows").innerHTML = rows.map((item) => `<tr><td><b>${safe(item.mssv)}</b></td><td><input class="student-inline" data-student-field="name" data-student-id="${safe(item.mssv)}" value="${safe(item.name)}"></td><td><select class="student-inline" data-student-field="gender" data-student-id="${safe(item.mssv)}"><option value="">—</option><option ${item.gender === "Nam" ? "selected" : ""}>Nam</option><option ${item.gender === "Nữ" ? "selected" : ""}>Nữ</option></select></td><td><select class="student-inline" data-student-field="major" data-student-id="${safe(item.mssv)}"><option value="">— Chọn ngành —</option>${FACULTY_MAJORS.map((v) => `<option ${item.major === v ? "selected" : ""}>${safe(v)}</option>`).join("")}</select></td><td><input class="student-inline" data-student-field="studentClass" data-student-id="${safe(item.mssv)}" value="${safe(item.studentClass)}"></td><td><button class="btn btn-small btn-danger" data-remove-faculty-student="${safe(item.mssv)}">Xóa</button></td></tr>`).join("") || '<tr><td colspan="6" class="empty">Không có sinh viên phù hợp.</td></tr>';
+  const edit = (item, field, value, type = "text") => value ? safe(value) : type === "select" ? `<select class="student-inline" data-student-field="${field}" data-student-id="${safe(item.mssv)}"><option value="">— Chọn —</option>${field === "major" ? FACULTY_MAJORS.map((v) => `<option>${safe(v)}</option>`).join("") : '<option>Nam</option><option>Nữ</option>'}</select>` : `<input class="student-inline" data-student-field="${field}" data-student-id="${safe(item.mssv)}" placeholder="Bổ sung..." value="">`;
+  $("#facultyStudentRows").innerHTML = rows.map((item) => `<tr><td><b>${safe(item.mssv)}</b></td><td>${edit(item, "name", item.name)}</td><td>${edit(item, "gender", item.gender, "select")}</td><td>${edit(item, "major", item.major, "select")}</td><td>${edit(item, "studentClass", item.studentClass)}</td><td><button class="btn btn-small btn-danger" data-remove-faculty-student="${safe(item.mssv)}">Xóa</button></td></tr>`).join("") || '<tr><td colspan="6" class="empty">Không có sinh viên phù hợp.</td></tr>';
   $("#attendanceStudentOptions").innerHTML = rows.map((item) => `<option value="${safe(item.mssv)}">${safe(item.name)}</option><option value="${safe(item.name)}">${safe(item.mssv)}</option>`).join("");
   $("#facultyStudentPageInfo").textContent = `Trang ${facultyStudentPage}`;
   $("#facultyStudentPrev").disabled = facultyStudentPage <= 1;
@@ -1668,6 +1669,8 @@ async function loadFacultyStudentMeta() {
     await setDoc(doc(db, "facultyStudentMeta", "current"), { ...data, updatedAt: serverTimestamp() }, { merge: true });
   }
   facultyStudentTotal = Number(data.count || 0);
+  try { facultyStudentTotal = (await getCountFromServer(collection(db, "facultyStudents"))).data().count; } catch {}
+  $("#facultyStudentTotalTop").textContent = `Tổng: ${facultyStudentTotal} sinh viên`;
   const majors = [...new Set([...FACULTY_MAJORS, ...(data.majors || [])])].sort();
   const byMajor = data.classesByMajor || {};
   const classes = [...new Set(data.classes || [])].sort();
@@ -1681,6 +1684,12 @@ async function loadFacultyStudentPage(reset = false) {
   if (search && validStudentId(search.toUpperCase())) {
     const snap = await getDoc(doc(db, "facultyStudents", search.toUpperCase())); facultyStudents = snap.exists() ? [studentRecord({ ...snap.data(), mssv: snap.id })] : []; facultyStudentHasNext = false;
   } else {
+    if (search) {
+      const all = await getDocs(query(collection(db, "facultyStudents"), limit(5000)));
+      facultyStudents = all.docs.map((item) => studentRecord({ ...item.data(), mssv: item.id })).filter((item) => normalizeSearch(item.name).includes(search) && (!major || item.major === major) && (!studentClass || item.studentClass === studentClass));
+      facultyStudentHasNext = false;
+      $("#facultyStudentPrompt").classList.add("hidden"); $("#facultyStudentTableWrap").classList.remove("hidden"); renderFacultyStudents(facultyStudents.slice(0, size)); return;
+    }
     const constraints = []; if (studentClass) constraints.push(where("studentClass", "==", studentClass)); else if (major) constraints.push(where("major", "==", major)); constraints.push(limit(size)); if (facultyStudentCursor) constraints.push(startAfter(facultyStudentCursor));
     const snap = await getDocs(query(collection(db, "facultyStudents"), ...constraints)); facultyStudents = snap.docs.map((item) => studentRecord({ ...item.data(), mssv: item.id })).filter((item) => !major || item.major === major); facultyStudentCursor = snap.docs.at(-1) || null; facultyStudentHasNext = snap.docs.length === size;
     if (search) facultyStudents = facultyStudents.filter((item) => normalizeSearch(item.name).includes(search));
