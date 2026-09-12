@@ -2,9 +2,12 @@
   "firestore": {
     "rules": "firestore.rules"
   },
-  "storage": {
-    "rules": "storage.rules"
-  },
+  "storage": [
+    {
+      "target": "facultyDataset",
+      "rules": "storage.rules"
+    }
+  ],
   "hosting": {
     "public": ".",
     "ignore": [

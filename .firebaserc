@@ -1,5 +1,14 @@
 {
   "projects": {
     "default": "ifa-activities"
+  },
+  "targets": {
+    "ifa-activities": {
+      "storage": {
+        "facultyDataset": [
+          "ifa-activities.firebasestorage.app"
+        ]
+      }
+    }
   }
 }
