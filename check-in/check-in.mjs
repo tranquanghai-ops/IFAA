@@ -170,6 +170,16 @@ async function resolveStudent(rawMssv) {
   const cached = rosterCache.get(mssv);
   const cachedName = String(cached?.name || "").trim().toLocaleLowerCase("vi");
   if (cached && cachedName && !["không có dữ liệu", "chưa có dữ liệu"].includes(cachedName)) return cached;
+  if (!session.liveRegistrationRoster) try {
+      const rosterSnapshot = await getDoc(doc(db, "attendanceRoster", `${session.id}_${mssv}`));
+      if (rosterSnapshot.exists()) {
+        const data = { mssv, ...rosterSnapshot.data() };
+        rosterCache.set(mssv, data);
+        return data;
+      }
+    } catch {
+      // Phiên cũ có thể không có bản ghi đối chiếu cho MSSV này.
+    }
   try {
     const reference = doc(db, "facultyStudents", mssv);
     let snapshot;
@@ -290,13 +300,7 @@ async function startSession() {
     const assignmentSnapshot = await getDoc(doc(db, "scannerAssignments", sessionId + "_" + user.email.toLowerCase()));
     assignment = assignmentSnapshot.data(); if (!assignment?.active) throw Error("Bạn chưa được cấp quyền quét sự kiện này.");
   }
-  try {
-    const rosterSnapshot = await getDocs(query(collection(db, "attendanceRoster"), where("sessionId", "==", session.id)));
-    rosterCache = new Map(rosterSnapshot.docs.map((item) => [String(item.data().mssv || "").toUpperCase(), item.data()]));
-  } catch {
-    // A scanner can still check in students outside the registration/faculty rosters.
-    rosterCache = new Map();
-  }
+  rosterCache = new Map();
   $("#loginCard").classList.add("hidden"); $("#app").classList.remove("hidden"); $("#title").textContent = session.title;
   $("#meta").textContent = [vietnamDate(session.date), session.startTime && session.endTime ? session.startTime + "–" + session.endTime : session.startTime || session.endTime, session.location].filter(Boolean).join(" · ");
   $("#roleText").textContent = isManager ? "Quản trị hệ thống" : assignment.role === "leader" ? "SV Leader" : "SV quét";

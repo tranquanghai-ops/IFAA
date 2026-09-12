@@ -134,7 +134,7 @@ service cloud.firestore {
 
     match /registrations/{regId} {
       allow list: if admin() || (participant() && resource.data.uid == request.auth.uid);
-      allow get: if admin() || (participant() && regId.matches('^' + request.auth.uid + '_.*$'));
+      allow get: if admin() || (participant() && (regId.matches('^' + request.auth.uid + '_.*$') || resource.data.uid == request.auth.uid));
       allow create: if participant()
         && exists(profilePath(request.auth.uid))
         && regId == request.auth.uid + '_' + request.resource.data.eventId

@@ -361,6 +361,7 @@
 @keyframes hotBlink{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(239,90,35,.08)}50%{opacity:.48;box-shadow:0 0 0 5px rgba(239,90,35,.14)}}
 .admin-event-card:has(.tag.hot) .admin-card-position{margin-right:0}
 .quick-edit-row{display:flex;justify-content:flex-start;margin:0 0 8px}.btn-quick-edit{padding:5px 10px;border-color:#b9cdfc;background:#eaf2ff;color:#1748c2;font-size:12px;box-shadow:none}.linked-event-header .quick-edit-row{margin-bottom:12px}
+.event-badge-row,.linked-event-tags{display:flex;align-items:center;justify-content:flex-start;gap:7px;flex-wrap:wrap}#eventGrid .event .event-top>div{width:100%}#eventGrid .event h3{text-align:center;min-height:2.5em;display:flex;align-items:center;justify-content:center}.attendance-card-stats{display:flex;gap:10px;flex-wrap:wrap;margin-top:9px}.attendance-card-stats span{padding:5px 9px;border-radius:8px;background:#f1f5f9;color:#475467;font-size:13px}.attendance-card-stats b{color:#17213a}.attendance-view-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.attendance-view-cards .att-row{display:flex;flex-direction:column;align-items:stretch;gap:14px}.attendance-view-cards .attendance-card-actions{max-width:none}.attendance-view-list{grid-template-columns:1fr}@media(max-width:760px){#eventGrid .event h3{min-height:0}.attendance-view-cards{grid-template-columns:1fr}}
 @media(prefers-reduced-motion:reduce){.tag.hot{animation:none}}
 @media(max-width:760px){
   .registration-page-size-field{max-width:none}

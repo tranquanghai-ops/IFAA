@@ -326,7 +326,7 @@ function eventCard(event) {
     actionButton = `<button class="btn ${state === "full" ? "btn-full" : ["closed", "ended"].includes(state) ? "btn-expired" : "btn-register"}" data-register="${event.id}" ${disabled || registered ? "disabled" : ""}>${registered ? "Đã đăng ký" : state === "full" ? "Đã đủ" : ["closed", "ended"].includes(state) ? "Hết thời gian đăng ký" : group.blocked ? "Đã đạt giới hạn đăng ký" : state === "upcoming" ? "Chưa đến giờ" : "Đăng ký"}</button>`;
   }
   const canEdit = adminRole === "owner" || adminRole === "admin" || (adminRole === "subadmin" && event.createdByUid === user?.uid);
-  return `<article class="card event event-${state} ${external ? "event-external" : ""} ${registered ? "event-registered" : ""}">${canEdit ? `<div class="quick-edit-row"><button class="btn btn-small btn-quick-edit" data-quick-edit="${event.id}">✎ Edit</button></div>` : ""}<div class="event-top"><div><span class="tag event-category">${safe(category)}</span><span class="tag ${tagClass}">${label}</span>${hotTag}${newTag}${external ? '<span class="tag external">ĐĂNG KÝ BÊN NGOÀI</span>' : ""}${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}<h3>${safe(event.title)}</h3></div></div><div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(event, state))}</span>${groupLine}</div>${capacityHtml}<div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${attendanceByEvent.has(event.id) ? `<button class="btn" data-history="${event.id}">Xem lịch sử điểm danh</button>` : ""}${STUDENT_CALENDAR_ENABLED && registered ? `<button class="btn btn-calendar" data-calendar="${event.id}">＋ Google Lịch</button>` : ""}${actionButton}</div></article>`;
+  return `<article class="card event event-${state} ${external ? "event-external" : ""} ${registered ? "event-registered" : ""}"><div class="event-top"><div><div class="event-badge-row">${canEdit ? `<button class="btn btn-small btn-quick-edit" data-full-edit="${event.id}">✎ Chỉnh sửa</button>` : ""}<span class="tag event-category">${safe(category)}</span><span class="tag ${tagClass}">${label}</span>${hotTag}${newTag}${external ? '<span class="tag external">ĐĂNG KÝ BÊN NGOÀI</span>' : ""}${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}</div><h3>${safe(event.title)}</h3></div></div><div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(event, state))}</span>${groupLine}</div>${capacityHtml}<div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${attendanceByEvent.has(event.id) ? `<button class="btn" data-history="${event.id}">Xem lịch sử điểm danh</button>` : ""}${STUDENT_CALENDAR_ENABLED && registered ? `<button class="btn btn-calendar" data-calendar="${event.id}">＋ Google Lịch</button>` : ""}${actionButton}</div></article>`;
 }
 function linkedEventPage(event) {
   const state = eventState(event);
@@ -356,7 +356,7 @@ function linkedEventPage(event) {
   }
   const canEdit = adminRole === "owner" || adminRole === "admin" || (adminRole === "subadmin" && event.createdByUid === user?.uid);
   return `<article class="linked-event-form">
-    <header class="linked-event-header">${canEdit ? `<div class="quick-edit-row"><button class="btn btn-small btn-quick-edit" data-quick-edit="${event.id}">✎ Edit</button></div>` : ""}<div class="linked-event-tags"><span class="tag ${safe(state)}">${safe(statusLabel)}</span>${event.isHot ? '<span class="tag hot">🔥 HOT</span>' : ""}${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}</div><h2>${safe(event.title)}</h2></header>
+    <header class="linked-event-header"><div class="linked-event-tags">${canEdit ? `<button class="btn btn-small btn-quick-edit" data-full-edit="${event.id}">✎ Chỉnh sửa</button>` : ""}<span class="tag ${safe(state)}">${safe(statusLabel)}</span>${event.isHot ? '<span class="tag hot">🔥 HOT</span>' : ""}${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}</div><h2>${safe(event.title)}</h2></header>
     <section class="linked-event-info"><p><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</p><p><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</p><p class="countdown">${safe(timingStatus(event, state))}</p>${group.text && !external ? `<p><b>${safe(group.text)}</b></p>` : ""}</section>
     <section class="linked-event-description rich-content">${description}</section>
     ${availability}
@@ -669,7 +669,9 @@ async function cancel(eventId) {
   const selectedEvent = events.find((event) => event.id === eventId);
   if (!selectedEvent?.allowCancellation) return show("Sự kiện này không cho phép tự hủy đăng ký.", "error");
   const eventRef = doc(db, "events", eventId);
-  const registrationRef = doc(db, "registrations", `${user.uid}_${eventId}`);
+  const currentRegistration = myRegs.get(eventId);
+  if (!currentRegistration?.id) return show("Không tìm thấy đăng ký cần hủy.", "error");
+  const registrationRef = doc(db, "registrations", currentRegistration.id);
   try {
     await runTransaction(db, async (transaction) => {
       const eventSnapshot = await transaction.get(eventRef);
@@ -789,7 +791,8 @@ function openQuickEdit(eventId) {
   if (!allowed) return show("Bạn không có quyền sửa sự kiện này.", "error");
   $("#quickEditId").value = selected.id;
   $("#quickEditTitle").value = selected.title || "";
-  $("#quickEditDate").value = formatDate(selected.date);
+  const dateParts = String(selected.date || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  $("#quickEditDate").value = dateParts ? `${dateParts[3]}/${dateParts[2]}/${dateParts[1]}` : "";
   $("#quickEditLocation").value = selected.location || "";
   $("#quickEditStartTime").value = selected.startTime || "";
   $("#quickEditEndTime").value = selected.endTime || "";
@@ -826,6 +829,7 @@ document.addEventListener("click", async (event) => {
   const button = event.target.closest("button");
   if (!button) return;
   if (button.dataset.close !== undefined) $("#detailDialog").close();
+  if (button.dataset.fullEdit) window.location.href = `./admin/?edit=${encodeURIComponent(button.dataset.fullEdit)}`;
   if (button.dataset.closeQuickEdit !== undefined) $("#quickEditDialog").close();
   if (button.dataset.quickEdit) openQuickEdit(button.dataset.quickEdit);
   if (button.dataset.view) openDetail(button.dataset.view);
