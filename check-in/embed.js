@@ -7,11 +7,15 @@
   if (!frame && container) {
     frame = document.createElement("iframe");
     frame.title = "Điểm danh sự kiện IFA+A";
-    frame.allow = "camera; microphone; clipboard-write";
+    frame.allow = "camera https://ifa-activities.web.app; clipboard-write https://ifa-activities.web.app";
+    frame.setAttribute("allowusermedia", "true");
     frame.style.cssText = "display:block;width:100%;min-height:100vh;border:0";
     container.appendChild(frame);
   }
   if (!frame) return;
+
+  frame.setAttribute("allow", "camera https://ifa-activities.web.app; clipboard-write https://ifa-activities.web.app");
+  frame.setAttribute("allowusermedia", "true");
 
   const target = new URL(FIREBASE_CHECKIN_URL);
   if (sessionId) target.searchParams.set("e", sessionId);
