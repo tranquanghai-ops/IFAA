@@ -32,6 +32,9 @@ function resolveSessionId() {
   return "";
 }
 const sessionId = resolveSessionId();
+const directCheckinUrl = new URL(window.location.href);
+directCheckinUrl.search = sessionId ? `?e=${encodeURIComponent(sessionId)}` : "";
+directCheckinUrl.hash = "";
 if (window.parent !== window) {
   window.addEventListener("message", (event) => {
     if (event.origin !== "https://ifa.tdtu.edu.vn" || event.data?.type !== "ifaa-checkin-session") return;
@@ -113,6 +116,21 @@ function setScanStatus(type, title, detail = "") {
   const box = $("#scanStatus");
   box.className = "scan-status" + (type ? " " + type : "");
   box.innerHTML = "<b>" + esc(title) + "</b><span>" + esc(detail) + "</span>";
+}
+function cameraAllowedByPolicy() {
+  try {
+    const policy = document.permissionsPolicy || document.featurePolicy;
+    return !policy?.allowsFeature || policy.allowsFeature("camera");
+  } catch {
+    return true;
+  }
+}
+function showDirectCameraAction(show = true) {
+  const actions = $("#cameraBlockedActions");
+  const link = $("#openDirectCamera");
+  if (!actions || !link) return;
+  link.href = directCheckinUrl.toString();
+  actions.classList.toggle("hidden", !show);
 }
 function playTone(frequency, duration, delay = 0) {
   try {
@@ -302,6 +320,12 @@ function startEnhancedDetector(request) {
 async function startCamera() {
   if (!sessionIsOpen()) return;
   if (!navigator.mediaDevices?.getUserMedia) return setScanStatus("error", "Không dùng được camera", "Hãy mở trang bằng HTTPS trong Chrome.");
+  showDirectCameraAction(false);
+  if (window.parent !== window && !cameraAllowedByPolicy()) {
+    setScanStatus("error", "Camera bị trang chứa iframe chặn", "Hãy cấp quyền camera cho iframe hoặc mở trang quét trực tiếp.");
+    showDirectCameraAction(true);
+    return;
+  }
   releaseCamera(); const request = ++cameraRequest;
   try {
     $("#startCamera").disabled = true; $("#cameraSelect").disabled = true;
@@ -317,8 +341,10 @@ async function startCamera() {
     await listCameras(); void startNativeDetector(request); if (window.ZXingBrowser) startEnhancedDetector(request);
   } catch (error) {
     releaseCamera();
-    const details = { NotAllowedError: "Hãy cấp quyền camera cho trang.", NotReadableError: "Camera đang được ứng dụng khác sử dụng.", NotFoundError: "Không tìm thấy camera sau.", OverconstrainedError: "Camera sau không hỗ trợ cấu hình yêu cầu." };
+    const iframeDenied = error.name === "NotAllowedError" && window.parent !== window;
+    const details = { NotAllowedError: iframeDenied ? "Trình duyệt hoặc trang chứa iframe đang chặn quyền camera. Hãy mở trang quét trực tiếp." : "Hãy cấp quyền camera cho trang trong cài đặt trình duyệt.", NotReadableError: "Camera đang được ứng dụng khác sử dụng.", NotFoundError: "Không tìm thấy camera sau.", OverconstrainedError: "Camera sau không hỗ trợ cấu hình yêu cầu." };
     setScanStatus("error", "Không mở được camera", details[error.name] || error.message);
+    showDirectCameraAction(iframeDenied);
   }
 }
 function handleDecoded(raw) {
