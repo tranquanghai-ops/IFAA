@@ -242,6 +242,7 @@ function attendanceShareUrl(sessionId) {
   // Dùng cùng tham số `e` với trang đăng ký. Tên `event` có thể bị
   // WordPress/plugin lịch của trang khoa giữ lại trước khi iframe được tải.
   url.search = `?e=${encodeURIComponent(normalizedSessionId)}`;
+  url.searchParams.set("event", normalizedSessionId);
   const link = url.toString();
   if (new URL(link).searchParams.get("e") !== normalizedSessionId) {
     throw new Error("Không thể tạo liên kết điểm danh có mã sự kiện.");
@@ -250,8 +251,12 @@ function attendanceShareUrl(sessionId) {
 }
 
 async function copyAttendanceLink(sessionId) {
-  const link = attendanceShareUrl(sessionId);
-  await copyText(link, `Đã sao chép link điểm danh: ${link}`);
+  try {
+    const link = attendanceShareUrl(sessionId);
+    await copyText(link, `Đã sao chép link điểm danh: ${link}`);
+  } catch (error) {
+    notice(error.message || "Không thể sao chép link điểm danh.", "error");
+  }
 }
 
 function groupShareUrl(group) {
@@ -638,6 +643,7 @@ function updateAdminCountdowns() {
     else node.textContent = adminTimingStatus(event);
   });
   if (stateChanged) render();
+  updateAttendanceCountdowns();
 }
 
 setInterval(updateAdminCountdowns, 1000);
@@ -1820,7 +1826,15 @@ $("#exportBtn").onclick = async () => {
 
 
 function attendanceStatusLabel(status) {
-  return status === "open" ? "Đang mở" : status === "ended" ? "Đã kết thúc" : "Đã chốt danh sách";
+  return status === "scheduled" ? "Sắp mở" : status === "open" ? "Đang mở" : status === "ended" ? "Đã kết thúc" : "Đã chốt danh sách";
+}
+function attendanceStartMillis(item) {
+  if (item?.startAt?.toDate) return item.startAt.toDate().getTime();
+  if (!item?.date) return -Infinity;
+  return new Date(`${item.date}T${item.startTime || "00:00"}:00`).getTime();
+}
+function attendanceStartTimestamp(date, startTime) {
+  return Timestamp.fromMillis(attendanceStartMillis({ date, startTime }));
 }
 function attendanceEndTimestamp(endDate, endTime) {
   return Timestamp.fromMillis(attendanceDeadlineMillis({ endDate, endTime }));
@@ -1832,6 +1846,18 @@ function attendanceDeadlineMillis(item) {
 }
 function attendanceExpired(item) {
   return item?.status === "open" && attendanceDeadlineMillis(item) <= Date.now();
+}
+function attendanceRuntimeState(item) {
+  if (item?.status === "finalized") return "finalized";
+  if (item?.status === "ended" || attendanceDeadlineMillis(item) <= Date.now()) return "ended";
+  if (attendanceStartMillis(item) > Date.now()) return "scheduled";
+  return "open";
+}
+function attendanceTimingStatus(item) {
+  const state = attendanceRuntimeState(item);
+  if (state === "scheduled") return `Mở điểm danh lúc ${new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" }).format(new Date(attendanceStartMillis(item)))} · Còn ${countdown(attendanceStartMillis(item))}`;
+  if (state === "open") return `Đang mở điểm danh${Number.isFinite(attendanceDeadlineMillis(item)) ? ` · Còn ${countdown(attendanceDeadlineMillis(item))}` : ""}`;
+  return attendanceStatusLabel(state);
 }
 async function closeExpiredAttendanceSessions() {
   clearTimeout(attendanceExpiryTimer);
@@ -2154,11 +2180,12 @@ function renderAttendance() {
   const target = $("#attendanceRows");
   if (!target) return;
   const list = attendanceSessions.filter((item) => !item.deletedAt)
-    .filter((item) => attendanceFilter === "all" || item.status === attendanceFilter)
+    .filter((item) => attendanceFilter === "all" || attendanceRuntimeState(item) === attendanceFilter)
     .sort((a, b) => (millis(b.createdAt) || 0) - (millis(a.createdAt) || 0));
   target.className = `att-grid attendance-view-${attendanceView}`;
   document.querySelectorAll("[data-attendance-view]").forEach((button) => button.classList.toggle("active", button.dataset.attendanceView === attendanceView));
   target.innerHTML = list.length ? list.map((item) => {
+    const runtimeState = attendanceRuntimeState(item);
     const hasRoster = attendanceHasRegistrationRoster(item);
     const sourceEvent = item.eventId ? events.find((event) => event.id === item.eventId) : null;
     const rosterCount = sourceEvent ? Number(sourceEvent.registeredCount || 0) : Number(item.rosterCount || 0);
@@ -2166,11 +2193,27 @@ function renderAttendance() {
     const checkinCount = attendanceCheckinCounts.get(item.id) || 0;
     const scannerCount = attendanceScannerCounts.get(item.id) || 0;
     return `<article class="att-row">
-    <div><span class="att-badge ${safe(item.status)}">${safe(attendanceStatusLabel(item.status))}</span>
-    <h3>${safe(item.title)}</h3><div class="att-meta">${safe(vietnamDate(item.date))}${item.location ? ` · ${safe(item.location)}` : ""}${rosterMeta}</div><div class="attendance-card-stats"><span><b>${checkinCount}</b> SV đã điểm danh</span><span><b>${scannerCount}</b> SV được cấp quyền quét</span></div></div>
+    <div><span class="att-badge ${safe(runtimeState)}" data-attendance-state="${item.id}" data-runtime-state="${safe(runtimeState)}">${safe(attendanceStatusLabel(runtimeState))}</span>
+    <h3>${safe(item.title)}</h3><div class="att-meta">${safe(vietnamDate(item.date))}${item.location ? ` · ${safe(item.location)}` : ""}${rosterMeta}</div><div class="att-meta attendance-timing" data-attendance-timing="${item.id}">${safe(attendanceTimingStatus(item))}</div><div class="attendance-card-stats"><span><b>${checkinCount}</b> SV đã điểm danh</span><span><b>${scannerCount}</b> SV được cấp quyền quét</span></div></div>
     <div class="att-actions attendance-card-actions"><button class="btn" data-attendance-manage="${item.id}">Quản lý</button><button class="btn" data-attendance-copy="${item.id}">Copy link</button><button class="btn btn-success" data-attendance-quick-export="${item.id}">↓ Danh sách</button><button class="btn btn-danger" data-delete-attendance="${item.id}">Xóa</button></div>
   </article>`;
   }).join("") : '<div class="card empty">Không có sự kiện điểm danh trong bộ lọc này.</div>';
+}
+
+function updateAttendanceCountdowns() {
+  let stateChanged = false;
+  document.querySelectorAll("[data-attendance-state]").forEach((node) => {
+    const item = attendanceSessions.find((value) => value.id === node.dataset.attendanceState);
+    if (item && node.dataset.runtimeState !== attendanceRuntimeState(item)) stateChanged = true;
+  });
+  if (stateChanged) renderAttendance();
+  else document.querySelectorAll("[data-attendance-timing]").forEach((node) => {
+    const item = attendanceSessions.find((value) => value.id === node.dataset.attendanceTiming);
+    if (item) node.textContent = attendanceTimingStatus(item);
+  });
+  if (selectedAttendanceSession && $("#attendanceManageDialog")?.open) {
+    $("#attendanceManageMeta").textContent = `${attendanceTimingStatus(selectedAttendanceSession)} · ${vietnamDate(selectedAttendanceSession.date)}`;
+  }
 }
 
 async function refreshAttendanceCardCounts() {
@@ -2341,7 +2384,7 @@ async function openAttendanceManage(sessionId) {
   if (!selectedAttendanceSession) return;
   attendancePage = 1; attendancePageCursors = [null]; attendanceReportPage = 1; attendanceReportFilter = "present"; attendanceReportLoaded = false; attendanceReportRowsSource = []; attendanceTrashLoaded = false; attendanceRoster = [];
   $("#attendanceManageTitle").textContent = selectedAttendanceSession.title;
-  $("#attendanceManageMeta").textContent = `${attendanceStatusLabel(selectedAttendanceSession.status)} · ${vietnamDate(selectedAttendanceSession.date)}`;
+  $("#attendanceManageMeta").textContent = `${attendanceTimingStatus(selectedAttendanceSession)} · ${vietnamDate(selectedAttendanceSession.date)}`;
   populateAttendanceEditForm(selectedAttendanceSession);
   $("#attendanceEnd").classList.toggle("hidden", selectedAttendanceSession.status !== "open");
   $("#attendanceFinalize").disabled = !highAdminAccess() || selectedAttendanceSession.status === "finalized";
@@ -2494,7 +2537,7 @@ async function createStandaloneAttendance() {
   const hasRegistrationRoster = Boolean(eventId) || roster.length > 0;
   const permissionMembers = attendancePermissionMembers;
   const writes = [
-    { ref: doc(db, "attendanceSessions", sessionId), data: { eventId, source: eventId ? "registration" : "standalone", hasRegistrationRoster, liveRegistrationRoster: Boolean(eventId), title, date, endDate, endAt: attendanceEndTimestamp(endDate, endTime), location, startTime, endTime, status: "open", rosterCount: eventId ? Number(events.find((item) => item.id === eventId)?.registeredCount || 0) : roster.length, checkinCount: 0, pendingCount: 0, scannerCount: permissionMembers.length, createdByUid: user.uid, createdByEmail: user.email, createdByName: user.displayName || "", createdAt: serverTimestamp() } },
+    { ref: doc(db, "attendanceSessions", sessionId), data: { eventId, source: eventId ? "registration" : "standalone", hasRegistrationRoster, liveRegistrationRoster: Boolean(eventId), title, date, endDate, startAt: attendanceStartTimestamp(date, startTime), endAt: attendanceEndTimestamp(endDate, endTime), location, startTime, endTime, status: "open", rosterCount: eventId ? Number(events.find((item) => item.id === eventId)?.registeredCount || 0) : roster.length, checkinCount: 0, pendingCount: 0, scannerCount: permissionMembers.length, createdByUid: user.uid, createdByEmail: user.email, createdByName: user.displayName || "", createdAt: serverTimestamp() } },
     ...roster.map((item) => ({ ref: doc(db, "attendanceRoster", sessionId + "_" + item.mssv), data: { sessionId, eventId, mssv: item.mssv, name: item.name || "", email: item.email || item.mssv.toLowerCase() + "@student.tdtu.edu.vn", uid: item.uid || "", createdAt: serverTimestamp() } }))
   ];
   const assignmentWrites = permissionMembers.flatMap((item) => {
@@ -2908,11 +2951,12 @@ $("#attendanceEditForm").onsubmit = async (event) => {
   const id = item.id;
   const date = parseVietnamDate($("#attendanceEditDate").value), endDate = parseVietnamDate($("#attendanceEditEndDate").value); if (!date || !endDate) return notice("Ngày không hợp lệ. Vui lòng nhập theo dạng ngày/tháng/năm.", "error"); if (endDate < date) return notice("Ngày kết thúc không được trước ngày tổ chức.", "error");
   const endTime = $("#attendanceEditEndTime").value;
-  const update = { date, endDate, startTime: $("#attendanceEditStartTime").value, endTime, endAt: attendanceEndTimestamp(endDate, endTime), updatedAt: serverTimestamp() };
+  const startTime = $("#attendanceEditStartTime").value;
+  const update = { date, endDate, startTime, endTime, startAt: attendanceStartTimestamp(date, startTime), endAt: attendanceEndTimestamp(endDate, endTime), updatedAt: serverTimestamp() };
   if (!item.eventId) { update.title = $("#attendanceEditTitle").value.trim(); update.location = $("#attendanceEditLocation").value.trim(); }
   await updateDoc(doc(db, "attendanceSessions", id), update);
   await audit("attendance.update", "attendanceSession", id, { title: item.title || "" });
-  Object.assign(item, update); $("#attendanceManageTitle").textContent = item.title; $("#attendanceManageMeta").textContent = `${attendanceStatusLabel(item.status)} · ${vietnamDate(item.date)}`;
+  Object.assign(item, update); $("#attendanceManageTitle").textContent = item.title; $("#attendanceManageMeta").textContent = `${attendanceTimingStatus(item)} · ${vietnamDate(item.date)}`;
   notice(endTime ? "Đã lưu. Điểm danh sẽ tự đóng sau giờ kết thúc 30 phút." : "Đã lưu thay đổi phiên điểm danh.", "success");
 };
 $("#attendanceEnd").onclick = async () => {
