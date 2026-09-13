@@ -177,9 +177,10 @@ async function migrateLegacyAttendancePhotos(rows) {
       const response = await fetch(item.photoData), blob = await response.blob();
       if (!blob.type.startsWith("image/") || blob.size > 1.5 * 1024 * 1024) continue;
       const path = `attendance/${item.sessionId}/${item.id}.jpg`;
-      await uploadBytes(ref(storage, path), blob, { contentType: "image/jpeg", cacheControl: "private,max-age=0,no-store" });
-      await updateDoc(doc(db, "checkins", item.id), { photoPath: path, photoData: deleteField(), photoMigratedAt: serverTimestamp() });
-      item.photoPath = path; delete item.photoData;
+      const uploaded = await uploadBytes(ref(storage, path), blob, { contentType: "image/jpeg", cacheControl: "private,max-age=0,no-store" });
+      const photoUrl = await getDownloadURL(uploaded.ref);
+      await updateDoc(doc(db, "checkins", item.id), { photoPath: path, photoUrl, photoData: deleteField(), photoMigratedAt: serverTimestamp() });
+      item.photoPath = path; item.photoUrl = photoUrl; delete item.photoData;
     } catch (error) { console.warn("Không thể chuyển ảnh cũ sang Storage:", item.id, error); }
   }
 }
@@ -410,6 +411,22 @@ async function accessRole(currentUser) {
   const snapshot = await getDoc(doc(db, "admins", currentUser.email.toLowerCase()));
   if (!snapshot.exists()) return "";
   return snapshot.data().role === "subadmin" ? "subadmin" : "admin";
+}
+
+async function syncStorageAdminAccess(currentUser, role) {
+  if (role === "owner") return;
+  await setDoc(doc(db, "storageAdminAccess", currentUser.uid), {
+    uid: currentUser.uid,
+    email: currentUser.email.toLowerCase(),
+    role: role === "subadmin" ? "subadmin" : "admin",
+    updatedAt: serverTimestamp()
+  }, { merge: true });
+}
+
+async function clearStorageAdminAccess(email) {
+  if (!isOwner) return;
+  const snapshot = await getDocs(query(collection(db, "storageAdminAccess"), where("email", "==", String(email).toLowerCase())));
+  await Promise.all(snapshot.docs.map((item) => deleteDoc(item.ref)));
 }
 
 function eventEnd(event) {
@@ -1521,6 +1538,7 @@ document.addEventListener("change", async (event) => {
   if (!select || !isOwner) return;
   try {
     await updateDoc(doc(db, "admins", select.dataset.adminRole), { role: select.value === "subadmin" ? "subadmin" : "admin", updatedAt: serverTimestamp() });
+    await clearStorageAdminAccess(select.dataset.adminRole);
     notice("Đã cập nhật quyền quản trị.", "success");
   } catch (error) {
     notice(error.message || "Không thể cập nhật quyền.", "error");
@@ -1742,6 +1760,7 @@ document.addEventListener("click", async (event) => {
     }
   }
   if (button.dataset.removeAdmin && await confirmAction({ title: "Xóa quyền Admin?", message: `Tài khoản ${button.dataset.removeAdmin} sẽ không còn quyền quản trị.` })) try {
+    await clearStorageAdminAccess(button.dataset.removeAdmin);
     await deleteDoc(doc(db, "admins", button.dataset.removeAdmin));
     notice("Đã xóa Admin.", "success");
   } catch (error) {
@@ -1921,7 +1940,7 @@ async function publishFacultyRows(records, message = "Đang cập nhật dữ li
   const rows = [...new Map(records.map(studentRecord).filter((item) => validStudentId(item.mssv) && item.name).map((item) => [item.mssv, item])).values()];
   const result = await publishFacultyDataset(storage, rows);
   const summary = facultyDatasetSummary(rows);
-  const metadata = { ...summary, datasetVersion: result.version, datasetPath: result.path, datasetEncoding: "gzip", datasetBytes: result.bytes, datasetUpdatedAt: serverTimestamp(), updatedAt: serverTimestamp() };
+  const metadata = { ...summary, datasetVersion: result.version, datasetPath: result.path, datasetUrl: result.url, datasetEncoding: "gzip", datasetBytes: result.bytes, datasetUpdatedAt: serverTimestamp(), updatedAt: serverTimestamp() };
   await setDoc(doc(db, "facultyStudentMeta", "current"), metadata, { merge: true });
   facultyStudentDatasetMeta = { ...facultyStudentDatasetMeta, ...metadata };
   facultyStudentTotal = rows.length;
@@ -2755,21 +2774,24 @@ async function resolveAttendanceStudent(rawMssv) {
 }
 async function openAttendanceImage(id) {
   const item = attendanceManageRows.find((row) => row.id === id);
-  if (!item?.photoPath && !item?.photoData) return notice("Không tìm thấy hình điểm danh.", "error");
+  if (!item?.photoPath && !item?.photoUrl && !item?.photoData) return notice("Không tìm thấy hình điểm danh.", "error");
   const dialog = $("#attendanceImageDialog"), image = $("#attendanceViewerImage"), status = $("#attendanceImageStatus");
   if (!dialog.open) dialog.showModal();
   image.removeAttribute("src"); status.textContent = "Đang tải hình…"; status.classList.remove("hidden");
   try {
-    let source = item.photoData || "";
-    if (item.photoPath) {
+    let source = item.photoUrl || item.photoData || "";
+    if (!source && item.photoPath) {
       const photoRef = ref(storage, item.photoPath);
       try {
-        const bytes = await getBytes(photoRef, 1.5 * 1024 * 1024);
-        if (attendanceViewerObjectUrl) URL.revokeObjectURL(attendanceViewerObjectUrl);
-        attendanceViewerObjectUrl = URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" })); source = attendanceViewerObjectUrl;
-      } catch (bytesError) {
-        try { source = await getDownloadURL(photoRef); }
-        catch { throw bytesError; }
+        source = await getDownloadURL(photoRef);
+        item.photoUrl = source;
+        await updateDoc(doc(db, "checkins", item.id), { photoUrl: source });
+      } catch (urlError) {
+        try {
+          const bytes = await getBytes(photoRef, 1.5 * 1024 * 1024);
+          if (attendanceViewerObjectUrl) URL.revokeObjectURL(attendanceViewerObjectUrl);
+          attendanceViewerObjectUrl = URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" })); source = attendanceViewerObjectUrl;
+        } catch { throw urlError; }
       }
     }
     attendanceViewerScale = 1; image.style.width = "100%";
@@ -3039,6 +3061,8 @@ onAuthStateChanged(auth, async (currentUser) => {
   currentRole = resolvedRole;
   isOwner = currentRole === "owner";
   isSubAdmin = currentRole === "subadmin";
+  try { await syncStorageAdminAccess(currentUser, currentRole); }
+  catch (error) { console.warn("Không thể đồng bộ quyền Storage:", error); }
   $("#accountEmail").textContent = currentUser.email;
   $("#roleText").textContent = `Quyền hiện tại: ${isOwner ? "Chủ sở hữu" : isSubAdmin ? "Sub-admin · chỉ quản lý sự kiện tự tạo" : "Admin"}`;
   $("#adminLogin").classList.add("hidden");
