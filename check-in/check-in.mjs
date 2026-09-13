@@ -12,21 +12,23 @@ const storage = getStorage(app);
 const provider = new GoogleAuthProvider();
 provider.setCustomParameters({ prompt: "select_account" });
 const $ = (selector) => document.querySelector(selector);
+function sessionParam(params) {
+  return (params.get("event") || params.get("e"))?.trim().toUpperCase() || "";
+}
 function resolveSessionId() {
-  const directParams = new URLSearchParams(window.location.search);
-  const directId = (directParams.get("e") || directParams.get("event"))?.trim();
-  if (directId) return directId;
-  const hashParams = new URLSearchParams(window.location.hash.replace(/^#\??/, ""));
-  const hashId = (hashParams.get("e") || hashParams.get("event"))?.trim();
-  if (hashId) return hashId;
   try {
     const referringPage = new URL(document.referrer);
     if (referringPage.hostname === "ifa.tdtu.edu.vn") {
-      return (referringPage.searchParams.get("e") || referringPage.searchParams.get("event"))?.trim() || "";
+      const referringId = sessionParam(referringPage.searchParams);
+      if (referringId) return referringId;
     }
   } catch {
     // Trang được mở trực tiếp hoặc trình duyệt không cung cấp địa chỉ trang chứa iframe.
   }
+  const directId = sessionParam(new URLSearchParams(window.location.search));
+  if (directId) return directId;
+  const hashId = sessionParam(new URLSearchParams(window.location.hash.replace(/^#\??/, "")));
+  if (hashId) return hashId;
   return "";
 }
 const sessionId = resolveSessionId();
@@ -122,9 +124,18 @@ function sessionDeadlineMillis() {
   if (session?.endAt?.toDate) return session.endAt.toDate().getTime();
   return endDate ? new Date(endDate + "T23:59:59").getTime() : Infinity;
 }
+function sessionStartMillis() {
+  if (session?.startAt?.toDate) return session.startAt.toDate().getTime();
+  return session?.date ? new Date(`${session.date}T${session.startTime || "00:00"}:00`).getTime() : -Infinity;
+}
+function sessionRuntimeState() {
+  if (session?.status === "finalized") return "finalized";
+  if (session?.status === "ended" || Date.now() > sessionDeadlineMillis()) return "ended";
+  if (Date.now() < sessionStartMillis()) return "scheduled";
+  return "open";
+}
 function sessionIsOpen() {
-  if (session?.status !== "open") return false;
-  return Date.now() <= sessionDeadlineMillis();
+  return sessionRuntimeState() === "open";
 }
 function barcodeFormats() { return ["CODE_128", "CODE_39", "CODE_93", "CODABAR", "ITF"].map((name) => window.ZXingBrowser?.BarcodeFormat?.[name]).filter(Number.isInteger); }
 function makeReader() {
@@ -305,18 +316,32 @@ function listenRows() {
   }, (error) => notice(error.message));
 }
 function renderSession() {
-  const open = sessionIsOpen();
+  const state = sessionRuntimeState();
+  const open = state === "open";
   clearTimeout(sessionExpiryTimer);
-  const endMillis = sessionDeadlineMillis();
-  if (session?.status === "open" && Number.isFinite(endMillis) && endMillis > Date.now()) {
+  const boundaryMillis = state === "scheduled" ? sessionStartMillis() : sessionDeadlineMillis();
+  if (session?.status === "open" && Number.isFinite(boundaryMillis) && boundaryMillis > Date.now()) {
     sessionExpiryTimer = window.setTimeout(() => {
       renderSession();
-      unsubscribeRows?.(); unsubscribeRows = null;
-      setScanStatus("error", "Điểm danh đã tự đóng", "Đã quá giờ kết thúc 30 phút.");
-    }, Math.min(endMillis - Date.now() + 250, 2147483647));
+      if (sessionIsOpen()) { listenRows(); void flushOutbox(); }
+      else { unsubscribeRows?.(); unsubscribeRows = null; setScanStatus("error", "Điểm danh đã tự đóng", "Đã quá giờ kết thúc 30 phút."); }
+    }, Math.min(boundaryMillis - Date.now() + 250, 2147483647));
   }
-  $("#eventStatus").textContent = open ? "Đang mở" : session.status === "finalized" ? "Đã chốt" : "Đã kết thúc";
-  $("#eventStatus").className = "att-badge " + (open ? "open" : session.status === "open" ? "ended" : session.status);
+  const labels = { scheduled: "Sắp mở", open: "Đang mở", ended: "Đã kết thúc", finalized: "Đã chốt danh sách" };
+  $("#eventStatus").textContent = labels[state];
+  $("#eventStatus").className = "att-badge " + state;
+  if (state === "scheduled") {
+    const remaining = Math.max(0, sessionStartMillis() - Date.now());
+    const days = Math.floor(remaining / 86400000), hours = Math.floor((remaining % 86400000) / 3600000), minutes = Math.floor((remaining % 3600000) / 60000), seconds = Math.floor((remaining % 60000) / 1000);
+    $("#statusDetail").textContent = `Mở sau ${days ? `${days} ngày ` : ""}${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    $("#closedTitle").textContent = "Sự kiện sắp mở";
+    $("#closedDetail").textContent = $("#statusDetail").textContent;
+    sessionExpiryTimer = window.setTimeout(renderSession, 1000);
+  } else {
+    $("#statusDetail").textContent = labels[state];
+    $("#closedTitle").textContent = state === "finalized" ? "Danh sách đã được chốt" : "Sự kiện đã kết thúc";
+    $("#closedDetail").textContent = state === "finalized" ? "Phiên điểm danh không nhận thêm dữ liệu." : "Không thể quét thêm sinh viên.";
+  }
   $("#closedMessage").classList.toggle("hidden", open);
   $("#scannerArea").classList.toggle("hidden", !open);
   $("#roleText").classList.toggle("hidden", !open);
