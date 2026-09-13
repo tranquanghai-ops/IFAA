@@ -146,8 +146,10 @@ async function loadSystemStatus() {
     getDocFromServer(doc(db, "settings", "main")),
     getMetadata(ref(storage, "datasets/faculty-students.json.gz"))
   ]);
+  const storageMissingDataset = results[1].status === "rejected" && results[1].reason?.code === "storage/object-not-found";
+  const storageReachable = results[1].status === "fulfilled" || storageMissingDataset;
   setSystemStatus("#systemFirestoreStatus", results[0].status === "fulfilled" ? "Kết nối tốt" : "Không truy cập được", results[0].status === "fulfilled");
-  setSystemStatus("#systemStorageStatus", results[1].status === "fulfilled" ? "Kết nối tốt" : "Không truy cập được", results[1].status === "fulfilled");
+  setSystemStatus("#systemStorageStatus", storageReachable ? "Kết nối tốt" : "Không truy cập được", storageReachable);
   setSystemStatus("#systemDatasetStatus", results[1].status === "fulfilled" ? `${Math.ceil(Number(results[1].value.size || 0) / 1024)} KB · sẵn sàng` : "Chưa có tệp nén", results[1].status === "fulfilled");
   $("#systemStatusCheckedAt").textContent = `Kiểm tra lúc ${new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "medium" }).format(new Date())}`;
   if (button) button.disabled = false;
@@ -224,18 +226,32 @@ function configuredAttendanceBaseUrl() {
   const value = String(settings.attendancePublicBaseUrl || DEFAULT_ATTENDANCE_BASE_URL).trim();
   try {
     const url = new URL(value);
+    url.pathname = `${url.pathname.replace(/\/+$/, "")}/`;
     url.search = "";
     url.hash = "";
     return url;
   } catch {
-    return new URL(DEFAULT_ATTENDANCE_BASE_URL);
+    return new URL(`${DEFAULT_ATTENDANCE_BASE_URL.replace(/\/+$/, "")}/`);
   }
 }
 
 function attendanceShareUrl(sessionId) {
+  const normalizedSessionId = String(sessionId || "").trim();
+  if (!normalizedSessionId) throw new Error("Phiên điểm danh chưa có mã để tạo liên kết.");
   const url = configuredAttendanceBaseUrl();
-  // Dùng cùng tham số `e` với trang đăng ký. Tên `event` có thể bị\n  // WordPress/plugin lịch của trang khoa giữ lại trước khi iframe được tải.\n  url.searchParams.set("e", sessionId);
-  return url.toString();
+  // Dùng cùng tham số `e` với trang đăng ký. Tên `event` có thể bị
+  // WordPress/plugin lịch của trang khoa giữ lại trước khi iframe được tải.
+  url.search = `?e=${encodeURIComponent(normalizedSessionId)}`;
+  const link = url.toString();
+  if (new URL(link).searchParams.get("e") !== normalizedSessionId) {
+    throw new Error("Không thể tạo liên kết điểm danh có mã sự kiện.");
+  }
+  return link;
+}
+
+async function copyAttendanceLink(sessionId) {
+  const link = attendanceShareUrl(sessionId);
+  await copyText(link, `Đã sao chép link điểm danh: ${link}`);
 }
 
 function groupShareUrl(group) {
@@ -2788,7 +2804,7 @@ document.addEventListener("click", async (event) => {
     }
   }
   if (button.dataset.attendanceManage) await openAttendanceManage(button.dataset.attendanceManage);
-  if (button.dataset.attendanceCopy) await copyText(attendanceShareUrl(button.dataset.attendanceCopy), "Đã sao chép link điểm danh.");
+  if (button.dataset.attendanceCopy) await copyAttendanceLink(button.dataset.attendanceCopy);
   if (button.dataset.attendanceQuickExport) await quickExportAttendance(button.dataset.attendanceQuickExport, button);
   if (button.dataset.attendanceReportFilter) { attendanceReportFilter = button.dataset.attendanceReportFilter; attendanceReportPage = 1; renderAttendanceManageRows(); }
   if (button.dataset.attendanceViewPhoto) await openAttendanceImage(button.dataset.attendanceViewPhoto);
@@ -2851,7 +2867,7 @@ document.addEventListener("click", async (event) => {
 });
 
 $("#attendanceCopyLink").onclick = async () => {
-  await copyText(attendanceShareUrl(selectedAttendanceSession.id), "Đã sao chép link quét điểm danh.");
+  await copyAttendanceLink(selectedAttendanceSession.id);
 };
 $("#attendancePrev").onclick = async () => { if (attendancePage > 1) { attendancePage -= 1; await loadAttendanceManage(); } };
 $("#attendanceNext").onclick = async () => { if (attendancePageHasNext) { attendancePage += 1; await loadAttendanceManage(); } };
