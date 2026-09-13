@@ -59,6 +59,21 @@ let cameraRequest = 0, scanning = false, pendingPhoto = "", lastDecoded = "", la
 let rosterCache = new Map(), flushing = false, toastTimer = 0, photoPreviewScale = 1, checkinViewerScale = 1;
 let sessionExpiryTimer = 0;
 let liveRowsById = new Map(), checkinImageObjectUrl = "";
+let zxingLoadPromise = null;
+
+function loadZxingLibrary() {
+  if (window.ZXingBrowser) return Promise.resolve(window.ZXingBrowser);
+  if (zxingLoadPromise) return zxingLoadPromise;
+  zxingLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://unpkg.com/@zxing/browser@0.1.5/umd/zxing-browser.min.js";
+    script.async = true;
+    script.onload = () => resolve(window.ZXingBrowser);
+    script.onerror = () => reject(Error("Không tải được thư viện quét mã vạch."));
+    document.head.appendChild(script);
+  });
+  return zxingLoadPromise;
+}
 
 async function uploadCheckinPhoto(checkinId, dataUrl) {
   const response = await fetch(dataUrl);
@@ -377,9 +392,9 @@ function renderSession() {
   if (!open) $("#stopCamera").disabled = true;
   if (!open) releaseCamera();
 }
-async function startSession() {
+async function startSession(preloadedSnapshot = null) {
   if (!sessionId) throw Error("Liên kết điểm danh không hợp lệ.");
-  const snapshot = await getDoc(doc(db, "attendanceSessions", sessionId)); if (!snapshot.exists()) throw Error(`Không tìm thấy phiên điểm danh có mã ${sessionId}.`);
+  const snapshot = preloadedSnapshot || await getDoc(doc(db, "attendanceSessions", sessionId)); if (!snapshot.exists()) throw Error(`Không tìm thấy phiên điểm danh có mã ${sessionId}.`);
   session = { id: snapshot.id, ...snapshot.data() };
   if (isManager) assignment = { active: true, role: "leader", name: managerName || user.displayName || user.email };
   else {
@@ -387,11 +402,12 @@ async function startSession() {
     assignment = assignmentSnapshot.data(); if (!assignment?.active) throw Error("Bạn chưa được cấp quyền quét sự kiện này.");
   }
   rosterCache = new Map();
-  await prepareFacultyDataset();
   $("#loginCard").classList.add("hidden"); $("#app").classList.remove("hidden"); $("#title").textContent = session.title;
   $("#meta").textContent = [vietnamDate(session.date), session.startTime && session.endTime ? session.startTime + "–" + session.endTime : session.startTime || session.endTime, session.location].filter(Boolean).join(" · ");
   $("#roleText").textContent = isManager ? "Quản trị hệ thống" : assignment.role === "leader" ? "SV Leader" : "SV quét";
   renderSession();
+  void prepareFacultyDataset();
+  void loadZxingLibrary().catch((error) => console.warn(error.message));
   if (sessionIsOpen()) { listenRows(); void flushOutbox(); }
   unsubscribeSession?.();
   unsubscribeSession = onSnapshot(doc(db, "attendanceSessions", sessionId), (live) => {
@@ -509,21 +525,40 @@ getRedirectResult(auth).catch((error) => {
 });
 
 onAuthStateChanged(auth, async (currentUser) => {
-  user = currentUser; $("#logoutBtn").classList.toggle("hidden", !currentUser); $("#loginCard").classList.toggle("hidden", !!currentUser); $("#app").classList.add("hidden");
+  user = currentUser; $("#logoutBtn").classList.toggle("hidden", !currentUser); $("#app").classList.add("hidden");
   releaseCamera(); unsubscribeRows?.(); unsubscribeSession?.();
-  if (!currentUser) { $("#account").textContent = "Vui lòng đăng nhập để quét điểm danh."; return; }
+  const loginCard = $("#loginCard"), loginButton = $("#loginCardBtn");
+  loginCard.classList.remove("hidden");
+  if (!currentUser) {
+    $("#account").textContent = "Vui lòng đăng nhập để quét điểm danh.";
+    $("#loginCard h2").textContent = "Đăng nhập tài khoản TDTU";
+    $("#loginCard p").textContent = "Chỉ Admin hoặc sinh viên đã được cấp quyền quét cho sự kiện này mới có thể sử dụng.";
+    loginButton.textContent = "Đăng nhập để tiếp tục"; loginButton.classList.remove("hidden");
+    return;
+  }
+  $("#loginCard h2").textContent = "Đang tải sự kiện điểm danh…";
+  $("#loginCard p").textContent = `Đang kiểm tra mã ${sessionId || "không hợp lệ"} và quyền truy cập.`;
+  loginButton.classList.add("hidden");
   try {
-    const email = currentUser.email.toLowerCase(), adminSnapshot = email === OWNER_EMAIL ? null : await getDoc(doc(db, "admins", email));
+    const email = currentUser.email.toLowerCase();
+    const [adminSnapshot, sessionSnapshot] = await Promise.all([
+      email === OWNER_EMAIL ? Promise.resolve(null) : getDoc(doc(db, "admins", email)),
+      sessionId ? getDoc(doc(db, "attendanceSessions", sessionId)) : Promise.resolve(null)
+    ]);
+    if (!sessionSnapshot) throw Error("Liên kết điểm danh không hợp lệ.");
     isManager = email === OWNER_EMAIL || !!adminSnapshot?.exists();
     if (!isManager && !email.endsWith(STUDENT_DOMAIN)) throw Error("Chỉ chấp nhận tài khoản TDTU đã được cấp quyền.");
-    if (isManager) { const profileSnapshot = await getDoc(doc(db, "profiles", currentUser.uid)); managerName = String(adminSnapshot?.data()?.name || profileSnapshot.data()?.name || currentUser.displayName || email).trim(); }
-    $("#account").textContent = (isManager ? managerName + " · " : "") + email; await startSession();
-  } catch (error) { notice(error.message); $("#loginCard").classList.remove("hidden"); $("#loginCard h2").textContent = "Không thể mở trang quét"; $("#loginCard p").textContent = error.message; }
+    if (isManager) managerName = String(adminSnapshot?.data()?.name || currentUser.displayName || email).trim();
+    $("#account").textContent = (isManager ? managerName + " · " : "") + email; await startSession(sessionSnapshot);
+  } catch (error) {
+    notice(error.message); loginCard.classList.remove("hidden"); $("#loginCard h2").textContent = "Không thể mở trang quét"; $("#loginCard p").textContent = error.message;
+    loginButton.textContent = "Thử tải lại"; loginButton.classList.remove("hidden");
+  }
 });
 
 $("#successSound").value = localStorage.getItem(successKey) || "bell"; $("#duplicateSound").value = localStorage.getItem(duplicateKey) || "low";
 $("#successSound").onchange = () => localStorage.setItem(successKey, $("#successSound").value); $("#duplicateSound").onchange = () => localStorage.setItem(duplicateKey, $("#duplicateSound").value);
-$("#testSuccess").onclick = () => feedback(true); $("#testDuplicate").onclick = () => feedback(false); $("#loginCardBtn").onclick = login; $("#logoutBtn").onclick = () => signOut(auth);
+$("#testSuccess").onclick = () => feedback(true); $("#testDuplicate").onclick = () => feedback(false); $("#loginCardBtn").onclick = () => user ? window.location.reload() : login(); $("#logoutBtn").onclick = () => signOut(auth);
 $("#startCamera").onclick = startCamera; $("#stopCamera").onclick = () => { releaseCamera(); setScanStatus("", "Đã dừng camera", "Nhấn Bắt đầu quét để tiếp tục."); }; $("#cameraSelect").onchange = () => { if (scanning) void startCamera(); };
 $("#capturePhoto").onclick = capturePhoto;
 $("#savePhoto").onclick = async () => { if (await submitCheckin($("#photoMssv").value)) $("#photoDialog").close(); };
