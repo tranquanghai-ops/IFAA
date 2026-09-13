@@ -10,17 +10,24 @@ service firebase.storage {
     function owner() {
       return signedIn() && email() == 'tranquanghai@tdtu.edu.vn';
     }
+    function storageAdmin() {
+      return signedIn()
+        && firestore.exists(/databases/(default)/documents/storageAdminAccess/$(request.auth.uid));
+    }
     function participant() {
       return signedIn() && (email().matches('^[^@]+@(student\\.)?tdtu\\.edu\\.vn$')
         || firestore.exists(/databases/(default)/documents/admins/$(request.auth.token.email)));
     }
     function highAdmin() {
-      return owner() || (signedIn()
+      return owner() || (storageAdmin()
+        && firestore.get(/databases/(default)/documents/storageAdminAccess/$(request.auth.uid)).data.role == 'admin')
+        || (signedIn()
         && firestore.exists(/databases/(default)/documents/admins/$(email()))
         && firestore.get(/databases/(default)/documents/admins/$(email())).data.role == 'admin');
     }
     function admin() {
-      return owner() || (signedIn() && firestore.exists(/databases/(default)/documents/admins/$(email())));
+      return owner() || storageAdmin()
+        || (signedIn() && firestore.exists(/databases/(default)/documents/admins/$(email())));
     }
     function assigned(sessionId) {
       return signedIn()
