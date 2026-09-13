@@ -83,21 +83,23 @@ async function uploadCheckinPhoto(checkinId, dataUrl) {
   const blob = await response.blob();
   if (!blob.type.startsWith("image/") || blob.size > 1.5 * 1024 * 1024) throw Error("Hình điểm danh không hợp lệ hoặc lớn hơn 1,5 MB.");
   const path = `attendance/${session.id}/${checkinId}.jpg`;
-  await uploadBytes(ref(storage, path), blob, { contentType: "image/jpeg", cacheControl: "private,max-age=0,no-store" });
-  return path;
+  const uploaded = await uploadBytes(ref(storage, path), blob, { contentType: "image/jpeg", cacheControl: "private,max-age=0,no-store" });
+  return { path, url: await getDownloadURL(uploaded.ref) };
 }
 
 async function photoSource(data) {
+  if (data.photoUrl) return data.photoUrl;
   if (data.photoPath) {
     const photoRef = ref(storage, data.photoPath);
     try {
+      return await getDownloadURL(photoRef);
+    } catch (urlError) {
+      try {
       const bytes = await getBytes(photoRef, 1.5 * 1024 * 1024);
       if (checkinImageObjectUrl) URL.revokeObjectURL(checkinImageObjectUrl);
       checkinImageObjectUrl = URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" }));
       return checkinImageObjectUrl;
-    } catch (bytesError) {
-      try { return await getDownloadURL(photoRef); }
-      catch { throw bytesError; }
+      } catch { throw urlError; }
     }
   }
   return data.photoData || "";
@@ -484,7 +486,10 @@ async function flushOutbox() {
       if (record.mssv && existing.exists() && existing.data().deletedAt) checkinRef = doc(db, "checkins", `${session.id}_${record.mssv}_recheck_${record.requestId}`);
       const student = record.student;
       const data = { sessionId: session.id, eventId: session.eventId || "", mssv: record.mssv, name: student.name || "", email: student.email || "", studentUid: student.uid || "", scannerUid: user.uid, scannerEmail: user.email.toLowerCase(), scannerMssv: user.email.split("@")[0].toUpperCase(), scannerName: assignment.name || user.displayName || user.email, checkedAt: Timestamp.fromDate(new Date(record.time)), requestId: record.requestId, deletedAt: null };
-      if (record.photoData) data.photoPath = await uploadCheckinPhoto(checkinRef.id, record.photoData);
+      if (record.photoData) {
+        const photo = await uploadCheckinPhoto(checkinRef.id, record.photoData);
+        data.photoPath = photo.path; data.photoUrl = photo.url;
+      }
       const batch = writeBatch(db);
       batch.set(checkinRef, data);
       batch.update(doc(db, "attendanceSessions", session.id), { checkinCount: increment(record.mssv ? 1 : 0), pendingCount: increment(record.mssv ? 0 : 1), updatedAt: serverTimestamp() });
@@ -536,7 +541,7 @@ async function openCheckinImage(id) {
       const snapshot = await getDoc(doc(db, "checkins", id));
       if (snapshot.exists()) data = snapshot.data();
     }
-    if (!data?.photoPath && !data?.photoData) throw Error("Không tìm thấy tệp hình. Hình có thể đã bị xóa.");
+    if (!data?.photoPath && !data?.photoUrl && !data?.photoData) throw Error("Không tìm thấy tệp hình. Hình có thể đã bị xóa.");
     checkinViewerScale = 1; image.style.width = "100%";
     image.onload = () => status.classList.add("hidden");
     image.onerror = () => { status.textContent = "Trình duyệt không hiển thị được tệp hình này."; status.classList.remove("hidden"); };
