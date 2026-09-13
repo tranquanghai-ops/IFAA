@@ -239,10 +239,8 @@ function attendanceShareUrl(sessionId) {
   const normalizedSessionId = String(sessionId || "").trim();
   if (!normalizedSessionId) throw new Error("Phiên điểm danh chưa có mã để tạo liên kết.");
   const url = configuredAttendanceBaseUrl();
-  // Dùng cùng tham số `e` với trang đăng ký. Tên `event` có thể bị
-  // WordPress/plugin lịch của trang khoa giữ lại trước khi iframe được tải.
+  // Dùng duy nhất tham số `e`, giống link đăng ký sự kiện.
   url.search = `?e=${encodeURIComponent(normalizedSessionId)}`;
-  url.searchParams.set("event", normalizedSessionId);
   const link = url.toString();
   if (new URL(link).searchParams.get("e") !== normalizedSessionId) {
     throw new Error("Không thể tạo liên kết điểm danh có mã sự kiện.");
