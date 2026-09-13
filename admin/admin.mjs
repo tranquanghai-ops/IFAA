@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 51330)
-Total output lines: 3094
-
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
 import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, getCountFromServer, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit, startAfter, serverTimestamp, Timestamp, runTransaction, writeBatch, increment, deleteField } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
@@ -1634,7 +1631,115 @@ document.addEventListener("click", async (event) => {
         deletedAt: null, deletedByUid: "", deletedByEmail: "", deletedWithGroupId: "",
         status: item.deletedPreviousStatus || item.status || "open", restoredAt: serverTimestamp(), restoredByEmail: user.email, updatedAt: serverTimestamp()
       })));
-…1330 tokens truncated…if (button.dataset.purgeEvent) {
+      notice(`Đã khôi phục nhóm “${selectedGroup.name}” và ${groupedEvents.length} sự kiện.`, "success");
+    } catch (error) {
+      button.disabled = false;
+      notice(error.message || "Không thể khôi phục nhóm.", "error");
+    }
+  }
+  if (button.dataset.purgeGroup) {
+    if (!isOwner) return notice("Chỉ Chủ sở hữu được xóa vĩnh viễn.", "error");
+    const selectedGroup = groups.find((item) => item.id === button.dataset.purgeGroup && item.deletedAt);
+    if (!selectedGroup) return;
+    const approved = await confirmAction({
+      title: "Xóa vĩnh viễn nhóm?",
+      message: `Nhóm “${selectedGroup.name}”, các sự kiện và lượt đăng ký liên quan sẽ bị xóa vĩnh viễn.`,
+      verification: "XÓA"
+    });
+    if (!approved) return;
+    button.disabled = true;
+    try {
+      await permanentlyDeleteGroup(selectedGroup);
+      notice("Đã xóa vĩnh viễn nhóm sự kiện.", "success");
+    } catch (error) {
+      button.disabled = false;
+      notice(error.message || "Không thể xóa vĩnh viễn nhóm.", "error");
+    }
+  }
+  if (button.dataset.editGroup) openGroup(groups.find((item) => item.id === button.dataset.editGroup));
+  if (button.dataset.calendarEvent) {
+    const selectedEvent = events.find((item) => item.id === button.dataset.calendarEvent);
+    if (selectedEvent) openGoogleCalendar(selectedEvent);
+  }
+  if (button.dataset.createEventLink) {
+    const selectedEvent = events.find((item) => item.id === button.dataset.createEventLink);
+    if (!selectedEvent) return;
+    button.disabled = true;
+    try {
+      const code = createUniqueEventCode();
+      await updateDoc(doc(db, "events", selectedEvent.id), { shareCode: code, updatedAt: serverTimestamp() });
+      await copyText(eventShareUrl({ ...selectedEvent, shareCode: code }), "Đã tạo và sao chép liên kết sự kiện.");
+    } catch (error) {
+      button.disabled = false;
+      notice(error.message || "Không thể tạo liên kết sự kiện.", "error");
+    }
+  }
+  if (button.dataset.copyEventLink) {
+    const selectedEvent = events.find((item) => item.id === button.dataset.copyEventLink);
+    if (selectedEvent?.shareCode) await copyText(eventShareUrl(selectedEvent), "Đã sao chép liên kết sự kiện.");
+  }
+  if (button.dataset.quickRegistrations) await openQuickRegistrations(button.dataset.quickRegistrations);
+  if (button.dataset.exportEvent) await downloadRegistrationExcel(button.dataset.exportEvent, "", button);
+  if (button.dataset.exportGroup) await downloadRegistrationExcel("", button.dataset.exportGroup, button);
+  if (button.dataset.closeQuick !== undefined) $("#quickRegistrationDialog").close();
+  if (button.dataset.calendarGroup) downloadGroupCalendar(button.dataset.calendarGroup);
+  if (button.dataset.copyGroupLink) {
+    const selectedGroup = groups.find((item) => item.id === button.dataset.copyGroupLink);
+    const link = groupShareUrl(selectedGroup || { id: button.dataset.copyGroupLink });
+    await copyText(link, "Đã sao chép liên kết riêng của nhóm.");
+  }
+  if (button.dataset.delete) {
+    const selected = events.find((item) => item.id === button.dataset.delete);
+    if (selected) {
+      const registeredCount = Number(selected.registeredCount || 0);
+      const approved = await confirmAction({
+        title: "Chuyển sự kiện vào thùng rác?",
+        message: registeredCount
+          ? `Sự kiện “${selected.title}” có ${registeredCount} lượt đăng ký. Danh sách đăng ký sẽ được giữ nguyên.`
+          : `Bạn có chắc muốn chuyển sự kiện “${selected.title}” vào thùng rác?`,
+        verification: "XÓA"
+      });
+      if (!approved) return;
+      button.disabled = true;
+      button.textContent = "Đang chuyển…";
+      try {
+        await updateDoc(doc(db, "events", selected.id), {
+          deletedAt: serverTimestamp(),
+          deletedByUid: user.uid,
+          deletedByEmail: user.email,
+          deletedPreviousStatus: selected.status || "open",
+          updatedAt: serverTimestamp()
+        });
+        notice("Đã chuyển sự kiện vào thùng rác. Danh sách đăng ký vẫn được giữ nguyên.", "success");
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = "Xóa";
+        notice(`Không thể chuyển sự kiện vào thùng rác: ${error.message}`, "error");
+      }
+    }
+  }
+  if (button.dataset.restoreEvent) {
+    if (!isOwner) return notice("Chỉ Chủ sở hữu được khôi phục sự kiện.", "error");
+    const selected = events.find((item) => item.id === button.dataset.restoreEvent && item.deletedAt);
+    if (!selected) return;
+    button.disabled = true;
+    try {
+      await updateDoc(doc(db, "events", selected.id), {
+        deletedAt: null,
+        deletedByUid: "",
+        deletedByEmail: "",
+        restoredAt: serverTimestamp(),
+        restoredByEmail: user.email,
+        status: selected.deletedPreviousStatus || selected.status || "open",
+        updatedAt: serverTimestamp()
+      });
+      notice(`Đã khôi phục sự kiện “${selected.title}”.`, "success");
+    } catch (error) {
+      button.disabled = false;
+      notice(error.message || "Không thể khôi phục sự kiện.", "error");
+    }
+  }
+  if (button.dataset.purgeEvent) {
     if (!isOwner) return notice("Chỉ Chủ sở hữu được xóa vĩnh viễn.", "error");
     const selected = events.find((item) => item.id === button.dataset.purgeEvent && item.deletedAt);
     if (!selected) return;
