@@ -1,4 +1,4 @@
-import { ref, getBytes, uploadBytes } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
+import { ref, getBytes, getDownloadURL, uploadBytes } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
 
 const CACHE_DB = "ifaa-faculty-dataset";
 const CACHE_STORE = "datasets";
@@ -81,7 +81,16 @@ export async function loadFacultyDataset(storage, metadata = {}, { force = false
     const cached = await cacheGet();
     if (Number(cached?.version) === version && Array.isArray(cached.rows)) return cached.rows;
   }
-  const bytes = await getBytes(ref(storage, path), 12 * 1024 * 1024);
+  let bytes;
+  if (metadata.datasetUrl) {
+    const response = await fetch(metadata.datasetUrl, { cache: "no-store" });
+    if (!response.ok) throw Error(`Không tải được dữ liệu nén (${response.status}).`);
+    const buffer = await response.arrayBuffer();
+    if (buffer.byteLength > 12 * 1024 * 1024) throw Error("Dữ liệu nén vượt quá 12 MB.");
+    bytes = buffer;
+  } else {
+    bytes = await getBytes(ref(storage, path), 12 * 1024 * 1024);
+  }
   const rows = normalizeRows(JSON.parse(await gunzip(bytes)));
   await cachePut({ version, rows, cachedAt: Date.now() });
   return rows;
@@ -92,11 +101,12 @@ export async function publishFacultyDataset(storage, records, version = Date.now
   const payload = JSON.stringify({ schemaVersion: 1, version, students: rows });
   const compressed = await gzip(payload);
   const path = FACULTY_DATASET_PATH;
-  await uploadBytes(ref(storage, path), compressed, {
+  const uploaded = await uploadBytes(ref(storage, path), compressed, {
     contentType: "application/gzip",
     cacheControl: "private, max-age=0, no-cache",
     customMetadata: { version: String(version), records: String(rows.length) }
   });
+  const url = await getDownloadURL(uploaded.ref);
   await cachePut({ version, rows, cachedAt: Date.now() });
-  return { version, path, count: rows.length, bytes: compressed.byteLength };
+  return { version, path, url, count: rows.length, bytes: compressed.byteLength };
 }
