@@ -1,7 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
 import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, getCountFromServer, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit, startAfter, serverTimestamp, Timestamp, runTransaction, writeBatch, increment, deleteField } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
-import { getStorage, ref, getBytes, getMetadata, uploadBytes, deleteObject } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
+import { getStorage, ref, getBytes, getDownloadURL, getMetadata, uploadBytes, deleteObject } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
 import { firebaseConfig, OWNER_EMAIL } from "../firebase-config.mjs";
 import { loadFacultyDataset, publishFacultyDataset } from "../faculty-dataset.mjs";
 
@@ -2346,12 +2346,12 @@ function renderAttendanceManageRows() {
   const active = attendanceActiveRows(), pending = active.filter((item) => !item.mssv && (item.photoPath || item.photoData)), completed = active.filter((item) => item.mssv), trashed = attendanceTrashLoaded ? attendanceManageRows.filter((item) => item.deletedAt).sort((a, b) => (millis(b.deletedAt) || 0) - (millis(a.deletedAt) || 0)) : [];
   $("#attendancePendingSection").classList.toggle("hidden", !pending.length);
   $("#attendancePendingPhotoCount").textContent = pending.length + " ảnh";
-  $("#attendancePendingPhotoRows").innerHTML = pending.map((item, index) => `<tr><td>${pending.length - index}</td><td><button class="attendance-photo-link" data-attendance-view-photo="${item.id}">Xem hình</button></td><td>${safe(item.scannerName || item.scannerMssv || "")}</td><td>${safe(ts(item.checkedAt))}</td><td><input class="attendance-inline-mssv" data-attendance-pending-input="${item.id}" maxlength="12" placeholder="Nhập MSSV" ${selectedAttendanceSession?.status === "finalized" ? "disabled" : ""}></td><td><button class="btn btn-primary" data-attendance-label-photo="${item.id}" ${selectedAttendanceSession?.status === "finalized" ? "disabled" : ""}>Lưu MSSV</button> <button class="btn btn-danger" data-attendance-delete-checkin="${item.id}" ${selectedAttendanceSession?.status === "finalized" ? "disabled" : ""}>Xóa</button></td></tr>`).join("");
+  $("#attendancePendingPhotoRows").innerHTML = pending.map((item, index) => `<tr><td>${pending.length - index}</td><td><button type="button" class="attendance-photo-link" data-attendance-view-photo="${item.id}">Xem hình</button></td><td>${safe(item.scannerName || item.scannerMssv || "")}</td><td>${safe(ts(item.checkedAt))}</td><td><input class="attendance-inline-mssv" data-attendance-pending-input="${item.id}" maxlength="12" placeholder="Nhập MSSV" ${selectedAttendanceSession?.status === "finalized" ? "disabled" : ""}></td><td><button type="button" class="btn btn-primary" data-attendance-label-photo="${item.id}" ${selectedAttendanceSession?.status === "finalized" ? "disabled" : ""}>Lưu MSSV</button> <button type="button" class="btn btn-danger" data-attendance-delete-checkin="${item.id}" ${selectedAttendanceSession?.status === "finalized" ? "disabled" : ""}>Xóa</button></td></tr>`).join("");
 
   const totalPages = Math.max(attendancePage, Math.ceil(attendanceTotalCount / attendancePageSize), 1);
   $("#attendanceCheckinCount").textContent = attendanceTotalCount + " lượt";
   $("#attendanceDeleteAll").disabled = attendanceTotalCount === 0 || selectedAttendanceSession?.status === "finalized";
-  $("#attendanceCheckinRows").innerHTML = completed.map((item, index) => `<tr><td>${Math.max(1, attendanceTotalCount - ((attendancePage - 1) * attendancePageSize + index))}</td><td>${item.photoPath || item.photoData ? `<button class="attendance-photo-link" data-attendance-view-photo="${item.id}">${safe(item.mssv)}</button>` : safe(item.mssv)}</td><td>${safe(item.name || "Không có dữ liệu")}</td><td>${safe(item.scannerName || item.scannerMssv || "")}</td><td>${safe(ts(item.checkedAt))}</td><td><button class="btn btn-small btn-danger" data-attendance-delete-checkin="${item.id}" ${selectedAttendanceSession?.status === "finalized" ? "disabled" : ""}>Xóa</button></td></tr>`).join("") || '<tr><td colspan="6" class="empty">Chưa có lượt điểm danh.</td></tr>';
+  $("#attendanceCheckinRows").innerHTML = completed.map((item, index) => `<tr><td>${Math.max(1, attendanceTotalCount - ((attendancePage - 1) * attendancePageSize + index))}</td><td>${item.photoPath || item.photoData ? `<button type="button" class="attendance-photo-link" data-attendance-view-photo="${item.id}">${safe(item.mssv)}</button>` : safe(item.mssv)}</td><td>${safe(item.name || "Không có dữ liệu")}</td><td>${safe(item.scannerName || item.scannerMssv || "")}</td><td>${safe(ts(item.checkedAt))}</td><td><button type="button" class="btn btn-small btn-danger" data-attendance-delete-checkin="${item.id}" ${selectedAttendanceSession?.status === "finalized" ? "disabled" : ""}>Xóa</button></td></tr>`).join("") || '<tr><td colspan="6" class="empty">Chưa có lượt điểm danh.</td></tr>';
   $("#attendancePageInfo").textContent = `Trang ${attendancePage}/${totalPages} · ${attendanceTotalCount} lượt`;
   $("#attendancePrev").disabled = attendancePage <= 1; $("#attendanceNext").disabled = !attendancePageHasNext;
 
@@ -2756,13 +2756,30 @@ async function resolveAttendanceStudent(rawMssv) {
 async function openAttendanceImage(id) {
   const item = attendanceManageRows.find((row) => row.id === id);
   if (!item?.photoPath && !item?.photoData) return notice("Không tìm thấy hình điểm danh.", "error");
-  let source = item.photoData || "";
-  if (item.photoPath) {
-    const bytes = await getBytes(ref(storage, item.photoPath), 1.5 * 1024 * 1024);
-    if (attendanceViewerObjectUrl) URL.revokeObjectURL(attendanceViewerObjectUrl);
-    attendanceViewerObjectUrl = URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" })); source = attendanceViewerObjectUrl;
+  const dialog = $("#attendanceImageDialog"), image = $("#attendanceViewerImage"), status = $("#attendanceImageStatus");
+  if (!dialog.open) dialog.showModal();
+  image.removeAttribute("src"); status.textContent = "Đang tải hình…"; status.classList.remove("hidden");
+  try {
+    let source = item.photoData || "";
+    if (item.photoPath) {
+      const photoRef = ref(storage, item.photoPath);
+      try {
+        const bytes = await getBytes(photoRef, 1.5 * 1024 * 1024);
+        if (attendanceViewerObjectUrl) URL.revokeObjectURL(attendanceViewerObjectUrl);
+        attendanceViewerObjectUrl = URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" })); source = attendanceViewerObjectUrl;
+      } catch (bytesError) {
+        try { source = await getDownloadURL(photoRef); }
+        catch { throw bytesError; }
+      }
+    }
+    attendanceViewerScale = 1; image.style.width = "100%";
+    image.onload = () => status.classList.add("hidden");
+    image.onerror = () => { status.textContent = "Trình duyệt không hiển thị được tệp hình này."; status.classList.remove("hidden"); };
+    image.src = source;
+  } catch (error) {
+    status.textContent = "Không tải được hình: " + (error.message || "Storage từ chối truy cập.");
+    notice("Không tải được hình: " + (error.message || "Vui lòng kiểm tra quyền Storage."), "error");
   }
-  attendanceViewerScale = 1; $("#attendanceViewerImage").src = source; $("#attendanceViewerImage").style.width = "100%"; $("#attendanceImageDialog").showModal();
 }
 function setAttendanceImageScale(value) {
   attendanceViewerScale = Math.min(3, Math.max(.5, value)); $("#attendanceViewerImage").style.width = `${attendanceViewerScale * 100}%`;
