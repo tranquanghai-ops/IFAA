@@ -498,3 +498,28 @@
   .trash-table{min-width:0!important}
 }
 @media(max-width:420px){.sidebar .card,.admin-filters{grid-template-columns:minmax(0,1fr)}td .actions,td.actions{grid-template-columns:minmax(0,1fr)}}
+
+/* V4.4: menu trượt và thao tác nhỏ gọn trên mobile */
+.mobile-menu-btn,.mobile-menu-backdrop,.mobile-menu-head{display:none}
+@media(max-width:760px){
+  .mobile-menu-btn{position:fixed;z-index:10020;top:max(12px,env(safe-area-inset-top));right:12px;display:grid;place-content:center;gap:5px;width:48px;height:48px;padding:0;border:1px solid #2b3448;border-radius:13px;background:#111827;box-shadow:0 8px 24px rgba(15,23,42,.25)}
+  .mobile-menu-btn span{display:block;width:25px;height:3px;border-radius:3px;background:#fff}
+  .mobile-menu-backdrop{position:fixed;z-index:10000;inset:0;display:block;border:0;background:rgba(15,23,42,.48);opacity:0;visibility:hidden;transition:opacity .2s,visibility .2s}
+  .sidebar{position:fixed!important;z-index:10010;top:0;right:0;bottom:0;width:min(84vw,340px)!important;max-width:340px!important;margin:0!important;padding:0 0 max(14px,env(safe-area-inset-bottom));overflow-y:auto;background:#f8fafc;box-shadow:-18px 0 50px rgba(15,23,42,.25);transform:translateX(105%);transition:transform .22s ease}
+  .mobile-menu-head{position:sticky;z-index:2;top:0;display:flex;align-items:center;justify-content:space-between;min-height:70px;padding:14px 16px;background:#111827;color:#fff;font-size:18px}
+  .mobile-menu-head button{display:grid;place-items:center;width:40px;height:40px;border:0;border-radius:10px;background:#273248;color:#fff;font-size:30px;line-height:1}
+  .sidebar .card{display:block;width:100%;padding:10px;margin:0;border:0;border-radius:0;background:transparent;box-shadow:none}
+  .sidebar .nav-btn{display:flex;width:100%;min-height:48px;justify-content:flex-start;padding:11px 13px;text-align:left;font-size:15px}
+  .admin-menu-open{overflow:hidden}
+  .admin-menu-open .sidebar{transform:translateX(0)}
+  .admin-menu-open .mobile-menu-backdrop{opacity:1;visibility:visible}
+  .admin-menu-open .mobile-menu-btn{visibility:hidden}
+
+  #adminEventFilters.admin-filters,.att-filters{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:5px;width:100%;overflow:visible}
+  #adminEventFilters .btn,.att-filters .btn{width:100%;min-width:0;padding:8px 3px;font-size:11.5px;line-height:1.2;white-space:normal}
+  #groupRows>tr>td:nth-child(5),#groupRows>tr>td:nth-child(6){display:block}
+  #groupRows>tr>td:nth-child(5)::before,#groupRows>tr>td:nth-child(6)::before{display:block;margin-bottom:8px}
+  #groupRows .actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;width:100%}
+  #groupRows .actions .btn{width:100%;min-height:38px;padding:7px 6px;font-size:12px;line-height:1.2;white-space:normal}
+  #groupRows .actions .btn-download-list{grid-column:1/-1}
+}
