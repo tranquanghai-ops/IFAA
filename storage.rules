@@ -19,6 +19,14 @@ service firebase.storage {
         && firestore.exists(/databases/(default)/documents/admins/$(email()))
         && firestore.get(/databases/(default)/documents/admins/$(email())).data.role == 'admin');
     }
+    function admin() {
+      return owner() || (signedIn() && firestore.exists(/databases/(default)/documents/admins/$(email())));
+    }
+    function assigned(sessionId) {
+      return signedIn()
+        && firestore.exists(/databases/(default)/documents/scannerAssignments/$(sessionId + '_' + email()))
+        && firestore.get(/databases/(default)/documents/scannerAssignments/$(sessionId + '_' + email())).data.active == true;
+    }
 
     match /datasets/{datasetFile} {
       allow read: if participant();
@@ -27,6 +35,15 @@ service firebase.storage {
         && request.resource.size < 12 * 1024 * 1024
         && request.resource.contentType == 'application/gzip';
       allow delete: if owner();
+    }
+
+    match /attendance/{sessionId}/{imageFile} {
+      allow read: if admin() || assigned(sessionId);
+      allow create, update: if (admin() || assigned(sessionId))
+        && imageFile.matches('^[A-Za-z0-9_.-]+\\.jpg$')
+        && request.resource.size < 1536 * 1024
+        && request.resource.contentType == 'image/jpeg';
+      allow delete: if highAdmin();
     }
 
     match /{allPaths=**} {

@@ -221,7 +221,19 @@ service cloud.firestore {
           && (resource.data.status != 'ended'
             || request.resource.data.status != 'open'
             || (resource.data.endedAt is timestamp
-              && request.time <= resource.data.endedAt + duration.value(5, 'd'))));
+              && request.time <= resource.data.endedAt + duration.value(5, 'd'))))
+        || (assigned(sessionId)
+          && resource.data.status == 'open'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checkinCount','pendingCount','updatedAt'])
+          && request.resource.data.checkinCount is int
+          && request.resource.data.pendingCount is int
+          && request.resource.data.checkinCount >= 0
+          && request.resource.data.pendingCount >= 0
+          && (!resource.data.keys().hasAll(['checkinCount','pendingCount'])
+            || (request.resource.data.checkinCount >= resource.data.checkinCount - 1
+              && request.resource.data.checkinCount <= resource.data.checkinCount + 1
+              && request.resource.data.pendingCount >= resource.data.pendingCount - 1
+              && request.resource.data.pendingCount <= resource.data.pendingCount + 1)));
       allow delete: if highAdmin();
     }
 
@@ -262,6 +274,14 @@ service cloud.firestore {
       allow read: if highAdmin();
       allow create, update: if admin();
       allow delete: if highAdmin();
+    }
+
+    match /auditLogs/{logId} {
+      allow read: if highAdmin();
+      allow create: if admin()
+        && request.resource.data.actorUid == request.auth.uid
+        && request.resource.data.actorEmail == email();
+      allow update, delete: if false;
     }
 
     match /checkins/{checkinId} {

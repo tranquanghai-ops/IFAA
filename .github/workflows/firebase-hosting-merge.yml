@@ -25,8 +25,8 @@ jobs:
         with:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_IFAA }}
 
-      - name: Deploy Firestore Rules
-        run: npx --yes firebase-tools@latest deploy --only firestore:rules --project ifa-activities --non-interactive
+      - name: Deploy Firestore Rules and Indexes
+        run: npx --yes firebase-tools@latest deploy --only firestore --project ifa-activities --non-interactive
 
       - name: Deploy Storage Rules
         run: npx --yes firebase-tools@latest deploy --only storage:facultyDataset --project ifa-activities --non-interactive

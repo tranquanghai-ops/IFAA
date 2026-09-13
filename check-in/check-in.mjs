@@ -1,7 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
-import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, setDoc, updateDoc, onSnapshot, query, where, serverTimestamp, Timestamp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
-import { getStorage } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
+import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, setDoc, updateDoc, onSnapshot, query, where, serverTimestamp, Timestamp, writeBatch, increment } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
+import { getStorage, ref, uploadBytes, getBytes } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
 import { firebaseConfig, STUDENT_DOMAIN, OWNER_EMAIL } from "../firebase-config.mjs";
 import { loadFacultyDataset } from "../faculty-dataset.mjs";
 
@@ -45,6 +45,26 @@ let cameraStream = null, cameraControls = null, nativeDetector = null, enhancedR
 let cameraRequest = 0, scanning = false, pendingPhoto = "", lastDecoded = "", lastDecodedAt = 0;
 let rosterCache = new Map(), flushing = false, toastTimer = 0, photoPreviewScale = 1, checkinViewerScale = 1;
 let sessionExpiryTimer = 0;
+let liveRowsById = new Map(), checkinImageObjectUrl = "";
+
+async function uploadCheckinPhoto(checkinId, dataUrl) {
+  const response = await fetch(dataUrl);
+  const blob = await response.blob();
+  if (!blob.type.startsWith("image/") || blob.size > 1.5 * 1024 * 1024) throw Error("Hình điểm danh không hợp lệ hoặc lớn hơn 1,5 MB.");
+  const path = `attendance/${session.id}/${checkinId}.jpg`;
+  await uploadBytes(ref(storage, path), blob, { contentType: "image/jpeg", cacheControl: "private,max-age=0,no-store" });
+  return path;
+}
+
+async function photoSource(data) {
+  if (data.photoPath) {
+    const bytes = await getBytes(ref(storage, data.photoPath), 1.5 * 1024 * 1024);
+    if (checkinImageObjectUrl) URL.revokeObjectURL(checkinImageObjectUrl);
+    checkinImageObjectUrl = URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" }));
+    return checkinImageObjectUrl;
+  }
+  return data.photoData || "";
+}
 
 function notice(text) {
   $("#notice").textContent = text;
@@ -274,13 +294,14 @@ function listenRows() {
   const rowsQuery = assignment.role === "leader" || isManager ? query(collection(db, "checkins"), where("sessionId", "==", session.id)) : query(collection(db, "checkins"), where("scannerUid", "==", user.uid));
   unsubscribeRows = onSnapshot(rowsQuery, (snapshot) => {
     const rows = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).filter((item) => item.sessionId === session.id && !item.deletedAt).sort((a, b) => (b.checkedAt?.seconds || 0) - (a.checkedAt?.seconds || 0));
-    const pending = rows.filter((item) => !item.mssv && item.photoData);
+    liveRowsById = new Map(rows.map((item) => [item.id, item]));
+    const pending = rows.filter((item) => !item.mssv && (item.photoPath || item.photoData));
     const completed = rows.filter((item) => item.mssv);
     $("#pendingPhotoSection").classList.toggle("hidden", !pending.length);
     $("#pendingPhotoCount").textContent = pending.length + " ảnh";
     $("#pendingPhotoRows").innerHTML = pending.map((item, index) => `<tr><td>${pending.length - index}</td><td><button class="photo-link" data-view-checkin-photo="${item.id}">Xem hình</button></td><td>${esc(item.scannerName || item.scannerMssv || "")}</td><td>${stamp(item.checkedAt)}</td><td><input class="pending-mssv" data-pending-mssv="${item.id}" maxlength="12" placeholder="Nhập MSSV"></td><td><button class="att-btn green" data-label-checkin="${item.id}">Lưu MSSV</button>${(assignment.role === "leader" || isManager) && sessionIsOpen() ? ` <button class="att-btn danger" data-delete="${item.id}">Xóa</button>` : ""}</td></tr>`).join("");
     $("#rowCount").textContent = completed.length + " lượt";
-    $("#rows").innerHTML = completed.map((item, index) => `<tr><td>${completed.length - index}</td><td>${item.photoData ? `<button class="photo-link" data-view-checkin-photo="${item.id}">${esc(item.mssv)}</button>` : esc(item.mssv)}</td><td>${esc(item.name || "Không có dữ liệu")}</td><td>${stamp(item.checkedAt)}</td><td>${(assignment.role === "leader" || isManager) && sessionIsOpen() ? `<button class="att-btn danger" data-delete="${item.id}">Xóa</button>` : ""}</td></tr>`).join("") || '<tr><td colspan="5">Chưa có lượt điểm danh.</td></tr>';
+    $("#rows").innerHTML = completed.map((item, index) => `<tr><td>${completed.length - index}</td><td>${item.photoPath || item.photoData ? `<button class="photo-link" data-view-checkin-photo="${item.id}">${esc(item.mssv)}</button>` : esc(item.mssv)}</td><td>${esc(item.name || "Không có dữ liệu")}</td><td>${stamp(item.checkedAt)}</td><td>${(assignment.role === "leader" || isManager) && sessionIsOpen() ? `<button class="att-btn danger" data-delete="${item.id}">Xóa</button>` : ""}</td></tr>`).join("") || '<tr><td colspan="5">Chưa có lượt điểm danh.</td></tr>';
   }, (error) => notice(error.message));
 }
 function renderSession() {
@@ -363,8 +384,11 @@ async function flushOutbox() {
       if (record.mssv && existing.exists() && existing.data().deletedAt) checkinRef = doc(db, "checkins", `${session.id}_${record.mssv}_recheck_${record.requestId}`);
       const student = record.student;
       const data = { sessionId: session.id, eventId: session.eventId || "", mssv: record.mssv, name: student.name || "", email: student.email || "", studentUid: student.uid || "", scannerUid: user.uid, scannerEmail: user.email.toLowerCase(), scannerMssv: user.email.split("@")[0].toUpperCase(), scannerName: assignment.name || user.displayName || user.email, checkedAt: Timestamp.fromDate(new Date(record.time)), requestId: record.requestId, deletedAt: null };
-      if (record.photoData) data.photoData = record.photoData;
-      await setDoc(checkinRef, data);
+      if (record.photoData) data.photoPath = await uploadCheckinPhoto(checkinRef.id, record.photoData);
+      const batch = writeBatch(db);
+      batch.set(checkinRef, data);
+      batch.update(doc(db, "attendanceSessions", session.id), { checkinCount: increment(record.mssv ? 1 : 0), pendingCount: increment(record.mssv ? 0 : 1), updatedAt: serverTimestamp() });
+      await batch.commit();
       saveOutbox(outbox().filter((item) => item.requestId !== record.requestId));
       feedback(true); showToast("success", record.mssv ? "Điểm danh thành công" : "Đã gửi ảnh chờ nhập MSSV", record.mssv ? record.mssv + " · " + (student.name || "") : "Ảnh đã chuyển đến danh sách quản lý.");
     }
@@ -396,14 +420,17 @@ async function labelPendingPhoto(id) {
   const canonical = await getDoc(doc(db, "checkins", session.id + "_" + mssv));
   if (canonical.exists() && !canonical.data().deletedAt) return showToast("warn", "Sinh viên đã điểm danh", mssv + " · " + (canonical.data().name || ""));
   const student = await resolveStudent(mssv);
-  await updateDoc(doc(db, "checkins", id), { mssv, name: student.name || "Không có dữ liệu", email: student.email || "", studentUid: student.uid || "" });
+  const batch = writeBatch(db);
+  batch.update(doc(db, "checkins", id), { mssv, name: student.name || "Không có dữ liệu", email: student.email || "", studentUid: student.uid || "" });
+  batch.update(doc(db, "attendanceSessions", session.id), { checkinCount: increment(1), pendingCount: increment(-1), updatedAt: serverTimestamp() });
+  await batch.commit();
   feedback(true); showToast("success", "Đã lưu MSSV", mssv + " · " + (student.name || "Không có dữ liệu"));
 }
 async function openCheckinImage(id) {
   const snapshot = await getDoc(doc(db, "checkins", id));
-  if (!snapshot.exists() || !snapshot.data().photoData) return showToast("error", "Không tìm thấy hình", "Hình có thể đã bị xóa.");
+  if (!snapshot.exists() || (!snapshot.data().photoPath && !snapshot.data().photoData)) return showToast("error", "Không tìm thấy hình", "Hình có thể đã bị xóa.");
   checkinViewerScale = 1;
-  $("#checkinImage").src = snapshot.data().photoData;
+  $("#checkinImage").src = await photoSource(snapshot.data());
   $("#checkinImage").style.width = "100%";
   $("#checkinImageDialog").showModal();
 }
@@ -454,7 +481,7 @@ $("#photoDialog").addEventListener("cancel", () => { pendingPhoto = ""; });
 $("#photoZoomOut").onclick = () => { photoPreviewScale = setImageScale($("#photoPreview"), photoPreviewScale - 0.25); };
 $("#photoZoomReset").onclick = () => { photoPreviewScale = setImageScale($("#photoPreview"), 1); };
 $("#photoZoomIn").onclick = () => { photoPreviewScale = setImageScale($("#photoPreview"), photoPreviewScale + 0.25); };
-$("#closeCheckinImage").onclick = () => $("#checkinImageDialog").close();
+$("#closeCheckinImage").onclick = () => { $("#checkinImageDialog").close(); if (checkinImageObjectUrl) { URL.revokeObjectURL(checkinImageObjectUrl); checkinImageObjectUrl = ""; } };
 $("#checkinZoomOut").onclick = () => { checkinViewerScale = setImageScale($("#checkinImage"), checkinViewerScale - 0.25); };
 $("#checkinZoomReset").onclick = () => { checkinViewerScale = setImageScale($("#checkinImage"), 1); };
 $("#checkinZoomIn").onclick = () => { checkinViewerScale = setImageScale($("#checkinImage"), checkinViewerScale + 0.25); };
@@ -465,7 +492,11 @@ document.addEventListener("click", async (event) => {
   const labelButton = event.target.closest("[data-label-checkin]");
   if (labelButton) { try { await labelPendingPhoto(labelButton.dataset.labelCheckin); } catch (error) { showToast("error", "Không thể lưu MSSV", error.message); } return; }
   const button = event.target.closest("[data-delete]"); if (!button || (!isManager && assignment?.role !== "leader") || !sessionIsOpen()) return;
-  await setDoc(doc(db, "checkins", button.dataset.delete), { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email }, { merge: true }); showToast("success", "Đã chuyển vào thùng rác", "Sub-admin có thể khôi phục lượt điểm danh.");
+  const row = liveRowsById.get(button.dataset.delete);
+  const batch = writeBatch(db);
+  batch.update(doc(db, "checkins", button.dataset.delete), { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email });
+  batch.update(doc(db, "attendanceSessions", session.id), { checkinCount: increment(row?.mssv ? -1 : 0), pendingCount: increment(row?.mssv ? 0 : -1), updatedAt: serverTimestamp() });
+  await batch.commit(); showToast("success", "Đã chuyển vào thùng rác", "Sub-admin có thể khôi phục lượt điểm danh.");
 });
 window.addEventListener("pagehide", releaseCamera);
 window.addEventListener("online", () => void flushOutbox());
