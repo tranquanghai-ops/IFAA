@@ -52,6 +52,17 @@ service cloud.firestore {
       allow list, create, update, delete: if owner();
     }
 
+    match /favoriteScannerLists/{ownerUid} {
+      allow get: if admin() && ownerUid == request.auth.uid;
+      allow list: if false;
+      allow create, update: if admin()
+        && ownerUid == request.auth.uid
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.students is list
+        && request.resource.data.students.size() <= 100;
+      allow delete: if admin() && ownerUid == request.auth.uid;
+    }
+
     match /profiles/{uid} {
       allow get: if admin() || (participant() && uid == request.auth.uid);
       allow list: if admin();
