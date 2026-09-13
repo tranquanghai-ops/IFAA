@@ -15,6 +15,8 @@ service cloud.firestore {
     function attendanceSession(sessionId){ return get(/databases/$(database)/documents/attendanceSessions/$(sessionId)).data; }
     function attendanceAccepting(sessionId){
       return attendanceSession(sessionId).status == 'open'
+        && (!attendanceSession(sessionId).keys().hasAll(['startAt'])
+          || request.time >= attendanceSession(sessionId).startAt)
         && (!attendanceSession(sessionId).keys().hasAll(['endAt'])
           || request.time <= attendanceSession(sessionId).endAt);
     }
