@@ -2154,7 +2154,7 @@ async function loadAttendanceManage() {
   if (!selectedAttendanceSession) return;
   const sessionId = selectedAttendanceSession.id;
   const cursor = attendancePageCursors[attendancePage - 1];
-  const pageQueryParts = [collection(db, "checkins"), where("sessionId", "==", sessionId), where("deletedAt", "==", null), orderBy("checkedAt", "desc")];
+  const pageQueryParts = [collection(db, "checkins"), where("sessionId", "==", sessionId)];
   if (cursor) pageQueryParts.push(startAfter(cursor));
   pageQueryParts.push(limit(attendancePageSize + 1));
   const [assignmentSnapshot, checkinSnapshot, pendingSnapshot, grantSnapshot] = await Promise.all([
@@ -2166,7 +2166,7 @@ async function loadAttendanceManage() {
   attendancePageHasNext = checkinSnapshot.docs.length > attendancePageSize;
   const pageDocs = checkinSnapshot.docs.slice(0, attendancePageSize);
   if (attendancePageHasNext && pageDocs.length) attendancePageCursors[attendancePage] = pageDocs[pageDocs.length - 1];
-  const pageRows = pageDocs.map((item) => ({ id: item.id, ...item.data() }));
+  const pageRows = pageDocs.map((item) => ({ id: item.id, ...item.data() })).filter((item) => !item.deletedAt).sort((a, b) => attendanceCheckedMillis(b) - attendanceCheckedMillis(a));
   const pendingRows = pendingSnapshot.docs.map((item) => ({ id: item.id, ...item.data() })).filter((item) => !item.deletedAt && !pageRows.some((row) => row.id === item.id));
   const preservedTrash = attendanceTrashLoaded ? attendanceManageRows.filter((item) => item.deletedAt) : [];
   attendanceManageRows = [...pageRows, ...pendingRows, ...preservedTrash];
@@ -2201,7 +2201,7 @@ function renderAttendanceManageRows() {
   $("#attendancePendingPhotoCount").textContent = pending.length + " ảnh";
   $("#attendancePendingPhotoRows").innerHTML = pending.map((item, index) => `<tr><td>${pending.length - index}</td><td><button class="attendance-photo-link" data-attendance-view-photo="${item.id}">Xem hình</button></td><td>${safe(item.scannerName || item.scannerMssv || "")}</td><td>${safe(ts(item.checkedAt))}</td><td><input class="attendance-inline-mssv" data-attendance-pending-input="${item.id}" maxlength="12" placeholder="Nhập MSSV" ${selectedAttendanceSession?.status === "finalized" ? "disabled" : ""}></td><td><button class="btn btn-primary" data-attendance-label-photo="${item.id}" ${selectedAttendanceSession?.status === "finalized" ? "disabled" : ""}>Lưu MSSV</button> <button class="btn btn-danger" data-attendance-delete-checkin="${item.id}" ${selectedAttendanceSession?.status === "finalized" ? "disabled" : ""}>Xóa</button></td></tr>`).join("");
 
-  const totalPages = Math.max(1, Math.ceil(attendanceTotalCount / attendancePageSize));
+  const totalPages = Math.max(attendancePage, Math.ceil(attendanceTotalCount / attendancePageSize), 1);
   $("#attendanceCheckinCount").textContent = attendanceTotalCount + " lượt";
   $("#attendanceDeleteAll").disabled = attendanceTotalCount === 0 || selectedAttendanceSession?.status === "finalized";
   $("#attendanceCheckinRows").innerHTML = completed.map((item, index) => `<tr><td>${Math.max(1, attendanceTotalCount - ((attendancePage - 1) * attendancePageSize + index))}</td><td>${item.photoPath || item.photoData ? `<button class="attendance-photo-link" data-attendance-view-photo="${item.id}">${safe(item.mssv)}</button>` : safe(item.mssv)}</td><td>${safe(item.name || "Không có dữ liệu")}</td><td>${safe(item.scannerName || item.scannerMssv || "")}</td><td>${safe(ts(item.checkedAt))}</td><td><button class="btn btn-small btn-danger" data-attendance-delete-checkin="${item.id}" ${selectedAttendanceSession?.status === "finalized" ? "disabled" : ""}>Xóa</button></td></tr>`).join("") || '<tr><td colspan="6" class="empty">Chưa có lượt điểm danh.</td></tr>';
