@@ -1,7 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
 import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, setDoc, updateDoc, onSnapshot, query, where, serverTimestamp, Timestamp, writeBatch, increment } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
-import { getStorage, ref, uploadBytes, getBytes } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
+import { getStorage, ref, uploadBytes, getBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
 import { firebaseConfig, STUDENT_DOMAIN, OWNER_EMAIL } from "../firebase-config.mjs";
 import { loadFacultyDataset } from "../faculty-dataset.mjs";
 
@@ -89,10 +89,16 @@ async function uploadCheckinPhoto(checkinId, dataUrl) {
 
 async function photoSource(data) {
   if (data.photoPath) {
-    const bytes = await getBytes(ref(storage, data.photoPath), 1.5 * 1024 * 1024);
-    if (checkinImageObjectUrl) URL.revokeObjectURL(checkinImageObjectUrl);
-    checkinImageObjectUrl = URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" }));
-    return checkinImageObjectUrl;
+    const photoRef = ref(storage, data.photoPath);
+    try {
+      const bytes = await getBytes(photoRef, 1.5 * 1024 * 1024);
+      if (checkinImageObjectUrl) URL.revokeObjectURL(checkinImageObjectUrl);
+      checkinImageObjectUrl = URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" }));
+      return checkinImageObjectUrl;
+    } catch (bytesError) {
+      try { return await getDownloadURL(photoRef); }
+      catch { throw bytesError; }
+    }
   }
   return data.photoData || "";
 }
@@ -362,9 +368,9 @@ function listenRows() {
     const completed = rows.filter((item) => item.mssv);
     $("#pendingPhotoSection").classList.toggle("hidden", !pending.length);
     $("#pendingPhotoCount").textContent = pending.length + " ảnh";
-    $("#pendingPhotoRows").innerHTML = pending.map((item, index) => `<tr><td>${pending.length - index}</td><td><button class="photo-link" data-view-checkin-photo="${item.id}">Xem hình</button></td><td>${esc(item.scannerName || item.scannerMssv || "")}</td><td>${stamp(item.checkedAt)}</td><td><input class="pending-mssv" data-pending-mssv="${item.id}" maxlength="12" placeholder="Nhập MSSV"></td><td><button class="att-btn green" data-label-checkin="${item.id}">Lưu MSSV</button>${(assignment.role === "leader" || isManager) && sessionIsOpen() ? ` <button class="att-btn danger" data-delete="${item.id}">Xóa</button>` : ""}</td></tr>`).join("");
+    $("#pendingPhotoRows").innerHTML = pending.map((item, index) => `<tr><td>${pending.length - index}</td><td><button type="button" class="photo-link" data-view-checkin-photo="${item.id}">Xem hình</button></td><td>${esc(item.scannerName || item.scannerMssv || "")}</td><td>${stamp(item.checkedAt)}</td><td><input class="pending-mssv" data-pending-mssv="${item.id}" maxlength="12" placeholder="Nhập MSSV"></td><td><button type="button" class="att-btn green" data-label-checkin="${item.id}">Lưu MSSV</button>${(assignment.role === "leader" || isManager) && sessionIsOpen() ? ` <button type="button" class="att-btn danger" data-delete="${item.id}">Xóa</button>` : ""}</td></tr>`).join("");
     $("#rowCount").textContent = completed.length + " lượt";
-    $("#rows").innerHTML = completed.map((item, index) => `<tr><td>${completed.length - index}</td><td>${item.photoPath || item.photoData ? `<button class="photo-link" data-view-checkin-photo="${item.id}">${esc(item.mssv)}</button>` : esc(item.mssv)}</td><td>${esc(item.name || "Không có dữ liệu")}</td><td>${stamp(item.checkedAt)}</td><td>${(assignment.role === "leader" || isManager) && sessionIsOpen() ? `<button class="att-btn danger" data-delete="${item.id}">Xóa</button>` : ""}</td></tr>`).join("") || '<tr><td colspan="5">Chưa có lượt điểm danh.</td></tr>';
+    $("#rows").innerHTML = completed.map((item, index) => `<tr><td>${completed.length - index}</td><td>${item.photoPath || item.photoData ? `<button type="button" class="photo-link" data-view-checkin-photo="${item.id}">${esc(item.mssv)}</button>` : esc(item.mssv)}</td><td>${esc(item.name || "Không có dữ liệu")}</td><td>${stamp(item.checkedAt)}</td><td>${(assignment.role === "leader" || isManager) && sessionIsOpen() ? `<button type="button" class="att-btn danger" data-delete="${item.id}">Xóa</button>` : ""}</td></tr>`).join("") || '<tr><td colspan="5">Chưa có lượt điểm danh.</td></tr>';
   }, (error) => notice(error.message));
 }
 function renderSession() {
@@ -521,12 +527,24 @@ async function labelPendingPhoto(id) {
   feedback(true); showToast("success", "Đã lưu MSSV", mssv + " · " + (student.name || "Không có dữ liệu"));
 }
 async function openCheckinImage(id) {
-  const snapshot = await getDoc(doc(db, "checkins", id));
-  if (!snapshot.exists() || (!snapshot.data().photoPath && !snapshot.data().photoData)) return showToast("error", "Không tìm thấy hình", "Hình có thể đã bị xóa.");
-  checkinViewerScale = 1;
-  $("#checkinImage").src = await photoSource(snapshot.data());
-  $("#checkinImage").style.width = "100%";
-  $("#checkinImageDialog").showModal();
+  const dialog = $("#checkinImageDialog"), image = $("#checkinImage"), status = $("#checkinImageStatus");
+  if (!dialog.open) dialog.showModal();
+  image.removeAttribute("src"); status.textContent = "Đang tải hình…"; status.classList.remove("hidden");
+  try {
+    let data = liveRowsById.get(id);
+    if (!data) {
+      const snapshot = await getDoc(doc(db, "checkins", id));
+      if (snapshot.exists()) data = snapshot.data();
+    }
+    if (!data?.photoPath && !data?.photoData) throw Error("Không tìm thấy tệp hình. Hình có thể đã bị xóa.");
+    checkinViewerScale = 1; image.style.width = "100%";
+    image.onload = () => status.classList.add("hidden");
+    image.onerror = () => { status.textContent = "Trình duyệt không hiển thị được tệp hình này."; status.classList.remove("hidden"); };
+    image.src = await photoSource(data);
+  } catch (error) {
+    status.textContent = "Không tải được hình: " + (error.message || "Storage từ chối truy cập.");
+    showToast("error", "Không tải được hình", error.message || "Vui lòng kiểm tra quyền Storage.");
+  }
 }
 async function login() {
   try {
@@ -601,7 +619,7 @@ $("#checkinZoomIn").onclick = () => { checkinViewerScale = setImageScale($("#che
 $("#scanForm").onsubmit = async (event) => { event.preventDefault(); await submitCheckin($("#mssv").value); };
 document.addEventListener("click", async (event) => {
   const viewButton = event.target.closest("[data-view-checkin-photo]");
-  if (viewButton) return openCheckinImage(viewButton.dataset.viewCheckinPhoto);
+  if (viewButton) { await openCheckinImage(viewButton.dataset.viewCheckinPhoto); return; }
   const labelButton = event.target.closest("[data-label-checkin]");
   if (labelButton) { try { await labelPendingPhoto(labelButton.dataset.labelCheckin); } catch (error) { showToast("error", "Không thể lưu MSSV", error.message); } return; }
   const button = event.target.closest("[data-delete]"); if (!button || (!isManager && assignment?.role !== "leader") || !sessionIsOpen()) return;
