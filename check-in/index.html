@@ -25,6 +25,7 @@
     <div id="closedMessage" class="scanner-message hidden"><h2 id="closedTitle">Sự kiện đã kết thúc</h2><p id="closedDetail"></p></div>
     <div id="scannerArea">
       <div id="scanStatus" class="scan-status"><b>Sẵn sàng điểm danh</b><span>Nhấn “Bắt đầu quét” để mở camera sau.</span></div>
+      <div id="cameraBlockedActions" class="att-actions camera-blocked-actions hidden"><a id="openDirectCamera" class="att-btn primary" href="#" target="_blank" rel="noopener">Mở trang quét trực tiếp</a></div>
       <section class="camera-card">
         <div class="scanner-video-wrap"><video id="video" autoplay playsinline webkit-playsinline muted></video><div class="scanner-frame"></div><div class="scanner-tip">Đưa mã vạch trên thẻ sinh viên vào khung</div></div>
         <div class="scanner-controls"><button id="startCamera" class="att-btn green" type="button">▶ Bắt đầu quét</button><button id="stopCamera" class="att-btn" type="button" disabled>■ Dừng</button><button id="capturePhoto" class="att-btn photo" type="button">📷 Chụp hình</button></div>
@@ -40,6 +41,6 @@
 </main>
 <dialog id="photoDialog" class="scanner-dialog"><div class="scanner-dialog-card"><div class="rows-head"><h2>Kiểm tra ảnh trước khi lưu</h2><button id="closePhotoDialog" class="att-btn" type="button">Đóng</button></div><div class="scanner-image-stage"><img id="photoPreview" alt="Hình vừa chụp"></div><div class="scanner-zoom-actions"><button id="photoZoomOut" class="att-btn" type="button">− Thu nhỏ</button><button id="photoZoomReset" class="att-btn" type="button">100%</button><button id="photoZoomIn" class="att-btn" type="button">＋ Phóng to</button></div><label class="photo-mssv-field">MSSV trên hình <span>(có thể để trống và bổ sung sau)</span><input id="photoMssv" maxlength="12" autocomplete="off" autocapitalize="characters" placeholder="Nhập MSSV nếu đã đọc được"></label><div class="scanner-dialog-actions"><button id="retakePhoto" class="att-btn photo" type="button">Chụp lại</button><button id="savePhoto" class="att-btn green" type="button">Lưu hình</button></div></div></dialog>
 <dialog id="checkinImageDialog" class="scanner-dialog"><div class="scanner-dialog-card"><div class="rows-head"><h2>Xem hình điểm danh</h2><button id="closeCheckinImage" class="att-btn" type="button">Đóng</button></div><div class="scanner-image-stage"><img id="checkinImage" alt="Hình điểm danh"></div><div class="scanner-zoom-actions"><button id="checkinZoomOut" class="att-btn" type="button">− Thu nhỏ</button><button id="checkinZoomReset" class="att-btn" type="button">100%</button><button id="checkinZoomIn" class="att-btn" type="button">＋ Phóng to</button></div></div></dialog>
-<script type="module" src="./check-in.mjs?v=18"></script>
+<script type="module" src="./check-in.mjs?v=19"></script>
 </body>
 </html>
