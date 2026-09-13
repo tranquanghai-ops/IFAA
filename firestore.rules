@@ -54,6 +54,16 @@ service cloud.firestore {
       allow list, create, update, delete: if owner();
     }
 
+    match /storageAdminAccess/{uid} {
+      allow get: if owner() || (admin() && uid == request.auth.uid);
+      allow list, delete: if owner();
+      allow create, update: if admin()
+        && uid == request.auth.uid
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == email()
+        && request.resource.data.role in ['admin', 'subadmin'];
+    }
+
     match /favoriteScannerLists/{ownerUid} {
       allow get: if admin() && ownerUid == request.auth.uid;
       allow list: if false;
