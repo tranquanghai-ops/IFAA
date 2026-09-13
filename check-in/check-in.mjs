@@ -13,7 +13,7 @@ const provider = new GoogleAuthProvider();
 provider.setCustomParameters({ prompt: "select_account" });
 const $ = (selector) => document.querySelector(selector);
 function sessionParam(params) {
-  return (params.get("event") || params.get("e"))?.trim().toUpperCase() || "";
+  return (params.get("e") || params.get("event"))?.trim().toUpperCase() || "";
 }
 function resolveSessionId() {
   try {
