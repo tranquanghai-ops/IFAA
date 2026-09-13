@@ -32,6 +32,17 @@ function resolveSessionId() {
   return "";
 }
 const sessionId = resolveSessionId();
+if (window.parent !== window) {
+  window.addEventListener("message", (event) => {
+    if (event.origin !== "https://ifa.tdtu.edu.vn" || event.data?.type !== "ifaa-checkin-session") return;
+    const forwardedId = String(event.data.sessionId || "").trim().toUpperCase();
+    if (!forwardedId || forwardedId === sessionId) return;
+    const target = new URL(window.location.href);
+    target.search = `?e=${encodeURIComponent(forwardedId)}`;
+    window.location.replace(target.toString());
+  });
+  window.parent.postMessage({ type: "ifaa-checkin-ready", sessionId }, "https://ifa.tdtu.edu.vn");
+}
 const esc = (value) => String(value ?? "").replace(/[&<>]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[char]);
 const stamp = (value) => value?.toDate ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "medium" }).format(value.toDate()) : "—";
 const vietnamDate = (value) => {
@@ -316,6 +327,23 @@ function listenRows() {
   }, (error) => notice(error.message));
 }
 function renderSession() {
+  const eventStatus = $("#eventStatus");
+  let statusDetail = $("#statusDetail");
+  if (!statusDetail && eventStatus) {
+    statusDetail = document.createElement("span");
+    statusDetail.id = "statusDetail";
+    statusDetail.className = "attendance-status-detail";
+    eventStatus.insertAdjacentElement("afterend", statusDetail);
+  }
+  const closedMessage = $("#closedMessage");
+  let closedTitle = $("#closedTitle") || closedMessage?.querySelector("h2");
+  if (closedTitle && !closedTitle.id) closedTitle.id = "closedTitle";
+  let closedDetail = $("#closedDetail");
+  if (!closedDetail && closedMessage) {
+    closedDetail = document.createElement("p");
+    closedDetail.id = "closedDetail";
+    closedMessage.appendChild(closedDetail);
+  }
   const state = sessionRuntimeState();
   const open = state === "open";
   clearTimeout(sessionExpiryTimer);
@@ -328,21 +356,20 @@ function renderSession() {
     }, Math.min(boundaryMillis - Date.now() + 250, 2147483647));
   }
   const labels = { scheduled: "Sắp mở", open: "Đang mở", ended: "Đã kết thúc", finalized: "Đã chốt danh sách" };
-  $("#eventStatus").textContent = labels[state];
-  $("#eventStatus").className = "att-badge " + state;
+  if (eventStatus) { eventStatus.textContent = labels[state]; eventStatus.className = "att-badge " + state; }
   if (state === "scheduled") {
     const remaining = Math.max(0, sessionStartMillis() - Date.now());
     const days = Math.floor(remaining / 86400000), hours = Math.floor((remaining % 86400000) / 3600000), minutes = Math.floor((remaining % 3600000) / 60000), seconds = Math.floor((remaining % 60000) / 1000);
-    $("#statusDetail").textContent = `Mở sau ${days ? `${days} ngày ` : ""}${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-    $("#closedTitle").textContent = "Sự kiện sắp mở";
-    $("#closedDetail").textContent = $("#statusDetail").textContent;
+    if (statusDetail) statusDetail.textContent = `Mở sau ${days ? `${days} ngày ` : ""}${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    if (closedTitle) closedTitle.textContent = "Sự kiện sắp mở";
+    if (closedDetail) closedDetail.textContent = statusDetail?.textContent || "Sự kiện chưa đến giờ mở.";
     sessionExpiryTimer = window.setTimeout(renderSession, 1000);
   } else {
-    $("#statusDetail").textContent = labels[state];
-    $("#closedTitle").textContent = state === "finalized" ? "Danh sách đã được chốt" : "Sự kiện đã kết thúc";
-    $("#closedDetail").textContent = state === "finalized" ? "Phiên điểm danh không nhận thêm dữ liệu." : "Không thể quét thêm sinh viên.";
+    if (statusDetail) statusDetail.textContent = labels[state];
+    if (closedTitle) closedTitle.textContent = state === "finalized" ? "Danh sách đã được chốt" : "Sự kiện đã kết thúc";
+    if (closedDetail) closedDetail.textContent = state === "finalized" ? "Phiên điểm danh không nhận thêm dữ liệu." : "Không thể quét thêm sinh viên.";
   }
-  $("#closedMessage").classList.toggle("hidden", open);
+  closedMessage?.classList.toggle("hidden", open);
   $("#scannerArea").classList.toggle("hidden", !open);
   $("#roleText").classList.toggle("hidden", !open);
   $("#capturePhoto").disabled = !open;
@@ -352,7 +379,7 @@ function renderSession() {
 }
 async function startSession() {
   if (!sessionId) throw Error("Liên kết điểm danh không hợp lệ.");
-  const snapshot = await getDoc(doc(db, "attendanceSessions", sessionId)); if (!snapshot.exists()) throw Error("Không tìm thấy sự kiện điểm danh.");
+  const snapshot = await getDoc(doc(db, "attendanceSessions", sessionId)); if (!snapshot.exists()) throw Error(`Không tìm thấy phiên điểm danh có mã ${sessionId}.`);
   session = { id: snapshot.id, ...snapshot.data() };
   if (isManager) assignment = { active: true, role: "leader", name: managerName || user.displayName || user.email };
   else {
