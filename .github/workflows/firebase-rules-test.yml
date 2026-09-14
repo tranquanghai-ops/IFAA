@@ -11,7 +11,11 @@ on:
       - "tests/**"
       - "firebase.json"
       - "package.json"
-      - "package-lock.json"
+      - "pnpm-lock.yaml"
+      - "scripts/**"
+      - "admin/admin.mjs"
+      - "student.mjs"
+      - "check-in/check-in.mjs"
   workflow_dispatch:
 
 permissions:

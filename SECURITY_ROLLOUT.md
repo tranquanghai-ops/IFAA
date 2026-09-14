@@ -9,6 +9,9 @@ Deployment order is intentionally:
 3. Firebase Hosting client.
 4. GitHub Pages, only after the Firebase deployment workflow succeeds.
 
+The production Firebase workflow runs syntax, static-security, and Firestore /
+Storage Emulator tests before authenticating or executing its first deploy.
+
 The transition rules accept both:
 
 - the previous client, which does not write mutation markers; and

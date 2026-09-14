@@ -7,6 +7,7 @@ const storage = read("storage.rules");
 const admin = read("admin/admin.mjs");
 const checkin = read("check-in/check-in.mjs");
 const pages = read(".github/workflows/pages.yml");
+const firebaseDeploy = read(".github/workflows/firebase-hosting-merge.yml");
 
 assert.match(firestore, /function managesSessionAfter\(sessionId\)/);
 assert.match(firestore, /allow create: if managesSessionAfter\(request\.resource\.data\.sessionId\)/);
@@ -26,6 +27,7 @@ assert.match(checkin, /where\("mssv", "==", record\.mssv\)/);
 assert.match(checkin, /const photoObjectId = record\.mssv \? `\$\{checkinRef\.id\}_\$\{record\.requestId\}` : checkinRef\.id/);
 assert.match(pages, /workflow_run:/);
 assert.match(pages, /workflow_run\.conclusion == 'success'/);
+assert.ok(firebaseDeploy.indexOf("pnpm test:rules") < firebaseDeploy.indexOf("Authenticate Firebase service account"));
 
 for (const [name, source] of [["firestore.rules", firestore], ["storage.rules", storage]]) {
   const stripped = source
