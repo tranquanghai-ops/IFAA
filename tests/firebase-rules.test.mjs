@@ -404,7 +404,10 @@ describe("registration integrity and legacy data", () => {
       const eventRef = doc(db, "events", "E");
       const registrationRef = doc(db, "registrations", `${uid}_E`);
       await runTransaction(db, async (transaction) => {
-        const event = await transaction.get(eventRef);
+        const [event, registration] = await Promise.all([
+          transaction.get(eventRef), transaction.get(registrationRef)
+        ]);
+        if (registration.exists()) return;
         transaction.update(eventRef, {
           registeredCount: Number(event.data().registeredCount || 0) + 1,
           registrationMutationId: registrationRef.id, updatedAt: serverTimestamp()
@@ -427,7 +430,10 @@ describe("registration integrity and legacy data", () => {
       const eventRef = doc(db, "events", "E");
       const registrationRef = doc(db, "registrations", `${uid}_E`);
       await runTransaction(db, async (transaction) => {
-        const event = await transaction.get(eventRef);
+        const [event, registration] = await Promise.all([
+          transaction.get(eventRef), transaction.get(registrationRef)
+        ]);
+        if (!registration.exists()) return;
         transaction.update(eventRef, {
           registeredCount: Number(event.data().registeredCount || 0) - 1,
           registrationMutationId: registrationRef.id, updatedAt: serverTimestamp()
