@@ -655,7 +655,7 @@ async function register(eventId) {
       const now = Date.now();
       if (event.status !== "open" || (event.registeredCount || 0) >= event.capacity || now < (millis(event.openAt) ?? 0) || now > (millis(event.closeAt) ?? Infinity)) throw Error("Sự kiện đã đủ, chưa mở hoặc đã đóng.");
       const identifier = profile.identifier || profile.mssv || user.email.split("@")[0].toUpperCase();
-      transaction.update(eventRef, { registeredCount: (event.registeredCount || 0) + 1, updatedAt: serverTimestamp() });
+      transaction.update(eventRef, { registeredCount: (event.registeredCount || 0) + 1, registrationMutationId: registrationRef.id, updatedAt: serverTimestamp() });
       transaction.set(registrationRef, { uid: user.uid, email: user.email.toLowerCase(), identifier, mssv: identifier, participantType: profile.participantType, name: profile.name, phone: profile.phone || "", faculty: profile.faculty, major: profile.major || "", eventId, eventTitle: event.title, eventDate: event.date, eventCreatorUid: event.createdByUid || "", groupId: event.groupId || "", groupName: event.groupName || "", createdAt: serverTimestamp() });
       if (event.groupId) transaction.set(limitRef, { uid: user.uid, email: user.email.toLowerCase(), groupId: event.groupId, groupName: group.name, maxRegistrations: group.maxRegistrations, count: (current.count || 0) + 1, eventIds: [...(current.eventIds || []), eventId], updatedAt: serverTimestamp() });
     });
@@ -692,7 +692,7 @@ async function cancel(eventId) {
         current = limitSnapshot.data();
         currentGroup = groupSnapshot.data();
       }
-      transaction.update(eventRef, { registeredCount: Math.max(0, (event.registeredCount || 0) - 1), updatedAt: serverTimestamp() });
+      transaction.update(eventRef, { registeredCount: Math.max(0, (event.registeredCount || 0) - 1), registrationMutationId: registrationRef.id, updatedAt: serverTimestamp() });
       transaction.delete(registrationRef);
       if (limitRef) transaction.set(limitRef, { ...current, groupName: currentGroup.name, maxRegistrations: currentGroup.maxRegistrations, count: Math.max(0, current.count - 1), eventIds: (current.eventIds || []).filter((id) => id !== eventId), updatedAt: serverTimestamp() });
     });
