@@ -3,7 +3,7 @@
 - Repository: `tranquanghai-ops/IFAA`
 - Branch hiện tại: `refactor/export-module`
 - Nhánh đích: `main`
-- PR liên quan: Draft PR của branch `refactor/export-module` (tạo sau khi push).
+- PR liên quan: Draft PR #4 — https://github.com/tranquanghai-ops/IFAA/pull/4
 
 # Mục tiêu hiện tại
 
@@ -57,7 +57,7 @@ Modular hóa có giới hạn bằng cách tách chức năng Export Excel khỏ
 
 # Hành động tiếp theo
 
-Review Draft PR của branch `refactor/export-module`, tập trung xác nhận diff chỉ di chuyển logic export. Sau refactor này, module phù hợp tiếp theo được đề xuất là `registrations`; không bắt đầu việc đó khi chưa có task/phê duyệt riêng.
+Review Draft PR #4, tập trung xác nhận diff chỉ di chuyển logic export. Sau refactor này, module phù hợp tiếp theo được đề xuất là `registrations`; không bắt đầu việc đó khi chưa có task/phê duyệt riêng.
 
 # Ràng buộc an toàn
 
