@@ -91,40 +91,54 @@ service cloud.firestore {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checkinCount','pendingCount','updatedAt'])
         && attendanceCounterDelta();
     }
+    function attendanceDocumentMutationLinked(sessionId){
+      let checkinId = request.resource.data.get('counterMutationId', '');
+      let path = checkinPath(checkinId);
+      return checkinId is string
+        && checkinId.size() > 0
+        && checkinId.size() <= 200
+        && existsAfter(path)
+        && getAfter(path).data.sessionId == sessionId
+        && (( !exists(path)
+            && activeCheckin(getAfter(path).data)
+            && ((getAfter(path).data.mssv != ''
+                && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount') + 1
+                && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount'))
+              || (getAfter(path).data.mssv == ''
+                && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount') + 1
+                && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount'))))
+          || (exists(path)
+            && get(path).data.sessionId == sessionId
+            && !activeCheckin(get(path).data)
+            && activeCheckin(getAfter(path).data)
+            && ((getAfter(path).data.mssv != ''
+                && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount') + 1
+                && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount'))
+              || (getAfter(path).data.mssv == ''
+                && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount') + 1
+                && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount'))))
+          || (exists(path)
+            && get(path).data.sessionId == sessionId
+            && activeCheckin(get(path).data)
+            && !activeCheckin(getAfter(path).data)
+            && ((get(path).data.mssv != ''
+                && counter(request.resource.data, 'checkinCount') == decrementedCounter(resource.data, 'checkinCount')
+                && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount'))
+              || (get(path).data.mssv == ''
+                && counter(request.resource.data, 'pendingCount') == decrementedCounter(resource.data, 'pendingCount')
+                && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount')))));
+    }
     function checkinCounterLinked(checkinId, sessionId){
       return (getAfter(attendanceSessionPath(sessionId)).data.get('counterMutationId', '') == checkinId
           || getAfter(attendanceSessionPath(sessionId)).data.get('counterMutationId', '') == get(attendanceSessionPath(sessionId)).data.get('counterMutationId', ''))
-        && (
-          (!activeCheckin(resource.data) && activeCheckin(request.resource.data)
-            && ((request.resource.data.mssv != ''
-                && counter(getAfter(attendanceSessionPath(sessionId)).data, 'checkinCount') == counter(get(attendanceSessionPath(sessionId)).data, 'checkinCount') + 1
-                && counter(getAfter(attendanceSessionPath(sessionId)).data, 'pendingCount') == counter(get(attendanceSessionPath(sessionId)).data, 'pendingCount'))
-              || (request.resource.data.mssv == ''
-                && counter(getAfter(attendanceSessionPath(sessionId)).data, 'pendingCount') == counter(get(attendanceSessionPath(sessionId)).data, 'pendingCount') + 1
-                && counter(getAfter(attendanceSessionPath(sessionId)).data, 'checkinCount') == counter(get(attendanceSessionPath(sessionId)).data, 'checkinCount'))))
-          || (activeCheckin(resource.data) && !activeCheckin(request.resource.data)
-            && ((resource.data.mssv != ''
-                && counter(getAfter(attendanceSessionPath(sessionId)).data, 'checkinCount') == decrementedCounter(get(attendanceSessionPath(sessionId)).data, 'checkinCount')
-                && counter(getAfter(attendanceSessionPath(sessionId)).data, 'pendingCount') == counter(get(attendanceSessionPath(sessionId)).data, 'pendingCount'))
-              || (resource.data.mssv == ''
-                && counter(getAfter(attendanceSessionPath(sessionId)).data, 'pendingCount') == decrementedCounter(get(attendanceSessionPath(sessionId)).data, 'pendingCount')
-                && counter(getAfter(attendanceSessionPath(sessionId)).data, 'checkinCount') == counter(get(attendanceSessionPath(sessionId)).data, 'checkinCount'))))
+        && ((!activeCheckin(resource.data) && activeCheckin(request.resource.data))
+          || (activeCheckin(resource.data) && !activeCheckin(request.resource.data))
           || (activeCheckin(resource.data) && activeCheckin(request.resource.data)
-            && resource.data.mssv == ''
-            && request.resource.data.mssv != ''
-            && counter(getAfter(attendanceSessionPath(sessionId)).data, 'checkinCount') == counter(get(attendanceSessionPath(sessionId)).data, 'checkinCount') + 1
-            && counter(getAfter(attendanceSessionPath(sessionId)).data, 'pendingCount') == counter(get(attendanceSessionPath(sessionId)).data, 'pendingCount') - 1)
-        );
+            && resource.data.mssv == '' && request.resource.data.mssv != ''));
     }
     function newCheckinCounterLinked(checkinId, sessionId){
       return (getAfter(attendanceSessionPath(sessionId)).data.get('counterMutationId', '') == checkinId
-          || getAfter(attendanceSessionPath(sessionId)).data.get('counterMutationId', '') == get(attendanceSessionPath(sessionId)).data.get('counterMutationId', ''))
-        && ((request.resource.data.mssv != ''
-            && counter(getAfter(attendanceSessionPath(sessionId)).data, 'checkinCount') == counter(get(attendanceSessionPath(sessionId)).data, 'checkinCount') + 1
-            && counter(getAfter(attendanceSessionPath(sessionId)).data, 'pendingCount') == counter(get(attendanceSessionPath(sessionId)).data, 'pendingCount'))
-          || (request.resource.data.mssv == ''
-            && counter(getAfter(attendanceSessionPath(sessionId)).data, 'pendingCount') == counter(get(attendanceSessionPath(sessionId)).data, 'pendingCount') + 1
-            && counter(getAfter(attendanceSessionPath(sessionId)).data, 'checkinCount') == counter(get(attendanceSessionPath(sessionId)).data, 'checkinCount')));
+          || getAfter(attendanceSessionPath(sessionId)).data.get('counterMutationId', '') == get(attendanceSessionPath(sessionId)).data.get('counterMutationId', ''));
     }
     function attendanceAccepting(sessionId){
       return attendanceSession(sessionId).status == 'open'
@@ -412,9 +426,7 @@ service cloud.firestore {
               && request.resource.data.get('counterMutationId', '') is string
               && request.resource.data.get('counterMutationId', '').size() > 0
               && request.resource.data.get('counterMutationId', '').size() <= 200
-              && (attendanceCounterDelta()
-                || (counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount')
-                  && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount'))))
+              && attendanceDocumentMutationLinked(sessionId))
             || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checkinCount','pendingCount','counterMutationId','counterSourceId','updatedAt'])
               && canonicalizationSessionLinked(sessionId))
             || legacyAttendanceCounterMutation()));
