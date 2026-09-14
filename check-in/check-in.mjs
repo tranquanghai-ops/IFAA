@@ -483,7 +483,7 @@ async function flushOutbox() {
         feedback(false); showToast("warn", "Đã điểm danh trước đó", record.mssv + " · " + (existing.data().name || ""));
         continue;
       }
-      if (record.mssv && existing.exists() && existing.data().deletedAt) checkinRef = doc(db, "checkins", `${session.id}_${record.mssv}_recheck_${record.requestId}`);
+      const restoringDeletedCheckin = record.mssv && existing.exists() && existing.data().deletedAt;
       const student = record.student;
       const data = { sessionId: session.id, eventId: session.eventId || "", mssv: record.mssv, name: student.name || "", email: student.email || "", studentUid: student.uid || "", scannerUid: user.uid, scannerEmail: user.email.toLowerCase(), scannerMssv: user.email.split("@")[0].toUpperCase(), scannerName: assignment.name || user.displayName || user.email, checkedAt: Timestamp.fromDate(new Date(record.time)), requestId: record.requestId, deletedAt: null };
       if (record.photoData) {
@@ -491,8 +491,8 @@ async function flushOutbox() {
         data.photoPath = photo.path; data.photoUrl = photo.url;
       }
       const batch = writeBatch(db);
-      batch.set(checkinRef, data);
-      batch.update(doc(db, "attendanceSessions", session.id), { checkinCount: increment(record.mssv ? 1 : 0), pendingCount: increment(record.mssv ? 0 : 1), updatedAt: serverTimestamp() });
+      batch.set(checkinRef, restoringDeletedCheckin ? { ...data, deletedByUid: "", deletedByEmail: "" } : data);
+      batch.update(doc(db, "attendanceSessions", session.id), { checkinCount: increment(record.mssv ? 1 : 0), pendingCount: increment(record.mssv ? 0 : 1), counterMutationId: checkinRef.id, updatedAt: serverTimestamp() });
       await batch.commit();
       saveOutbox(outbox().filter((item) => item.requestId !== record.requestId));
       feedback(true); showToast("success", record.mssv ? "Điểm danh thành công" : "Đã gửi ảnh chờ nhập MSSV", record.mssv ? record.mssv + " · " + (student.name || "") : "Ảnh đã chuyển đến danh sách quản lý.");
@@ -527,7 +527,7 @@ async function labelPendingPhoto(id) {
   const student = await resolveStudent(mssv);
   const batch = writeBatch(db);
   batch.update(doc(db, "checkins", id), { mssv, name: student.name || "Không có dữ liệu", email: student.email || "", studentUid: student.uid || "" });
-  batch.update(doc(db, "attendanceSessions", session.id), { checkinCount: increment(1), pendingCount: increment(-1), updatedAt: serverTimestamp() });
+  batch.update(doc(db, "attendanceSessions", session.id), { checkinCount: increment(1), pendingCount: increment(-1), counterMutationId: id, updatedAt: serverTimestamp() });
   await batch.commit();
   feedback(true); showToast("success", "Đã lưu MSSV", mssv + " · " + (student.name || "Không có dữ liệu"));
 }
@@ -631,7 +631,7 @@ document.addEventListener("click", async (event) => {
   const row = liveRowsById.get(button.dataset.delete);
   const batch = writeBatch(db);
   batch.update(doc(db, "checkins", button.dataset.delete), { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email });
-  batch.update(doc(db, "attendanceSessions", session.id), { checkinCount: increment(row?.mssv ? -1 : 0), pendingCount: increment(row?.mssv ? 0 : -1), updatedAt: serverTimestamp() });
+  batch.update(doc(db, "attendanceSessions", session.id), { checkinCount: increment(row?.mssv ? -1 : 0), pendingCount: increment(row?.mssv ? 0 : -1), counterMutationId: button.dataset.delete, updatedAt: serverTimestamp() });
   await batch.commit(); showToast("success", "Đã chuyển vào thùng rác", "Sub-admin có thể khôi phục lượt điểm danh.");
 });
 window.addEventListener("pagehide", releaseCamera);
