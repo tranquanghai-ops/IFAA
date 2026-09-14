@@ -1,11 +1,22 @@
 # Dự án
 
 - Repository: `tranquanghai-ops/IFAA`
-- Branch hiện tại: `refactor/students-module`
+- Branch hiện tại: `refactor/groups-module`
 - Nhánh đích: `main`
-- Base commit: `41cd524` (`Merge pull request #6 from tranquanghai-ops/refactor/events-module`)
+- Base commit: `1e4fcbd` (`Merge pull request #7 from tranquanghai-ops/refactor/students-module`)
 
-# Mục tiêu hiện tại
+# Cập nhật mới nhất — Groups
+
+- Groups đã được modularize vào `admin/modules/groups/group-service.mjs`.
+- Module mới giữ group render, list subscription, group dialog/form, validation, group ordering, group link/calendar, group limit/unlimited behavior, bulk status, trash/restore/purge và binding riêng của Groups.
+- `admin/admin.mjs` giữ shared `groups` list cho Events/Registrations/Exports, subscription orchestration và phần tạo group ngay trong event form vì nó phối hợp trực tiếp event creation.
+- Events module nhận `groupCode`, `groupPosition`, `refreshGroupOptions` và `setLimitInputState`; Registrations đọc `groups` qua getter và dùng `groupPosition` để sắp thứ tự. Không có import ngược hoặc circular dependency.
+- Không thay đổi UI, quyền, Firestore Rules/Storage Rules, schema, collection/document path, group registration-limit, event-group relationship hoặc transaction/batch behavior.
+- Kiểm tra: syntax `admin/admin.mjs`, `group-service.mjs`, static security và `git diff --check` PASS. Có targeted registration integration test, nhưng không chạy được vì môi trường không có `firebase`; không cài thêm công cụ.
+- Commit dự kiến: `refactor: extract admin groups module`.
+- Module đề xuất tiếp theo: `attendance`; không bắt đầu khi chưa có task riêng.
+
+# Bàn giao Students (lịch sử)
 
 Modular hóa có giới hạn bằng cách tách logic quản lý sinh viên phía Admin khỏi `admin/admin.mjs`, chỉ refactor cấu trúc và giữ nguyên hành vi production.
 
