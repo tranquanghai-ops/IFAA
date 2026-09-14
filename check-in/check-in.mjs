@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
-import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, setDoc, updateDoc, onSnapshot, query, where, serverTimestamp, Timestamp, writeBatch, increment } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
+import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, setDoc, updateDoc, onSnapshot, query, where, serverTimestamp, Timestamp, runTransaction } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
 import { getStorage, ref, uploadBytes, getBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
 import { firebaseConfig, STUDENT_DOMAIN, OWNER_EMAIL } from "../firebase-config.mjs";
 import { loadFacultyDataset } from "../faculty-dataset.mjs";
@@ -476,24 +476,48 @@ async function flushOutbox() {
   try {
     while (outbox().length) {
       const record = outbox()[0];
-      let checkinRef = doc(db, "checkins", session.id + "_" + (record.mssv || "photo_" + record.requestId));
+      const checkinRef = doc(db, "checkins", session.id + "_" + (record.mssv || "photo_" + record.requestId));
+      if (record.mssv) {
+        const legacy = await getDocs(query(collection(db, "checkins"), where("sessionId", "==", session.id), where("mssv", "==", record.mssv)));
+        const activeLegacy = legacy.docs.find((item) => item.id !== checkinRef.id && !item.data().deletedAt);
+        if (activeLegacy) {
+          saveOutbox(outbox().filter((item) => item.requestId !== record.requestId));
+          feedback(false); showToast("warn", "Đã điểm danh trước đó", record.mssv + " · " + (activeLegacy.data().name || ""));
+          continue;
+        }
+      }
       const existing = record.mssv ? await getDoc(checkinRef) : { exists: () => false };
       if (record.mssv && existing.exists() && !existing.data().deletedAt) {
         saveOutbox(outbox().filter((item) => item.requestId !== record.requestId));
         feedback(false); showToast("warn", "Đã điểm danh trước đó", record.mssv + " · " + (existing.data().name || ""));
         continue;
       }
-      const restoringDeletedCheckin = record.mssv && existing.exists() && existing.data().deletedAt;
       const student = record.student;
       const data = { sessionId: session.id, eventId: session.eventId || "", mssv: record.mssv, name: student.name || "", email: student.email || "", studentUid: student.uid || "", scannerUid: user.uid, scannerEmail: user.email.toLowerCase(), scannerMssv: user.email.split("@")[0].toUpperCase(), scannerName: assignment.name || user.displayName || user.email, checkedAt: Timestamp.fromDate(new Date(record.time)), requestId: record.requestId, deletedAt: null };
       if (record.photoData) {
         const photo = await uploadCheckinPhoto(checkinRef.id, record.photoData);
         data.photoPath = photo.path; data.photoUrl = photo.url;
       }
-      const batch = writeBatch(db);
-      batch.set(checkinRef, restoringDeletedCheckin ? { ...data, deletedByUid: "", deletedByEmail: "" } : data);
-      batch.update(doc(db, "attendanceSessions", session.id), { checkinCount: increment(record.mssv ? 1 : 0), pendingCount: increment(record.mssv ? 0 : 1), counterMutationId: checkinRef.id, updatedAt: serverTimestamp() });
-      await batch.commit();
+      const duplicate = await runTransaction(db, async (transaction) => {
+        const sessionRef = doc(db, "attendanceSessions", session.id);
+        const [liveCheckin, liveSession] = await Promise.all([transaction.get(checkinRef), transaction.get(sessionRef)]);
+        if (!liveSession.exists()) throw Error("Phiên điểm danh không còn tồn tại.");
+        if (record.mssv && liveCheckin.exists() && !liveCheckin.data().deletedAt) return true;
+        transaction.set(checkinRef, liveCheckin.exists() ? { ...data, deletedByUid: "", deletedByEmail: "" } : data);
+        const counters = liveSession.data();
+        transaction.update(sessionRef, {
+          checkinCount: Number(counters.checkinCount || 0) + (record.mssv ? 1 : 0),
+          pendingCount: Number(counters.pendingCount || 0) + (record.mssv ? 0 : 1),
+          counterMutationId: checkinRef.id,
+          updatedAt: serverTimestamp()
+        });
+        return false;
+      });
+      if (duplicate) {
+        saveOutbox(outbox().filter((item) => item.requestId !== record.requestId));
+        feedback(false); showToast("warn", "Đã điểm danh trước đó", record.mssv);
+        continue;
+      }
       saveOutbox(outbox().filter((item) => item.requestId !== record.requestId));
       feedback(true); showToast("success", record.mssv ? "Điểm danh thành công" : "Đã gửi ảnh chờ nhập MSSV", record.mssv ? record.mssv + " · " + (student.name || "") : "Ảnh đã chuyển đến danh sách quản lý.");
     }
@@ -522,14 +546,48 @@ async function labelPendingPhoto(id) {
   const input = document.querySelector(`[data-pending-mssv="${CSS.escape(id)}"]`);
   const mssv = input?.value.trim().toUpperCase() || "";
   if (!validMssv(mssv)) return showToast("warn", "MSSV không hợp lệ", "MSSV gồm 8–12 chữ hoặc số.");
-  const canonical = await getDoc(doc(db, "checkins", session.id + "_" + mssv));
-  if (canonical.exists() && !canonical.data().deletedAt) return showToast("warn", "Sinh viên đã điểm danh", mssv + " · " + (canonical.data().name || ""));
   const student = await resolveStudent(mssv);
-  const batch = writeBatch(db);
-  batch.update(doc(db, "checkins", id), { mssv, name: student.name || "Không có dữ liệu", email: student.email || "", studentUid: student.uid || "" });
-  batch.update(doc(db, "attendanceSessions", session.id), { checkinCount: increment(1), pendingCount: increment(-1), counterMutationId: id, updatedAt: serverTimestamp() });
-  await batch.commit();
-  feedback(true); showToast("success", "Đã lưu MSSV", mssv + " · " + (student.name || "Không có dữ liệu"));
+  const canonicalId = session.id + "_" + mssv;
+  const legacy = await getDocs(query(collection(db, "checkins"), where("sessionId", "==", session.id), where("mssv", "==", mssv)));
+  const activeLegacy = legacy.docs.find((item) => item.id !== canonicalId && item.id !== id && !item.data().deletedAt);
+  if (activeLegacy) return showToast("warn", "Sinh viên đã điểm danh", mssv + " · " + (activeLegacy.data().name || ""));
+  const result = await runTransaction(db, async (transaction) => {
+    const pendingRef = doc(db, "checkins", id);
+    const canonicalRef = doc(db, "checkins", canonicalId);
+    const sessionRef = doc(db, "attendanceSessions", session.id);
+    const [pendingSnapshot, canonicalSnapshot, sessionSnapshot] = await Promise.all([
+      transaction.get(pendingRef), transaction.get(canonicalRef), transaction.get(sessionRef)
+    ]);
+    if (!pendingSnapshot.exists() || pendingSnapshot.data().deletedAt) throw Error("Ảnh chờ không còn hoạt động.");
+    if (pendingSnapshot.data().mssv) throw Error("Ảnh này đã được gắn MSSV.");
+    if (!sessionSnapshot.exists()) throw Error("Phiên điểm danh không còn tồn tại.");
+    const canonicalActive = canonicalSnapshot.exists() && !canonicalSnapshot.data().deletedAt;
+    const pending = pendingSnapshot.data();
+    if (!canonicalActive) {
+      transaction.set(canonicalRef, {
+        ...pending,
+        mssv,
+        name: student.name || "Không có dữ liệu",
+        email: student.email || "",
+        studentUid: student.uid || "",
+        deletedAt: null,
+        deletedByUid: "",
+        deletedByEmail: ""
+      });
+    }
+    transaction.update(pendingRef, { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email });
+    const counters = sessionSnapshot.data();
+    transaction.update(sessionRef, {
+      checkinCount: Number(counters.checkinCount || 0) + (canonicalActive ? 0 : 1),
+      pendingCount: Math.max(0, Number(counters.pendingCount || 0) - 1),
+      counterMutationId: canonicalId,
+      counterSourceId: id,
+      updatedAt: serverTimestamp()
+    });
+    return { canonicalActive, name: canonicalActive ? canonicalSnapshot.data().name || "" : student.name || "" };
+  });
+  feedback(!result.canonicalActive);
+  showToast(result.canonicalActive ? "warn" : "success", result.canonicalActive ? "Sinh viên đã điểm danh" : "Đã lưu MSSV", mssv + " · " + (result.name || "Không có dữ liệu"));
 }
 async function openCheckinImage(id) {
   const dialog = $("#checkinImageDialog"), image = $("#checkinImage"), status = $("#checkinImageStatus");
@@ -628,11 +686,18 @@ document.addEventListener("click", async (event) => {
   const labelButton = event.target.closest("[data-label-checkin]");
   if (labelButton) { try { await labelPendingPhoto(labelButton.dataset.labelCheckin); } catch (error) { showToast("error", "Không thể lưu MSSV", error.message); } return; }
   const button = event.target.closest("[data-delete]"); if (!button || (!isManager && assignment?.role !== "leader") || !sessionIsOpen()) return;
-  const row = liveRowsById.get(button.dataset.delete);
-  const batch = writeBatch(db);
-  batch.update(doc(db, "checkins", button.dataset.delete), { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email });
-  batch.update(doc(db, "attendanceSessions", session.id), { checkinCount: increment(row?.mssv ? -1 : 0), pendingCount: increment(row?.mssv ? 0 : -1), counterMutationId: button.dataset.delete, updatedAt: serverTimestamp() });
-  await batch.commit(); showToast("success", "Đã chuyển vào thùng rác", "Sub-admin có thể khôi phục lượt điểm danh.");
+  const checkinId = button.dataset.delete;
+  await runTransaction(db, async (transaction) => {
+    const checkinRef = doc(db, "checkins", checkinId), sessionRef = doc(db, "attendanceSessions", session.id);
+    const [checkinSnapshot, sessionSnapshot] = await Promise.all([transaction.get(checkinRef), transaction.get(sessionRef)]);
+    if (!checkinSnapshot.exists() || checkinSnapshot.data().deletedAt || !sessionSnapshot.exists()) return;
+    const liveCheckin = checkinSnapshot.data(), counters = sessionSnapshot.data();
+    transaction.update(checkinRef, { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email });
+    transaction.update(sessionRef, liveCheckin.mssv
+      ? { checkinCount: Math.max(0, Number(counters.checkinCount || 0) - 1), pendingCount: Number(counters.pendingCount || 0), counterMutationId: checkinId, updatedAt: serverTimestamp() }
+      : { checkinCount: Number(counters.checkinCount || 0), pendingCount: Math.max(0, Number(counters.pendingCount || 0) - 1), counterMutationId: checkinId, updatedAt: serverTimestamp() });
+  });
+  showToast("success", "Đã chuyển vào thùng rác", "Sub-admin có thể khôi phục lượt điểm danh.");
 });
 window.addEventListener("pagehide", releaseCamera);
 window.addEventListener("online", () => void flushOutbox());

@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
-import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, getCountFromServer, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit, startAfter, serverTimestamp, Timestamp, runTransaction, writeBatch, increment, deleteField } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
+import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, getCountFromServer, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit, startAfter, serverTimestamp, Timestamp, runTransaction, writeBatch, deleteField } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
 import { getStorage, ref, getBytes, getDownloadURL, getMetadata, uploadBytes, deleteObject } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
 import { firebaseConfig, OWNER_EMAIL } from "../firebase-config.mjs";
 import { loadFacultyDataset, publishFacultyDataset } from "../faculty-dataset.mjs";
@@ -2822,14 +2822,51 @@ async function resolveAttendanceStudent(rawMssv) {
 async function labelPendingAttendancePhoto(id, rawMssv) {
   const mssv = String(rawMssv || "").trim().toUpperCase();
   if (!/^(?=.{8,12}$)(?=.*\d)[A-Z0-9]+$/.test(mssv)) throw Error("MSSV không hợp lệ; cần 8–12 chữ hoặc số.");
-  const duplicate = attendanceActiveRows().find((item) => item.id !== id && item.mssv && String(item.mssv).toUpperCase() === mssv);
-  if (duplicate) throw Error(`MSSV ${mssv} đã có trong danh sách điểm danh.`);
   const student = await resolveAttendanceStudent(mssv);
-  const batch = writeBatch(db);
-  batch.update(doc(db, "checkins", id), { mssv, name: student.name || "Không có dữ liệu", email: student.email || "", studentUid: student.uid || "" });
-  batch.update(doc(db, "attendanceSessions", selectedAttendanceSession.id), { checkinCount: increment(1), pendingCount: increment(-1), counterMutationId: id, updatedAt: serverTimestamp() });
-  await batch.commit();
-  notice(`Đã lưu ${mssv} · ${student.name || "Không có dữ liệu"}.`, "success");
+  const sessionId = selectedAttendanceSession.id;
+  const canonicalId = sessionId + "_" + mssv;
+  const legacy = await getDocs(query(collection(db, "checkins"), where("sessionId", "==", sessionId), where("mssv", "==", mssv)));
+  const activeLegacy = legacy.docs.find((item) => item.id !== canonicalId && item.id !== id && !item.data().deletedAt);
+  if (activeLegacy) throw Error(`MSSV ${mssv} đã có trong dữ liệu điểm danh cũ (${activeLegacy.id}).`);
+  const result = await runTransaction(db, async (transaction) => {
+    const pendingRef = doc(db, "checkins", id);
+    const canonicalRef = doc(db, "checkins", canonicalId);
+    const sessionRef = doc(db, "attendanceSessions", sessionId);
+    const [pendingSnapshot, canonicalSnapshot, sessionSnapshot] = await Promise.all([
+      transaction.get(pendingRef), transaction.get(canonicalRef), transaction.get(sessionRef)
+    ]);
+    if (!pendingSnapshot.exists() || pendingSnapshot.data().deletedAt) throw Error("Ảnh chờ không còn hoạt động.");
+    if (pendingSnapshot.data().mssv) throw Error("Ảnh này đã được gắn MSSV.");
+    if (!sessionSnapshot.exists()) throw Error("Phiên điểm danh không còn tồn tại.");
+    const canonicalActive = canonicalSnapshot.exists() && !canonicalSnapshot.data().deletedAt;
+    const pending = pendingSnapshot.data();
+    if (!canonicalActive) {
+      transaction.set(canonicalRef, {
+        ...pending,
+        mssv,
+        name: student.name || "Không có dữ liệu",
+        email: student.email || "",
+        studentUid: student.uid || "",
+        deletedAt: null,
+        deletedByUid: "",
+        deletedByEmail: ""
+      });
+    }
+    transaction.update(pendingRef, { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email });
+    const counters = sessionSnapshot.data();
+    transaction.update(sessionRef, {
+      checkinCount: Number(counters.checkinCount || 0) + (canonicalActive ? 0 : 1),
+      pendingCount: Math.max(0, Number(counters.pendingCount || 0) - 1),
+      counterMutationId: canonicalId,
+      counterSourceId: id,
+      updatedAt: serverTimestamp()
+    });
+    return { canonicalActive, name: canonicalActive ? canonicalSnapshot.data().name || "" : student.name || "" };
+  });
+  notice(result.canonicalActive
+    ? `${mssv} đã điểm danh; ảnh chờ đã được đóng mà không tăng bộ đếm.`
+    : `Đã lưu ${mssv} · ${result.name || "Không có dữ liệu"}.`,
+  result.canonicalActive ? "warn" : "success");
   await loadAttendanceManage();
 }
 
@@ -2977,17 +3014,31 @@ document.addEventListener("click", async (event) => {
   }
   if (button.dataset.attendanceDeleteCheckin) {
     const item = attendanceManageRows.find((row) => row.id === button.dataset.attendanceDeleteCheckin); if (!item || selectedAttendanceSession.status === "finalized") return;
-    const batch = writeBatch(db);
-    batch.update(doc(db, "checkins", item.id), { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email });
-    batch.update(doc(db, "attendanceSessions", selectedAttendanceSession.id), item.mssv ? { checkinCount: increment(-1), counterMutationId: item.id, updatedAt: serverTimestamp() } : { pendingCount: increment(-1), counterMutationId: item.id, updatedAt: serverTimestamp() });
-    await batch.commit(); await audit("checkin.trash", "checkin", item.id, { sessionId: selectedAttendanceSession.id, mssv: item.mssv || "" }); notice("Đã chuyển lượt điểm danh vào thùng rác.", "success"); await loadAttendanceManage();
+    await runTransaction(db, async (transaction) => {
+      const checkinRef = doc(db, "checkins", item.id), sessionRef = doc(db, "attendanceSessions", selectedAttendanceSession.id);
+      const [checkinSnapshot, sessionSnapshot] = await Promise.all([transaction.get(checkinRef), transaction.get(sessionRef)]);
+      if (!checkinSnapshot.exists() || checkinSnapshot.data().deletedAt || !sessionSnapshot.exists()) return;
+      const liveCheckin = checkinSnapshot.data(), counters = sessionSnapshot.data();
+      transaction.update(checkinRef, { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email });
+      transaction.update(sessionRef, liveCheckin.mssv
+        ? { checkinCount: Math.max(0, Number(counters.checkinCount || 0) - 1), pendingCount: Number(counters.pendingCount || 0), counterMutationId: item.id, updatedAt: serverTimestamp() }
+        : { checkinCount: Number(counters.checkinCount || 0), pendingCount: Math.max(0, Number(counters.pendingCount || 0) - 1), counterMutationId: item.id, updatedAt: serverTimestamp() });
+    });
+    await audit("checkin.trash", "checkin", item.id, { sessionId: selectedAttendanceSession.id, mssv: item.mssv || "" }); notice("Đã chuyển lượt điểm danh vào thùng rác.", "success"); await loadAttendanceManage();
   }
   if (button.dataset.attendanceRestoreCheckin) {
     const item = attendanceManageRows.find((row) => row.id === button.dataset.attendanceRestoreCheckin); if (!item || selectedAttendanceSession.status === "finalized") return;
-    const batch = writeBatch(db);
-    batch.update(doc(db, "checkins", item.id), { deletedAt: null, deletedByUid: "", deletedByEmail: "" });
-    batch.update(doc(db, "attendanceSessions", selectedAttendanceSession.id), item.mssv ? { checkinCount: increment(1), counterMutationId: item.id, updatedAt: serverTimestamp() } : { pendingCount: increment(1), counterMutationId: item.id, updatedAt: serverTimestamp() });
-    await batch.commit(); await audit("checkin.restore", "checkin", item.id, { sessionId: selectedAttendanceSession.id, mssv: item.mssv || "" }); notice("Đã khôi phục lượt điểm danh.", "success"); await loadAttendanceManage();
+    await runTransaction(db, async (transaction) => {
+      const checkinRef = doc(db, "checkins", item.id), sessionRef = doc(db, "attendanceSessions", selectedAttendanceSession.id);
+      const [checkinSnapshot, sessionSnapshot] = await Promise.all([transaction.get(checkinRef), transaction.get(sessionRef)]);
+      if (!checkinSnapshot.exists() || !checkinSnapshot.data().deletedAt || !sessionSnapshot.exists()) return;
+      const liveCheckin = checkinSnapshot.data(), counters = sessionSnapshot.data();
+      transaction.update(checkinRef, { deletedAt: null, deletedByUid: "", deletedByEmail: "" });
+      transaction.update(sessionRef, liveCheckin.mssv
+        ? { checkinCount: Number(counters.checkinCount || 0) + 1, pendingCount: Number(counters.pendingCount || 0), counterMutationId: item.id, updatedAt: serverTimestamp() }
+        : { checkinCount: Number(counters.checkinCount || 0), pendingCount: Number(counters.pendingCount || 0) + 1, counterMutationId: item.id, updatedAt: serverTimestamp() });
+    });
+    await audit("checkin.restore", "checkin", item.id, { sessionId: selectedAttendanceSession.id, mssv: item.mssv || "" }); notice("Đã khôi phục lượt điểm danh.", "success"); await loadAttendanceManage();
   }
   if (button.dataset.attendancePurgeCheckin) {
     const item = attendanceManageRows.find((row) => row.id === button.dataset.attendancePurgeCheckin); if (!item?.deletedAt || !highAdminAccess()) return;
@@ -3043,21 +3094,33 @@ $("#attendanceDeleteAll").onclick = async () => {
   const snapshot = await getDocs(query(collection(db, "checkins"), where("sessionId", "==", selectedAttendanceSession.id), where("deletedAt", "==", null)));
   const rows = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); if (!rows.length) return;
   if (!(await confirmAction({ title: "Xóa toàn bộ lượt điểm danh?", message: `${rows.length} lượt sẽ chuyển vào thùng rác và có thể khôi phục. Nhập XÓA để tiếp tục.`, verification: "XÓA" }))) return;
+  let deleted = 0, skipped = 0;
+  const failed = [];
   for (const item of rows) {
-    await runTransaction(db, async (transaction) => {
-      const checkinRef = doc(db, "checkins", item.id);
-      const sessionRef = doc(db, "attendanceSessions", selectedAttendanceSession.id);
-      const checkinSnapshot = await transaction.get(checkinRef);
-      const sessionSnapshot = await transaction.get(sessionRef);
-      if (!checkinSnapshot.exists() || checkinSnapshot.data().deletedAt || !sessionSnapshot.exists()) return;
-      transaction.update(checkinRef, { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email });
-      transaction.update(sessionRef, item.mssv
-        ? { checkinCount: Math.max(0, Number(sessionSnapshot.data().checkinCount || 0) - 1), counterMutationId: item.id, updatedAt: serverTimestamp() }
-        : { pendingCount: Math.max(0, Number(sessionSnapshot.data().pendingCount || 0) - 1), counterMutationId: item.id, updatedAt: serverTimestamp() });
-    });
+    try {
+      const changed = await runTransaction(db, async (transaction) => {
+        const checkinRef = doc(db, "checkins", item.id);
+        const sessionRef = doc(db, "attendanceSessions", selectedAttendanceSession.id);
+        const [checkinSnapshot, sessionSnapshot] = await Promise.all([transaction.get(checkinRef), transaction.get(sessionRef)]);
+        if (!checkinSnapshot.exists() || checkinSnapshot.data().deletedAt || !sessionSnapshot.exists()) return false;
+        const liveCheckin = checkinSnapshot.data();
+        const counters = sessionSnapshot.data();
+        transaction.update(checkinRef, { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email });
+        transaction.update(sessionRef, liveCheckin.mssv
+          ? { checkinCount: Math.max(0, Number(counters.checkinCount || 0) - 1), counterMutationId: item.id, updatedAt: serverTimestamp() }
+          : { pendingCount: Math.max(0, Number(counters.pendingCount || 0) - 1), counterMutationId: item.id, updatedAt: serverTimestamp() });
+        return true;
+      });
+      if (changed) deleted += 1; else skipped += 1;
+    } catch (error) {
+      failed.push({ id: item.id, error: String(error.message || error) });
+    }
   }
-  await audit("checkin.trash_all", "attendanceSession", selectedAttendanceSession.id, { count: rows.length });
-  notice("Đã chuyển toàn bộ lượt điểm danh vào thùng rác.", "success"); await loadAttendanceManage();
+  await audit("checkin.trash_all", "attendanceSession", selectedAttendanceSession.id, { requested: rows.length, deleted, skipped, failed: failed.slice(0, 20) });
+  if (failed.length) notice(`Đã chuyển ${deleted}/${rows.length} lượt vào thùng rác; ${failed.length} lượt lỗi, ${skipped} lượt đã thay đổi trước đó. Hãy tải lại và thử lại các lượt còn lại.`, "error");
+  else if (skipped) notice(`Đã chuyển ${deleted} lượt vào thùng rác; bỏ qua ${skipped} lượt đã được xử lý đồng thời.`, "warn");
+  else notice(`Đã chuyển toàn bộ ${deleted} lượt điểm danh vào thùng rác.`, "success");
+  await loadAttendanceManage();
 };
 $("#attendanceTrashDeleteAll").onclick = async () => {
   const rows = attendanceManageRows.filter((item) => item.deletedAt); if (!rows.length || !highAdminAccess()) return;
