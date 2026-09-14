@@ -416,8 +416,8 @@ service cloud.firestore {
           && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount')
           && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount')
         )
-        || ((managesSession(sessionId)
-            || (assigned(sessionId) && attendanceAccepting(sessionId)))
+        || (((assigned(sessionId) && attendanceAccepting(sessionId))
+            || managesSession(sessionId))
           && counter(request.resource.data, 'checkinCount') is int
           && counter(request.resource.data, 'pendingCount') is int
           && counter(request.resource.data, 'checkinCount') >= 0
@@ -495,8 +495,8 @@ service cloud.firestore {
           && attendanceSession(resource.data.sessionId).status != 'finalized');
       allow create: if attendanceAccepting(request.resource.data.sessionId)
         && (
-          ((managesSession(request.resource.data.sessionId)
-              || assigned(request.resource.data.sessionId))
+          ((assigned(request.resource.data.sessionId)
+              || managesSession(request.resource.data.sessionId))
             && request.resource.data.scannerUid == request.auth.uid
             && request.resource.data.scannerEmail == email()
             && ((validMssv(request.resource.data.mssv)
@@ -504,15 +504,29 @@ service cloud.firestore {
               || (request.resource.data.mssv == ''
                 && checkinId.matches('^' + request.resource.data.sessionId + '_photo_[A-Za-z0-9-]+$')))
             && newCheckinCounterLinked(checkinId, request.resource.data.sessionId))
-          || ((managesSession(request.resource.data.sessionId)
-                || leader(request.resource.data.sessionId)
+          || ((leader(request.resource.data.sessionId)
                 || (assigned(request.resource.data.sessionId)
-                  && get(checkinPath(attendanceSessionAfter(request.resource.data.sessionId).counterSourceId)).data.scannerUid == request.auth.uid))
+                  && get(checkinPath(attendanceSessionAfter(request.resource.data.sessionId).counterSourceId)).data.scannerUid == request.auth.uid)
+                || managesSession(request.resource.data.sessionId))
             && canonicalizationTargetLinked(checkinId, request.resource.data.sessionId))
         );
-      allow update: if (((managesSession(resource.data.sessionId)
-              || leader(resource.data.sessionId)
-              || (assigned(resource.data.sessionId) && resource.data.scannerUid == request.auth.uid))
+      allow update: if (assigned(resource.data.sessionId)
+            && attendanceAccepting(resource.data.sessionId)
+            && checkinId == resource.data.sessionId + '_' + resource.data.mssv
+            && !activeCheckin(resource.data)
+            && activeCheckin(request.resource.data)
+            && request.resource.data.sessionId == resource.data.sessionId
+            && request.resource.data.mssv == resource.data.mssv
+            && request.resource.data.scannerUid == request.auth.uid
+            && request.resource.data.scannerEmail == email()
+            && checkinCounterLinked(checkinId, resource.data.sessionId))
+        || (leader(resource.data.sessionId)
+          && attendanceAccepting(resource.data.sessionId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deletedAt','deletedByUid','deletedByEmail'])
+          && checkinCounterLinked(checkinId, resource.data.sessionId))
+        || (((leader(resource.data.sessionId)
+              || (assigned(resource.data.sessionId) && resource.data.scannerUid == request.auth.uid)
+              || managesSession(resource.data.sessionId))
             && attendanceAccepting(resource.data.sessionId)
             && request.resource.data.sessionId == resource.data.sessionId
             && resource.data.mssv == ''
@@ -521,10 +535,10 @@ service cloud.firestore {
             && !activeCheckin(request.resource.data)
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deletedAt','deletedByUid','deletedByEmail'])
             && canonicalizationSourceLinked(checkinId, resource.data.sessionId))
-          || ((managesSession(resource.data.sessionId)
-              || leader(resource.data.sessionId)
+          || ((leader(resource.data.sessionId)
               || (assigned(resource.data.sessionId)
-                && get(checkinPath(attendanceSessionAfter(resource.data.sessionId).counterSourceId)).data.scannerUid == request.auth.uid))
+                && get(checkinPath(attendanceSessionAfter(resource.data.sessionId).counterSourceId)).data.scannerUid == request.auth.uid)
+              || managesSession(resource.data.sessionId))
             && attendanceAccepting(resource.data.sessionId)
             && request.resource.data.sessionId == resource.data.sessionId
             && !activeCheckin(resource.data)
