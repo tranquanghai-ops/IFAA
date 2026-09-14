@@ -7,6 +7,7 @@ const storage = read("storage.rules");
 const admin = read("admin/admin.mjs");
 const adminEvents = read("admin/modules/events/event-service.mjs");
 const adminExports = read("admin/modules/exports/export-service.mjs");
+const adminGroups = read("admin/modules/groups/group-service.mjs");
 const adminRegistrations = read("admin/modules/registrations/registration-service.mjs");
 const adminStudents = read("admin/modules/students/student-service.mjs");
 const checkin = read("check-in/check-in.mjs");
@@ -28,6 +29,7 @@ assert.match(storage, /match \/exports\/\{exportType\}\/\{exportFile\}[\s\S]*all
 assert.doesNotMatch(storage, /storageAdminAccess/);
 assert.match(admin, /canUseStorageCache: highAdminAccess/);
 assert.match(admin, /createAdminEventService\(/);
+assert.match(admin, /createAdminGroupService\(/);
 assert.match(admin, /createAdminRegistrationService\(/);
 assert.match(admin, /createAdminStudentService\(/);
 assert.match(admin, /fetchRegistrations,/);
@@ -41,6 +43,10 @@ assert.match(adminEvents, /query\(collection\(db, "events"\), where\("createdByU
 assert.match(adminEvents, /const canManage = !getIsSubAdmin\(\) \|\| event\.createdByUid === user\.uid/);
 assert.match(adminEvents, /updateDoc\(doc\(db, "events", selected\.id\), \{\s*deletedAt: serverTimestamp\(\), deletedByUid: user\.uid, deletedByEmail: user\.email/);
 assert.match(adminEvents, /if \(!selected \|\| !getIsOwner\(\)\) throw Error\("Chỉ Chủ sở hữu được xóa vĩnh viễn\."\)/);
+assert.match(adminGroups, /getFetchRegistrations\(\)\("groupId", id\)/);
+assert.match(adminGroups, /updateDoc\(doc\(db, "eventGroups", id\), data\)/);
+assert.match(adminGroups, /updateDoc\(doc\(db, "events", item\.id\), \{ groupName: name, groupMaxRegistrations: effectiveMax/);
+assert.doesNotMatch(adminGroups, /from ["'][^"']*admin\.mjs["']/);
 assert.match(adminStudents, /if \(!hasHighAdminAccess\(\)\) throw Error\("Chỉ Chủ sở hữu hoặc Admin cấp cao được cập nhật danh sách SV khoa\."\)/);
 assert.match(adminStudents, /batch\.set\(doc\(db, "facultyStudents", item\.mssv\)/);
 assert.match(adminStudents, /setDoc\(doc\(db, "facultyStudentMeta", "current"\)/);
