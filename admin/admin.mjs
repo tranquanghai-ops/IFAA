@@ -5,6 +5,7 @@ import { getStorage, ref, getBytes, getDownloadURL, getMetadata, uploadBytes, de
 import { firebaseConfig, OWNER_EMAIL } from "../firebase-config.mjs";
 import { loadFacultyDataset, publishFacultyDataset } from "../faculty-dataset.mjs";
 import { createAdminExportService } from "./modules/exports/export-service.mjs";
+import { createAdminRegistrationService } from "./modules/registrations/registration-service.mjs";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
 const DEFAULT_PUBLIC_BASE_URL = "https://ifa.tdtu.edu.vn/dang-ky-su-kien";
@@ -123,9 +124,38 @@ let facultyStudentPage = 1, facultyStudentCursor = null, facultyStudentHasNext =
 const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const purgingEventIds = new Set();
 const purgingGroupIds = new Set();
-let regs = [];
 let admins = [];
 let groups = [];
+
+const {
+  fetchRegistrations,
+  findLoadedRegistration,
+  loadQuickRegistrationPage,
+  loadRegistrationPage,
+  openQuickRegistrations,
+  refreshRegistrationFilters,
+  removeRegistration,
+  renderRegistrations: renderRegs,
+  resetRegistrationPage,
+  resetSelectedEventRegistrations,
+  setPageSize: setRegistrationPageSize,
+  syncStatusFilters: syncRegistrationStatusFilters
+} = createAdminRegistrationService({
+  db,
+  select: $,
+  safe,
+  formatTimestamp: ts,
+  toMillis: millis,
+  formatVietnamDate: vietnamDate,
+  getEvents: () => events,
+  getGroups: () => groups,
+  eventState,
+  eventPosition,
+  groupPosition,
+  isExternalEvent,
+  notice,
+  confirmAction
+});
 
 const {
   deleteCachedExport,
@@ -139,6 +169,7 @@ const {
   getEvents: () => events,
   getGroups: () => groups,
   getAttendanceSessions: () => attendanceSessions,
+  fetchRegistrations,
   notice,
   formatTimestamp: ts,
   toMillis: millis,
@@ -210,21 +241,6 @@ async function migrateLegacyAttendancePhotos(rows) {
 let settings = { faculties: [DEFAULT_FACULTY], publicBaseUrl: DEFAULT_PUBLIC_BASE_URL, attendancePublicBaseUrl: DEFAULT_ATTENDANCE_BASE_URL };
 let adminStatusFilter = "all";
 let adminEventView = localStorage.getItem("ifaa-admin-event-view") === "list" ? "list" : "cards";
-let registrationPageSize = 20;
-const registrationStatusFilters = new Set(["open", "ended"]);
-let registrationPageIndex = 0;
-let registrationPageCursors = [null];
-let registrationHasNext = false;
-let registrationLoading = false;
-let registrationLoadedEventId = "";
-let registrationRequestId = 0;
-let quickRegistrationEventId = "";
-let quickRegistrationPageIndex = 0;
-let quickRegistrationPageCursors = [null];
-let quickRegistrationHasNext = false;
-let quickRegistrationLoading = false;
-let quickRegistrationRequestId = 0;
-let quickRegistrationRows = [];
 
 function shareCode(value) {
   return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/gi, "d").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60).toUpperCase();
@@ -698,190 +714,6 @@ function updateAdminCountdowns() {
 }
 
 setInterval(updateAdminCountdowns, 1000);
-
-function registrationStatusMatches(event) {
-  const state = eventState(event);
-  return (state === "open" && registrationStatusFilters.has("open"))
-    || (state === "ended" && registrationStatusFilters.has("ended"))
-    || (state === "hidden" && registrationStatusFilters.has("hidden"));
-}
-
-function refreshRegistrationFilters() {
-  const selectedGroup = $("#groupFilter").value;
-  const selectedEvent = $("#eventFilter").value;
-  $("#groupFilter").innerHTML = '<option value="">Tất cả nhóm sự kiện</option>' + groups.filter((group) => !group.deletedAt).slice().sort((a, b) => groupPosition(a) - groupPosition(b)).map((group) => `<option value="${group.id}">${safe(group.name)}</option>`).join("");
-  if (groups.some((group) => group.id === selectedGroup)) $("#groupFilter").value = selectedGroup;
-  const activeGroup = $("#groupFilter").value;
-  const availableEvents = events.filter((event) => !event.deletedAt && !isExternalEvent(event) && registrationStatusMatches(event) && (!activeGroup || event.groupId === activeGroup)).slice().sort((a, b) => eventPosition(a) - eventPosition(b));
-  $("#eventFilter").innerHTML = '<option value="">— Chọn sự kiện để tải danh sách —</option>' + availableEvents.map((event) => `<option value="${event.id}">${safe(event.title)} · ${safe(vietnamDate(event.date))}</option>`).join("");
-  if (availableEvents.some((event) => event.id === selectedEvent)) $("#eventFilter").value = selectedEvent;
-}
-
-function filteredRegistrations() {
-  return registrationLoadedEventId === $("#eventFilter").value ? regs : [];
-}
-
-function resetRegistrationPage() {
-  regs = [];
-  registrationPageIndex = 0;
-  registrationPageCursors = [null];
-  registrationHasNext = false;
-  registrationLoadedEventId = "";
-}
-
-async function loadRegistrationPage(direction = 0) {
-  const eventId = $("#eventFilter").value;
-  if (!eventId) {
-    resetRegistrationPage();
-    renderRegs();
-    return;
-  }
-  let targetPage = direction === 0 ? 0 : registrationPageIndex + direction;
-  if (targetPage < 0 || (direction > 0 && !registrationHasNext)) return;
-  if (direction === 0) {
-    registrationPageCursors = [null];
-    registrationPageIndex = 0;
-  }
-  const cursor = registrationPageCursors[targetPage];
-  if (targetPage > 0 && !cursor) return;
-  const requestId = ++registrationRequestId;
-  registrationLoading = true;
-  renderRegs();
-  try {
-    const clauses = [where("eventId", "==", eventId)];
-    if (cursor) clauses.push(startAfter(cursor));
-    clauses.push(limit(registrationPageSize + 1));
-    const snapshot = await getDocs(query(collection(db, "registrations"), ...clauses));
-    if (requestId !== registrationRequestId || $("#eventFilter").value !== eventId) return;
-    const visibleDocs = snapshot.docs.slice(0, registrationPageSize);
-    regs = visibleDocs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => (millis(b.createdAt) || 0) - (millis(a.createdAt) || 0));
-    registrationPageIndex = targetPage;
-    registrationHasNext = snapshot.docs.length > registrationPageSize;
-    registrationLoadedEventId = eventId;
-    if (registrationHasNext && visibleDocs.length) registrationPageCursors[targetPage + 1] = visibleDocs[visibleDocs.length - 1];
-  } catch (error) {
-    if (requestId === registrationRequestId) {
-      resetRegistrationPage();
-      notice(error.message || "Không thể tải danh sách đăng ký.", "error");
-    }
-  } finally {
-    if (requestId === registrationRequestId) {
-      registrationLoading = false;
-      renderRegs();
-    }
-  }
-}
-
-function renderRegs() {
-  const eventId = $("#eventFilter").value;
-  const list = filteredRegistrations();
-  const selectedEvent = events.find((item) => item.id === eventId);
-  $("#resetEventBtn").disabled = !eventId || Number(selectedEvent?.registeredCount || 0) < 1;
-  $("#exportBtn").disabled = !eventId && !$("#groupFilter").value;
-  $("#registrationPagination").classList.toggle("hidden", !eventId || registrationLoading || (!list.length && !registrationHasNext));
-  $("#registrationPrev").disabled = registrationPageIndex <= 0 || registrationLoading;
-  $("#registrationNext").disabled = !registrationHasNext || registrationLoading;
-  $("#registrationPageText").textContent = `Trang ${registrationPageIndex + 1}`;
-  if (!eventId) {
-    $("#registrationLoadHint").textContent = "Danh sách chưa được tải để tiết kiệm lượt đọc dữ liệu.";
-    $("#regRows").innerHTML = '<tr><td colspan="8" class="empty">Vui lòng chọn một sự kiện để xem danh sách đăng ký.</td></tr>';
-    return;
-  }
-  if (registrationLoading) {
-    $("#registrationLoadHint").textContent = `Đang tải tối đa ${registrationPageSize} lượt đăng ký…`;
-    $("#regRows").innerHTML = '<tr><td colspan="8" class="empty">Đang tải danh sách đăng ký…</td></tr>';
-    return;
-  }
-  $("#registrationLoadHint").textContent = list.length ? `Đang hiển thị ${list.length} người ở trang ${registrationPageIndex + 1}.` : "Sự kiện này chưa có người đăng ký.";
-  $("#regRows").innerHTML = list.map((registration, index) => `<tr><td class="col-stt">${registrationPageIndex * registrationPageSize + index + 1}</td><td class="col-identifier"><b>${safe(registration.identifier || registration.mssv)}</b></td><td>${safe(registration.name)}</td><td>${safe(registration.faculty)}</td><td>${safe(registration.participantType || "Sinh viên")}</td><td>${safe(registration.eventTitle)}</td><td>${ts(registration.createdAt)}</td><td><button class="btn btn-small btn-danger" data-delete-registration="${registration.id}">Xóa</button></td></tr>`).join("") || '<tr><td colspan="8" class="empty">Sự kiện này chưa có người đăng ký.</td></tr>';
-}
-
-function renderQuickRegistrations() {
-  const selectedEvent = events.find((item) => item.id === quickRegistrationEventId);
-  $("#quickRegistrationTitle").textContent = selectedEvent?.title || "Danh sách đăng ký";
-  $("#quickRegistrationSummary").textContent = quickRegistrationLoading ? "Đang tải danh sách…" : `Trang ${quickRegistrationPageIndex + 1} · ${quickRegistrationRows.length} người`;
-  $("#quickRegistrationPrev").disabled = quickRegistrationLoading || quickRegistrationPageIndex <= 0;
-  $("#quickRegistrationNext").disabled = quickRegistrationLoading || !quickRegistrationHasNext;
-  $("#quickRegistrationPageText").textContent = `Trang ${quickRegistrationPageIndex + 1}`;
-  if (quickRegistrationLoading) {
-    $("#quickRegistrationRows").innerHTML = '<tr><td colspan="6" class="empty">Đang tải danh sách đăng ký…</td></tr>';
-    return;
-  }
-  $("#quickRegistrationRows").innerHTML = quickRegistrationRows.map((registration, index) => `<tr><td class="col-stt">${quickRegistrationPageIndex * registrationPageSize + index + 1}</td><td class="col-identifier"><b>${safe(registration.identifier || registration.mssv)}</b></td><td>${safe(registration.name)}</td><td>${safe(registration.faculty)}</td><td>${safe(registration.participantType || "Sinh viên")}</td><td>${ts(registration.createdAt)}</td></tr>`).join("") || '<tr><td colspan="6" class="empty">Sự kiện này chưa có người đăng ký.</td></tr>';
-}
-
-async function loadQuickRegistrationPage(direction = 0) {
-  const eventId = quickRegistrationEventId;
-  if (!eventId) return;
-  let targetPage = direction === 0 ? 0 : quickRegistrationPageIndex + direction;
-  if (targetPage < 0 || (direction > 0 && !quickRegistrationHasNext)) return;
-  if (direction === 0) {
-    quickRegistrationPageCursors = [null];
-    quickRegistrationPageIndex = 0;
-  }
-  const cursor = quickRegistrationPageCursors[targetPage];
-  if (targetPage > 0 && !cursor) return;
-  const requestId = ++quickRegistrationRequestId;
-  quickRegistrationLoading = true;
-  renderQuickRegistrations();
-  try {
-    const clauses = [where("eventId", "==", eventId)];
-    if (cursor) clauses.push(startAfter(cursor));
-    clauses.push(limit(registrationPageSize + 1));
-    const snapshot = await getDocs(query(collection(db, "registrations"), ...clauses));
-    if (requestId !== quickRegistrationRequestId || eventId !== quickRegistrationEventId) return;
-    const visibleDocs = snapshot.docs.slice(0, registrationPageSize);
-    quickRegistrationRows = visibleDocs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => (millis(b.createdAt) || 0) - (millis(a.createdAt) || 0));
-    quickRegistrationPageIndex = targetPage;
-    quickRegistrationHasNext = snapshot.docs.length > registrationPageSize;
-    if (quickRegistrationHasNext && visibleDocs.length) quickRegistrationPageCursors[targetPage + 1] = visibleDocs[visibleDocs.length - 1];
-  } catch (error) {
-    quickRegistrationRows = [];
-    quickRegistrationHasNext = false;
-    notice(error.message || "Không thể tải danh sách đăng ký.", "error");
-  } finally {
-    if (requestId === quickRegistrationRequestId) {
-      quickRegistrationLoading = false;
-      renderQuickRegistrations();
-    }
-  }
-}
-
-async function openQuickRegistrations(eventId) {
-  const selectedEvent = events.find((item) => item.id === eventId);
-  if (!selectedEvent || Number(selectedEvent.registeredCount || 0) < 1) return;
-  quickRegistrationEventId = eventId;
-  quickRegistrationPageIndex = 0;
-  quickRegistrationPageCursors = [null];
-  quickRegistrationHasNext = false;
-  quickRegistrationRows = [];
-  $("#quickRegistrationDialog").showModal();
-  await loadQuickRegistrationPage(0);
-}
-
-async function removeRegistration(registration) {
-  const registrationRef = doc(db, "registrations", registration.id);
-  const eventRef = doc(db, "events", registration.eventId);
-  await runTransaction(db, async (transaction) => {
-    const eventSnapshot = await transaction.get(eventRef);
-    const registrationSnapshot = await transaction.get(registrationRef);
-    if (!registrationSnapshot.exists()) return;
-    const liveRegistration = registrationSnapshot.data();
-    let limitRef = null;
-    let limitSnapshot = null;
-    if (liveRegistration.groupId) {
-      limitRef = doc(db, "registrationLimits", `${liveRegistration.uid}_${liveRegistration.groupId}`);
-      limitSnapshot = await transaction.get(limitRef);
-    }
-    if (eventSnapshot.exists()) transaction.update(eventRef, { registeredCount: Math.max(0, Number(eventSnapshot.data().registeredCount || 0) - 1), registrationMutationId: registration.id, updatedAt: serverTimestamp() });
-    transaction.delete(registrationRef);
-    if (limitRef && limitSnapshot?.exists()) {
-      const limit = limitSnapshot.data();
-      const eventIds = (limit.eventIds || []).filter((id) => id !== liveRegistration.eventId);
-      transaction.update(limitRef, { count: eventIds.length, eventIds, updatedAt: serverTimestamp() });
-    }
-  });
-}
 
 function refreshGroupOptions(selected = "") {
   const select = $("#groupId");
@@ -1713,7 +1545,7 @@ document.addEventListener("click", async (event) => {
     }
   }
   if (button.dataset.deleteRegistration) {
-    const registration = regs.find((item) => item.id === button.dataset.deleteRegistration);
+    const registration = findLoadedRegistration(button.dataset.deleteRegistration);
     if (registration && await confirmAction({ title: "Xóa đăng ký?", message: `Xóa đăng ký của ${registration.name || registration.email} khỏi sự kiện “${registration.eventTitle}”?` })) try {
       button.disabled = true;
       await removeRegistration(registration);
@@ -1739,8 +1571,7 @@ document.addEventListener("click", async (event) => {
 
 document.querySelectorAll(".registration-status-filter").forEach((checkbox) => {
   checkbox.onchange = () => {
-    registrationStatusFilters.clear();
-    document.querySelectorAll(".registration-status-filter:checked").forEach((item) => registrationStatusFilters.add(item.value));
+    syncRegistrationStatusFilters([...document.querySelectorAll(".registration-status-filter:checked")].map((item) => item.value));
     $("#eventFilter").value = "";
     resetRegistrationPage();
     refreshRegistrationFilters();
@@ -1748,7 +1579,7 @@ document.querySelectorAll(".registration-status-filter").forEach((checkbox) => {
   };
 });
 $("#registrationPageSize").onchange = async () => {
-  registrationPageSize = Number($("#registrationPageSize").value) || 20;
+  setRegistrationPageSize($("#registrationPageSize").value);
   resetRegistrationPage();
   await loadRegistrationPage(0);
 };
@@ -1768,33 +1599,7 @@ $("#registrationNext").onclick = () => loadRegistrationPage(1);
 $("#quickRegistrationPrev").onclick = () => loadQuickRegistrationPage(-1);
 $("#quickRegistrationNext").onclick = () => loadQuickRegistrationPage(1);
 
-$("#resetEventBtn").onclick = async () => {
-  const eventId = $("#eventFilter").value;
-  const selectedEvent = events.find((item) => item.id === eventId);
-  if (!selectedEvent) return;
-  const button = $("#resetEventBtn");
-  button.disabled = true;
-  button.textContent = "Đang kiểm tra…";
-  try {
-    const list = await fetchRegistrations("eventId", eventId);
-    if (!list.length) {
-      notice("Sự kiện này không có dữ liệu đăng ký.", "success");
-      return;
-    }
-    if (!(await confirmAction({ title: "Xóa toàn bộ đăng ký?", message: `Xóa toàn bộ ${list.length} lượt đăng ký của sự kiện “${selectedEvent.title}”? Thao tác này không thể hoàn tác.`, verification: "XÓA" }))) return;
-    for (let index = 0; index < list.length; index += 1) {
-      button.textContent = `Đang xóa ${index + 1}/${list.length}…`;
-      await removeRegistration(list[index]);
-    }
-    await loadRegistrationPage(0);
-    notice(`Đã xóa toàn bộ ${list.length} lượt đăng ký.`, "success");
-  } catch (error) {
-    notice(`Đã dừng khi gặp lỗi: ${error.message}`, "error");
-  } finally {
-    button.textContent = "Xóa toàn bộ đăng ký";
-    renderRegs();
-  }
-};
+$("#resetEventBtn").onclick = () => resetSelectedEventRegistrations();
 
 $("#exportBtn").onclick = async () => {
   const eventId = $("#eventFilter").value;
