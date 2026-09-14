@@ -2,7 +2,7 @@
 
 - Repository: `tranquanghai-ops/IFAA`
 - Branch hiện tại: `fix/storage-export-permissions`
-- PR liên quan: PR mới cho bản sửa quyền Storage export; chưa tạo tại thời điểm ghi handover này.
+- PR liên quan: PR #3 — https://github.com/tranquanghai-ops/IFAA/pull/3
 
 # Mục tiêu hiện tại
 
@@ -57,7 +57,7 @@ Sửa tối thiểu luồng xuất Excel đăng ký sự kiện để Owner và 
 
 # Hành động tiếp theo
 
-Sau khi lấy branch, kiểm tra có commit triển khai `b8e255a869e0cf7ef3bf9cc3b69c677e05886231` và commit handover ngay sau đó. Mở PR mới vào `main`, giữ trạng thái chưa merge/deploy, rồi người dùng có thể kiểm tra thực tế bằng tài khoản Owner, Admin và Sub-admin.
+Sau khi lấy branch, kiểm tra có commit triển khai `b8e255a869e0cf7ef3bf9cc3b69c677e05886231` và các commit handover sau đó. Review Draft PR #3, giữ trạng thái chưa merge/deploy, rồi người dùng có thể kiểm tra thực tế bằng tài khoản Owner, Admin và Sub-admin.
 
 # Ràng buộc an toàn
 
