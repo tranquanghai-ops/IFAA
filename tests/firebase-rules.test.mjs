@@ -17,6 +17,7 @@ const otherSubEmail = "other-sub@tdtu.edu.vn";
 const scannerEmail = "scanner@student.tdtu.edu.vn";
 const leaderEmail = "leader@student.tdtu.edu.vn";
 const studentEmail = "student@student.tdtu.edu.vn";
+const student2Email = "student2@student.tdtu.edu.vn";
 const outsiderEmail = "outside@example.com";
 let env;
 
@@ -49,6 +50,11 @@ async function seedBase() {
       setDoc(doc(db, "profiles", "student"), {
         uid: "student", email: studentEmail, participantType: "student",
         identifier: "52200001", mssv: "52200001", name: "Student",
+        phone: "", faculty: "IFA", major: ""
+      }),
+      setDoc(doc(db, "profiles", "student2"), {
+        uid: "student2", email: student2Email, participantType: "student",
+        identifier: "52200002", mssv: "52200002", name: "Student 2",
         phone: "", faculty: "IFA", major: ""
       })
     ]);
@@ -160,6 +166,22 @@ describe("role matrix and session ownership", () => {
     await assertFails(setDoc(doc(own, "attendanceRoster", "OTHER_52200001"), {
       sessionId: "OTHER", eventId: "", mssv: "52200001", name: "Student",
       email: studentEmail, uid: "student", createdAt: new Date()
+    }));
+  });
+
+  test("Sub-admin can end and reopen own session but only high Admin can finalize", async () => {
+    const own = dbFor("sub", subEmail);
+    await assertSucceeds(updateDoc(doc(own, "attendanceSessions", "OWN"), {
+      status: "ended", endedAt: new Date(), updatedAt: new Date()
+    }));
+    await assertSucceeds(updateDoc(doc(own, "attendanceSessions", "OWN"), {
+      status: "open", endedAt: null, updatedAt: new Date()
+    }));
+    await assertFails(updateDoc(doc(own, "attendanceSessions", "OWN"), {
+      status: "finalized", updatedAt: new Date()
+    }));
+    await assertSucceeds(updateDoc(doc(dbFor("admin", adminEmail), "attendanceSessions", "OWN"), {
+      status: "finalized", updatedAt: new Date()
     }));
   });
 
@@ -373,6 +395,48 @@ describe("registration integrity and legacy data", () => {
       transaction.update(eventRef, { registeredCount: 0, updatedAt: new Date() });
       transaction.delete(registrationRef);
     }));
+  });
+
+  test("Concurrent students register and cancel without losing event counter updates", async () => {
+    await seedEvent();
+    const register = async (uid, email, mssv) => {
+      const db = dbFor(uid, email);
+      const eventRef = doc(db, "events", "E");
+      const registrationRef = doc(db, "registrations", `${uid}_E`);
+      await runTransaction(db, async (transaction) => {
+        const event = await transaction.get(eventRef);
+        transaction.update(eventRef, {
+          registeredCount: Number(event.data().registeredCount || 0) + 1,
+          registrationMutationId: registrationRef.id, updatedAt: new Date()
+        });
+        transaction.set(registrationRef, {
+          uid, email, identifier: mssv, mssv, participantType: "student", name: uid,
+          phone: "", faculty: "IFA", major: "", eventId: "E", eventTitle: "Event",
+          eventDate: "", eventCreatorUid: "admin", groupId: "", groupName: "", createdAt: new Date()
+        });
+      });
+    };
+    await Promise.all([
+      register("student", studentEmail, "52200001"),
+      register("student2", student2Email, "52200002")
+    ]);
+    assert.equal((await getDoc(doc(dbFor("student", studentEmail), "events", "E"))).data().registeredCount, 2);
+
+    const cancel = async (uid, email) => {
+      const db = dbFor(uid, email);
+      const eventRef = doc(db, "events", "E");
+      const registrationRef = doc(db, "registrations", `${uid}_E`);
+      await runTransaction(db, async (transaction) => {
+        const event = await transaction.get(eventRef);
+        transaction.update(eventRef, {
+          registeredCount: Number(event.data().registeredCount || 0) - 1,
+          registrationMutationId: registrationRef.id, updatedAt: new Date()
+        });
+        transaction.delete(registrationRef);
+      });
+    };
+    await Promise.all([cancel("student", studentEmail), cancel("student2", student2Email)]);
+    assert.equal((await getDoc(doc(dbFor("student", studentEmail), "events", "E"))).data().registeredCount, 0);
   });
 
   test("Admin can delete legacy grouped registration when registrationLimits is missing", async () => {
