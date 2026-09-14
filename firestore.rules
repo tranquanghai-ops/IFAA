@@ -148,6 +148,7 @@ service cloud.firestore {
           || request.time <= attendanceSession(sessionId).endAt);
     }
     function eventAfter(id){ return getAfter(/databases/$(database)/documents/events/$(id)).data; }
+    function eventPath(id){ return /databases/$(database)/documents/events/$(id); }
     function eventCount(data){ return data.get('registeredCount', 0); }
     function registrationMarkerLinked(regId, id){
       return eventAfter(id).get('registrationMutationId', '') == regId
@@ -340,7 +341,8 @@ service cloud.firestore {
             && limitAfter(request.auth.uid,request.resource.data.groupId).eventIds.hasAll([request.resource.data.eventId])
             && limitAfter(request.auth.uid,request.resource.data.groupId).count == (exists(limitPath(request.auth.uid,request.resource.data.groupId))
               ? get(limitPath(request.auth.uid,request.resource.data.groupId)).data.count + 1 : 1)));
-      allow delete: if (admin() || (participant()
+      allow delete: if (admin() && !exists(eventPath(resource.data.eventId)))
+        || ((admin() || (participant()
           && resource.data.uid == request.auth.uid
           && eventBefore(resource.data.eventId).keys().hasAll(['allowCancellation'])
           && eventBefore(resource.data.eventId).allowCancellation == true))
@@ -356,7 +358,7 @@ service cloud.firestore {
             && limitAfter(resource.data.uid,resource.data.groupId).count == get(limitPath(resource.data.uid,resource.data.groupId)).data.count - 1)
           || (admin()
             && !exists(limitPath(resource.data.uid,resource.data.groupId))
-            && !existsAfter(limitPath(resource.data.uid,resource.data.groupId))));
+            && !existsAfter(limitPath(resource.data.uid,resource.data.groupId)))));
       allow update: if false;
     }
 
@@ -533,7 +535,7 @@ service cloud.firestore {
             && request.resource.data.mssv == ''
             && activeCheckin(resource.data)
             && !activeCheckin(request.resource.data)
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deletedAt','deletedByUid','deletedByEmail'])
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deletedAt','deletedByUid','deletedByEmail','photoPath','photoUrl','photoData'])
             && canonicalizationSourceLinked(checkinId, resource.data.sessionId))
           || ((leader(resource.data.sessionId)
               || (assigned(resource.data.sessionId)

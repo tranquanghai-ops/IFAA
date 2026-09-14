@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
-import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, setDoc, updateDoc, onSnapshot, query, where, serverTimestamp, Timestamp, runTransaction } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
+import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, setDoc, updateDoc, onSnapshot, query, where, serverTimestamp, Timestamp, runTransaction, deleteField } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
 import { getStorage, ref, uploadBytes, getBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
 import { firebaseConfig, STUDENT_DOMAIN, OWNER_EMAIL } from "../firebase-config.mjs";
 import { loadFacultyDataset } from "../faculty-dataset.mjs";
@@ -479,10 +479,6 @@ async function flushOutbox() {
       const checkinRef = doc(db, "checkins", session.id + "_" + (record.mssv || "photo_" + record.requestId));
       const student = record.student;
       const data = { sessionId: session.id, eventId: session.eventId || "", mssv: record.mssv, name: student.name || "", email: student.email || "", studentUid: student.uid || "", scannerUid: user.uid, scannerEmail: user.email.toLowerCase(), scannerMssv: user.email.split("@")[0].toUpperCase(), scannerName: assignment.name || user.displayName || user.email, checkedAt: Timestamp.fromDate(new Date(record.time)), requestId: record.requestId, deletedAt: null };
-      if (record.photoData) {
-        const photo = await uploadCheckinPhoto(checkinRef.id, record.photoData);
-        data.photoPath = photo.path; data.photoUrl = photo.url;
-      }
       let duplicate = null;
       let saved = false;
       for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -494,6 +490,11 @@ async function flushOutbox() {
             || null;
           if (duplicate) break;
           canonicalSnapshot = legacy.docs.find((item) => item.id === checkinRef.id) || null;
+        }
+        if (record.photoData && !data.photoPath) {
+          const photoObjectId = record.mssv ? `${checkinRef.id}_${record.requestId}` : checkinRef.id;
+          const photo = await uploadCheckinPhoto(photoObjectId, record.photoData);
+          data.photoPath = photo.path; data.photoUrl = photo.url;
         }
         try {
           await runTransaction(db, async (transaction) => {
@@ -582,7 +583,9 @@ async function labelPendingPhoto(id) {
         deletedByEmail: ""
       });
     }
-    transaction.update(pendingRef, { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email });
+    const sourceUpdate = { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email };
+    if (!canonicalActive) Object.assign(sourceUpdate, { photoPath: deleteField(), photoUrl: deleteField(), photoData: deleteField() });
+    transaction.update(pendingRef, sourceUpdate);
     const counters = sessionSnapshot.data();
     transaction.update(sessionRef, {
       checkinCount: Number(counters.checkinCount || 0) + (canonicalActive ? 0 : 1),

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
 import {
-  collection, deleteDoc, doc, getDoc, getDocs, query, runTransaction,
+  collection, deleteDoc, deleteField, doc, getDoc, getDocs, query, runTransaction,
   setDoc, updateDoc, where, writeBatch
 } from "firebase/firestore";
 import { getBytes, ref, uploadBytes } from "firebase/storage";
@@ -105,7 +105,9 @@ async function canonicalizePending(db, sourceId, mssv) {
           transaction.get(sourceRef), transaction.get(sessionRef)
         ]);
         if (!targetActive) transaction.set(targetRef, { ...source.data(), mssv, deletedAt: null, deletedByUid: "", deletedByEmail: "" });
-        transaction.update(sourceRef, { deletedAt: new Date(), deletedByUid: "scanner", deletedByEmail: scannerEmail });
+        const sourceUpdate = { deletedAt: new Date(), deletedByUid: "scanner", deletedByEmail: scannerEmail };
+        if (!targetActive) Object.assign(sourceUpdate, { photoPath: deleteField(), photoUrl: deleteField(), photoData: deleteField() });
+        transaction.update(sourceRef, sourceUpdate);
         transaction.update(sessionRef, {
           checkinCount: Number(session.data().checkinCount || 0) + (targetActive ? 0 : 1),
           pendingCount: Math.max(0, Number(session.data().pendingCount || 0) - 1),
@@ -205,8 +207,12 @@ describe("canonical check-in and counters", () => {
   test("Pending photo becomes canonical atomically and a competing label does not double count", async () => {
     await env.withSecurityRulesDisabled(async (context) => {
       const db = context.firestore();
-      await setDoc(doc(db, "checkins", "OWN_photo_a"), checkinData({ mssv: "" }));
-      await setDoc(doc(db, "checkins", "OWN_photo_b"), checkinData({ mssv: "" }));
+      await setDoc(doc(db, "checkins", "OWN_photo_a"), {
+        ...checkinData({ mssv: "" }), photoPath: "attendance/OWN/OWN_photo_a.jpg"
+      });
+      await setDoc(doc(db, "checkins", "OWN_photo_b"), {
+        ...checkinData({ mssv: "" }), photoPath: "attendance/OWN/OWN_photo_b.jpg"
+      });
       await updateDoc(doc(db, "attendanceSessions", "OWN"), { pendingCount: 2 });
     });
     const scanner = dbFor("scanner", scannerEmail);
@@ -221,6 +227,10 @@ describe("canonical check-in and counters", () => {
     assert.equal(session.data().checkinCount, 1);
     assert.equal(session.data().pendingCount, 0);
     assert.equal(canonical.data().deletedAt, null);
+    assert.ok(["attendance/OWN/OWN_photo_a.jpg", "attendance/OWN/OWN_photo_b.jpg"].includes(canonical.data().photoPath));
+    const winnerIsA = canonical.data().photoPath.endsWith("OWN_photo_a.jpg");
+    assert.equal(pendingA.data().photoPath, winnerIsA ? undefined : "attendance/OWN/OWN_photo_a.jpg");
+    assert.equal(pendingB.data().photoPath, winnerIsA ? "attendance/OWN/OWN_photo_b.jpg" : undefined);
     assert.ok(pendingA.data().deletedAt);
     assert.ok(pendingB.data().deletedAt);
   });
@@ -346,5 +356,14 @@ describe("registration integrity and legacy data", () => {
       });
     });
     await assertFails(deleteDoc(doc(dbFor("admin", adminEmail), "registrations", "student_E")));
+  });
+
+  test("Admin can delete an orphan legacy registration whose event no longer exists", async () => {
+    await env.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), "registrations", "student_MISSING"), {
+        uid: "student", email: studentEmail, eventId: "MISSING", groupId: ""
+      });
+    });
+    await assertSucceeds(deleteDoc(doc(dbFor("admin", adminEmail), "registrations", "student_MISSING")));
   });
 });

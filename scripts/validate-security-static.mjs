@@ -23,6 +23,7 @@ assert.match(admin, /failed\.push\(\{ id: item\.id/);
 assert.match(admin, /transaction\.set\(canonicalRef/);
 assert.match(checkin, /transaction\.set\(canonicalRef/);
 assert.match(checkin, /where\("mssv", "==", record\.mssv\)/);
+assert.match(checkin, /const photoObjectId = record\.mssv \? `\$\{checkinRef\.id\}_\$\{record\.requestId\}` : checkinRef\.id/);
 assert.match(pages, /workflow_run:/);
 assert.match(pages, /workflow_run\.conclusion == 'success'/);
 

@@ -2856,7 +2856,9 @@ async function labelPendingAttendancePhoto(id, rawMssv) {
         deletedByEmail: ""
       });
     }
-    transaction.update(pendingRef, { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email });
+    const sourceUpdate = { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email };
+    if (!canonicalActive) Object.assign(sourceUpdate, { photoPath: deleteField(), photoUrl: deleteField(), photoData: deleteField() });
+    transaction.update(pendingRef, sourceUpdate);
     const counters = sessionSnapshot.data();
     transaction.update(sessionRef, {
       checkinCount: Number(counters.checkinCount || 0) + (canonicalActive ? 0 : 1),
