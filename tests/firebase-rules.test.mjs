@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
 import {
   collection, deleteDoc, deleteField, doc, getDoc, getDocs, query, runTransaction,
-  setDoc, updateDoc, where, writeBatch
+  serverTimestamp, setDoc, updateDoc, where, writeBatch
 } from "firebase/firestore";
 import { getBytes, ref, uploadBytes } from "firebase/storage";
 
@@ -407,7 +407,7 @@ describe("registration integrity and legacy data", () => {
         const event = await transaction.get(eventRef);
         transaction.update(eventRef, {
           registeredCount: Number(event.data().registeredCount || 0) + 1,
-          registrationMutationId: registrationRef.id, updatedAt: new Date()
+          registrationMutationId: registrationRef.id, updatedAt: serverTimestamp()
         });
         transaction.set(registrationRef, {
           uid, email, identifier: mssv, mssv, participantType: "student", name: uid,
@@ -430,7 +430,7 @@ describe("registration integrity and legacy data", () => {
         const event = await transaction.get(eventRef);
         transaction.update(eventRef, {
           registeredCount: Number(event.data().registeredCount || 0) - 1,
-          registrationMutationId: registrationRef.id, updatedAt: new Date()
+          registrationMutationId: registrationRef.id, updatedAt: serverTimestamp()
         });
         transaction.delete(registrationRef);
       });
