@@ -8,11 +8,138 @@ service cloud.firestore {
     function owner(){ return staff() && email() == 'tranquanghai@tdtu.edu.vn'; }
     function admin(){ return owner() || (signedIn() && exists(/databases/$(database)/documents/admins/$(email()))); }
     function participant(){ return student() || staff() || admin(); }
-    function highAdmin(){ return owner() || (admin() && get(/databases/$(database)/documents/admins/$(email())).data.role == 'admin'); }
+    function highAdmin(){ return owner() || (admin() && get(/databases/$(database)/documents/admins/$(email())).data.get('role', 'admin') != 'subadmin'); }
+    function subAdmin(){ return admin() && !owner() && get(/databases/$(database)/documents/admins/$(email())).data.role == 'subadmin'; }
     function assignmentPath(sessionId){ return /databases/$(database)/documents/scannerAssignments/$(sessionId + '_' + email()); }
     function assigned(sessionId){ return signedIn() && exists(assignmentPath(sessionId)) && get(assignmentPath(sessionId)).data.active == true; }
     function leader(sessionId){ return assigned(sessionId) && get(assignmentPath(sessionId)).data.role == 'leader'; }
-    function attendanceSession(sessionId){ return get(/databases/$(database)/documents/attendanceSessions/$(sessionId)).data; }
+    function attendanceSessionPath(sessionId){ return /databases/$(database)/documents/attendanceSessions/$(sessionId); }
+    function attendanceSession(sessionId){ return get(attendanceSessionPath(sessionId)).data; }
+    function attendanceSessionAfter(sessionId){ return getAfter(attendanceSessionPath(sessionId)).data; }
+    function managesSession(sessionId){ return highAdmin() || (subAdmin() && attendanceSession(sessionId).createdByUid == request.auth.uid); }
+    function managesSessionAfter(sessionId){ return highAdmin() || (subAdmin()
+      && existsAfter(attendanceSessionPath(sessionId))
+      && attendanceSessionAfter(sessionId).createdByUid == request.auth.uid); }
+    function checkinPath(checkinId){ return /databases/$(database)/documents/checkins/$(checkinId); }
+    function counter(data, field){ return data.get(field, 0); }
+    function decrementedCounter(data, field){ return counter(data, field) > 0 ? counter(data, field) - 1 : 0; }
+    function activeCheckin(data){ return data.get('deletedAt', null) == null; }
+    function validMssv(value){ return value is string
+      && value.matches('^[A-Z0-9]{8,12}$')
+      && value.matches('.*[0-9].*'); }
+    function canonicalCheckinId(sessionId, mssv){ return sessionId + '_' + mssv; }
+    function canonicalizationSessionLinked(sessionId){
+      let sessionAfter = attendanceSessionAfter(sessionId);
+      let sourceId = sessionAfter.get('counterSourceId', '');
+      let targetId = sessionAfter.get('counterMutationId', '');
+      let sourcePath = checkinPath(sourceId);
+      let targetPath = checkinPath(targetId);
+      let targetWasActive = exists(targetPath) && activeCheckin(get(targetPath).data);
+      return sourceId is string
+        && targetId is string
+        && sourceId != targetId
+        && exists(sourcePath)
+        && existsAfter(sourcePath)
+        && get(sourcePath).data.sessionId == sessionId
+        && getAfter(sourcePath).data.sessionId == sessionId
+        && activeCheckin(get(sourcePath).data)
+        && get(sourcePath).data.mssv == ''
+        && !activeCheckin(getAfter(sourcePath).data)
+        && getAfter(sourcePath).data.mssv == ''
+        && existsAfter(targetPath)
+        && getAfter(targetPath).data.sessionId == sessionId
+        && activeCheckin(getAfter(targetPath).data)
+        && validMssv(getAfter(targetPath).data.mssv)
+        && targetId == canonicalCheckinId(sessionId, getAfter(targetPath).data.mssv)
+        && counter(sessionAfter, 'checkinCount') == counter(attendanceSession(sessionId), 'checkinCount') + (targetWasActive ? 0 : 1)
+        && counter(sessionAfter, 'pendingCount') == decrementedCounter(attendanceSession(sessionId), 'pendingCount');
+    }
+    function canonicalizationTargetLinked(checkinId, sessionId){
+      let sessionAfter = attendanceSessionAfter(sessionId);
+      let sourceId = sessionAfter.get('counterSourceId', '');
+      return checkinId == sessionAfter.get('counterMutationId', '')
+        && sourceId is string
+        && sourceId != checkinId
+        && validMssv(request.resource.data.mssv)
+        && checkinId == canonicalCheckinId(sessionId, request.resource.data.mssv);
+    }
+    function canonicalizationSourceLinked(checkinId, sessionId){
+      let sessionAfter = attendanceSessionAfter(sessionId);
+      return checkinId == sessionAfter.get('counterSourceId', '')
+        && sessionAfter.get('counterMutationId', '') != checkinId;
+    }
+    function attendanceCounterDelta(){
+      return counter(request.resource.data, 'checkinCount') is int
+        && counter(request.resource.data, 'pendingCount') is int
+        && counter(request.resource.data, 'checkinCount') >= 0
+        && counter(request.resource.data, 'pendingCount') >= 0
+        && ((counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount') + 1
+            && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount'))
+          || (counter(resource.data, 'checkinCount') > 0
+            && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount') - 1
+            && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount'))
+          || (counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount') + 1
+            && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount'))
+          || (counter(resource.data, 'pendingCount') > 0
+            && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount') - 1
+            && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount'))
+          || (counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount') + 1
+            && counter(resource.data, 'pendingCount') > 0
+            && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount') - 1));
+    }
+    function legacyAttendanceCounterMutation(){
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checkinCount','pendingCount','updatedAt'])
+        && attendanceCounterDelta();
+    }
+    function attendanceDocumentMutationLinked(sessionId){
+      let checkinId = request.resource.data.get('counterMutationId', '');
+      let path = checkinPath(checkinId);
+      return checkinId is string
+        && checkinId.size() > 0
+        && checkinId.size() <= 200
+        && existsAfter(path)
+        && getAfter(path).data.sessionId == sessionId
+        && (( !exists(path)
+            && activeCheckin(getAfter(path).data)
+            && ((getAfter(path).data.mssv != ''
+                && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount') + 1
+                && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount'))
+              || (getAfter(path).data.mssv == ''
+                && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount') + 1
+                && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount'))))
+          || (exists(path)
+            && get(path).data.sessionId == sessionId
+            && !activeCheckin(get(path).data)
+            && activeCheckin(getAfter(path).data)
+            && ((getAfter(path).data.mssv != ''
+                && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount') + 1
+                && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount'))
+              || (getAfter(path).data.mssv == ''
+                && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount') + 1
+                && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount'))))
+          || (exists(path)
+            && get(path).data.sessionId == sessionId
+            && activeCheckin(get(path).data)
+            && !activeCheckin(getAfter(path).data)
+            && ((get(path).data.mssv != ''
+                && counter(request.resource.data, 'checkinCount') == decrementedCounter(resource.data, 'checkinCount')
+                && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount'))
+              || (get(path).data.mssv == ''
+                && counter(request.resource.data, 'pendingCount') == decrementedCounter(resource.data, 'pendingCount')
+                && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount')))));
+    }
+    function checkinCounterLinked(checkinId, sessionId){
+      return (getAfter(attendanceSessionPath(sessionId)).data.get('counterMutationId', '') == checkinId
+          || getAfter(attendanceSessionPath(sessionId)).data.get('counterMutationId', '') == get(attendanceSessionPath(sessionId)).data.get('counterMutationId', ''))
+        && ((!activeCheckin(resource.data) && activeCheckin(request.resource.data))
+          || (activeCheckin(resource.data) && !activeCheckin(request.resource.data))
+          || (activeCheckin(resource.data) && activeCheckin(request.resource.data)
+            && resource.data.mssv == '' && request.resource.data.mssv != ''));
+    }
+    function newCheckinCounterLinked(checkinId, sessionId){
+      return (getAfter(attendanceSessionPath(sessionId)).data.get('counterMutationId', '') == checkinId
+          || getAfter(attendanceSessionPath(sessionId)).data.get('counterMutationId', '') == get(attendanceSessionPath(sessionId)).data.get('counterMutationId', ''));
+    }
     function attendanceAccepting(sessionId){
       return attendanceSession(sessionId).status == 'open'
         && (!attendanceSession(sessionId).keys().hasAll(['startAt'])
@@ -21,6 +148,58 @@ service cloud.firestore {
           || request.time <= attendanceSession(sessionId).endAt);
     }
     function eventAfter(id){ return getAfter(/databases/$(database)/documents/events/$(id)).data; }
+    function eventPath(id){ return /databases/$(database)/documents/events/$(id); }
+    function eventCount(data){ return data.get('registeredCount', 0); }
+    function registrationMarkerLinked(regId, id){
+      return eventAfter(id).get('registrationMutationId', '') == regId
+        || eventAfter(id).get('registrationMutationId', '') == eventBefore(id).get('registrationMutationId', '');
+    }
+    function registrationEventWriteLinked(regId, id){
+      return registrationMarkerLinked(regId, id)
+        && eventAfter(id).get('updatedAt', null) != eventBefore(id).get('updatedAt', null);
+    }
+    function legacyRegistrationCounterMutation(id){
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['registeredCount','updatedAt'])
+        && request.resource.data.registeredCount is int
+        && request.resource.data.registeredCount >= 0
+        && request.resource.data.get('registrationMutationId', '') == resource.data.get('registrationMutationId', '')
+        && (request.resource.data.registeredCount == eventCount(resource.data) + 1
+          || (eventCount(resource.data) > 0
+            && request.resource.data.registeredCount == eventCount(resource.data) - 1));
+    }
+    function registrationCreatedMutation(id){
+      let mutationId = eventAfter(id).get('registrationMutationId', '');
+      let mutationPath = /databases/$(database)/documents/registrations/$(mutationId);
+      return mutationId is string
+        && mutationId.size() > 0
+        && mutationId.size() <= 200
+        && !exists(mutationPath)
+        && existsAfter(mutationPath)
+        && getAfter(mutationPath).data.eventId == id;
+    }
+    function registrationDeletedMutation(id){
+      let mutationId = eventAfter(id).get('registrationMutationId', '');
+      let mutationPath = /databases/$(database)/documents/registrations/$(mutationId);
+      return mutationId is string
+        && mutationId.size() > 0
+        && mutationId.size() <= 200
+        && exists(mutationPath)
+        && !existsAfter(mutationPath)
+        && get(mutationPath).data.eventId == id;
+    }
+    function validRegistrationZeroCleanup(id){
+      let mutationId = eventAfter(id).get('registrationMutationId', '');
+      let mutationPath = /databases/$(database)/documents/registrations/$(mutationId);
+      return admin()
+        && mutationId is string
+        && mutationId.size() > 0
+        && exists(mutationPath)
+        && !existsAfter(mutationPath)
+        && get(mutationPath).data.eventId == id
+        && eventCount(eventBefore(id)) == 0
+        && eventCount(eventAfter(id)) == 0
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['registeredCount','registrationMutationId','updatedAt']);
+    }
     function eventBefore(id){ return get(/databases/$(database)/documents/events/$(id)).data; }
     function regPath(uid,id){ return /databases/$(database)/documents/registrations/$(uid + '_' + id); }
     function profilePath(uid){ return /databases/$(database)/documents/profiles/$(uid); }
@@ -56,12 +235,7 @@ service cloud.firestore {
 
     match /storageAdminAccess/{uid} {
       allow get: if owner() || (admin() && uid == request.auth.uid);
-      allow list, delete: if owner();
-      allow create, update: if admin()
-        && uid == request.auth.uid
-        && request.resource.data.uid == request.auth.uid
-        && request.resource.data.email == email()
-        && request.resource.data.role in ['admin', 'subadmin'];
+      allow list, create, update, delete: if owner();
     }
 
     match /favoriteScannerLists/{ownerUid} {
@@ -122,36 +296,55 @@ service cloud.firestore {
         && request.resource.data.allowedFaculties is list
         && request.resource.data.allowedFaculties.size() >= 1
         && validEventGroup(request.resource.data);
-      allow update: if ((highAdmin() || (admin() && resource.data.createdByUid == request.auth.uid))
-        && request.resource.data.createdByUid == resource.data.createdByUid
-        && request.resource.data.createdByEmail == resource.data.createdByEmail
-        && request.resource.data.createdAt == resource.data.createdAt
-        && request.resource.data.registeredCount is int
-        && request.resource.data.registeredCount >= 0
-        && request.resource.data.registeredCount <= resource.data.registeredCount
-        && request.resource.data.capacity >= resource.data.registeredCount
-        && request.resource.data.allowedFaculties is list
-        && request.resource.data.allowedFaculties.size() >= 1
-        && (resource.data.registeredCount == 0 || request.resource.data.groupId == resource.data.groupId)
-        && validEventGroup(request.resource.data))
-        || (participant()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['registeredCount','updatedAt'])
+      allow update: if (participant()
         && (
-          (request.resource.data.registeredCount == resource.data.registeredCount + 1
+          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['registeredCount','registrationMutationId','updatedAt'])
+            && request.resource.data.registeredCount == eventCount(resource.data) + 1
+            && registrationCreatedMutation(eventId)
             && resource.data.status == 'open'
-            && resource.data.registeredCount < resource.data.capacity
+            && eventCount(resource.data) < resource.data.capacity
             && facultyAllowed(eventId, request.auth.uid)
             && (resource.data.openAt == null || request.time >= resource.data.openAt)
-            && (resource.data.closeAt == null || request.time <= resource.data.closeAt)
-            && existsAfter(regPath(request.auth.uid,eventId)))
+            && (resource.data.closeAt == null || request.time <= resource.data.closeAt))
           ||
-          (request.resource.data.registeredCount == resource.data.registeredCount - 1
+          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['registeredCount','registrationMutationId','updatedAt'])
+            && eventCount(resource.data) > 0
+            && request.resource.data.registeredCount == eventCount(resource.data) - 1
             && request.resource.data.registeredCount >= 0
-            && resource.data.keys().hasAll(['allowCancellation'])
-            && resource.data.allowCancellation == true
-            && !existsAfter(regPath(request.auth.uid,eventId)))
-        ));
-      allow delete: if resource.data.registeredCount == 0
+            && registrationDeletedMutation(eventId)
+            && (admin() || (resource.data.keys().hasAll(['allowCancellation'])
+              && resource.data.allowCancellation == true
+              && exists(regPath(request.auth.uid, eventId))
+              && !existsAfter(regPath(request.auth.uid, eventId)))))
+          || (validRegistrationZeroCleanup(eventId)
+            && request.resource.data.registeredCount == 0)
+          || (legacyRegistrationCounterMutation(eventId)
+            && ((request.resource.data.registeredCount == eventCount(resource.data) + 1
+                && resource.data.status == 'open'
+                && eventCount(resource.data) < resource.data.capacity
+                && facultyAllowed(eventId, request.auth.uid)
+                && (resource.data.openAt == null || request.time >= resource.data.openAt)
+                && (resource.data.closeAt == null || request.time <= resource.data.closeAt)
+                && !exists(regPath(request.auth.uid, eventId))
+                && existsAfter(regPath(request.auth.uid, eventId)))
+              || (eventCount(resource.data) > 0
+                && request.resource.data.registeredCount == eventCount(resource.data) - 1
+                && (admin() || (resource.data.keys().hasAll(['allowCancellation'])
+                  && resource.data.allowCancellation == true
+                  && exists(regPath(request.auth.uid, eventId))
+                  && !existsAfter(regPath(request.auth.uid, eventId)))))))
+        ))
+        || ((highAdmin() || (subAdmin() && resource.data.createdByUid == request.auth.uid))
+          && request.resource.data.createdByUid == resource.data.createdByUid
+          && request.resource.data.createdByEmail == resource.data.createdByEmail
+          && request.resource.data.createdAt == resource.data.createdAt
+          && eventCount(request.resource.data) == eventCount(resource.data)
+          && request.resource.data.capacity >= eventCount(resource.data)
+          && request.resource.data.allowedFaculties is list
+          && request.resource.data.allowedFaculties.size() >= 1
+          && (eventCount(resource.data) == 0 || request.resource.data.groupId == resource.data.groupId)
+          && validEventGroup(request.resource.data));
+      allow delete: if eventCount(resource.data) == 0
         && (owner() || (admin() && resource.data.createdByUid == request.auth.uid));
     }
 
@@ -159,27 +352,26 @@ service cloud.firestore {
       allow list: if admin() || (participant() && resource.data.uid == request.auth.uid);
       allow get: if admin() || (participant() && (regId.matches('^' + request.auth.uid + '_.*$') || resource.data.uid == request.auth.uid));
       allow create: if participant()
-        && exists(profilePath(request.auth.uid))
         && regId == request.auth.uid + '_' + request.resource.data.eventId
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.email == email()
-        && facultyAllowed(request.resource.data.eventId, request.auth.uid)
         && request.resource.data.groupId == eventBefore(request.resource.data.eventId).groupId
-        && eventAfter(request.resource.data.eventId).registeredCount == eventBefore(request.resource.data.eventId).registeredCount + 1
+        && registrationEventWriteLinked(regId, request.resource.data.eventId)
         && (!groupedEvent(request.resource.data.eventId)
           || (existsAfter(limitPath(request.auth.uid,request.resource.data.groupId))
             && limitAfter(request.auth.uid,request.resource.data.groupId).eventIds.hasAll([request.resource.data.eventId])
             && limitAfter(request.auth.uid,request.resource.data.groupId).count == (exists(limitPath(request.auth.uid,request.resource.data.groupId))
               ? get(limitPath(request.auth.uid,request.resource.data.groupId)).data.count + 1 : 1)));
-      allow delete: if admin() || (participant()
-        && resource.data.uid == request.auth.uid
-        && eventBefore(resource.data.eventId).keys().hasAll(['allowCancellation'])
-        && eventBefore(resource.data.eventId).allowCancellation == true
-        && eventAfter(resource.data.eventId).registeredCount == eventBefore(resource.data.eventId).registeredCount - 1
+      allow delete: if (admin() && !exists(eventPath(resource.data.eventId)))
+        || ((admin() || (participant() && resource.data.uid == request.auth.uid))
+        && registrationEventWriteLinked(regId, resource.data.eventId)
         && (!groupedEvent(resource.data.eventId)
-          || (existsAfter(limitPath(request.auth.uid,resource.data.groupId))
-            && !limitAfter(request.auth.uid,resource.data.groupId).eventIds.hasAny([resource.data.eventId])
-            && limitAfter(request.auth.uid,resource.data.groupId).count == get(limitPath(request.auth.uid,resource.data.groupId)).data.count - 1)));
+          || (existsAfter(limitPath(resource.data.uid,resource.data.groupId))
+            && !limitAfter(resource.data.uid,resource.data.groupId).eventIds.hasAny([resource.data.eventId])
+            && limitAfter(resource.data.uid,resource.data.groupId).count == get(limitPath(resource.data.uid,resource.data.groupId)).data.count - 1)
+          || (admin()
+            && !exists(limitPath(resource.data.uid,resource.data.groupId))
+            && !existsAfter(limitPath(resource.data.uid,resource.data.groupId)))));
       allow update: if false;
     }
 
@@ -225,27 +417,34 @@ service cloud.firestore {
       allow create: if admin()
         && request.resource.data.createdByUid == request.auth.uid
         && request.resource.data.status == 'open';
-      allow update: if highAdmin()
-        || (admin()
-          && resource.data.createdByUid == request.auth.uid
-          && resource.data.status != 'finalized'
-          && request.resource.data.status != 'finalized'
-          && (resource.data.status != 'ended'
-            || request.resource.data.status != 'open'
-            || (resource.data.endedAt is timestamp
-              && request.time <= resource.data.endedAt + duration.value(5, 'd'))))
-        || (assigned(sessionId)
-          && resource.data.status == 'open'
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checkinCount','pendingCount','updatedAt'])
-          && request.resource.data.checkinCount is int
-          && request.resource.data.pendingCount is int
-          && request.resource.data.checkinCount >= 0
-          && request.resource.data.pendingCount >= 0
-          && (!resource.data.keys().hasAll(['checkinCount','pendingCount'])
-            || (request.resource.data.checkinCount >= resource.data.checkinCount - 1
-              && request.resource.data.checkinCount <= resource.data.checkinCount + 1
-              && request.resource.data.pendingCount >= resource.data.pendingCount - 1
-              && request.resource.data.pendingCount <= resource.data.pendingCount + 1)));
+      allow update: if (
+          (highAdmin()
+            || (subAdmin()
+              && resource.data.createdByUid == request.auth.uid
+              && request.resource.data.createdByUid == resource.data.createdByUid
+              && resource.data.status != 'finalized'
+              && request.resource.data.status != 'finalized'
+              && (resource.data.status != 'ended'
+                || request.resource.data.status != 'open'
+                || (resource.data.endedAt is timestamp
+                  && request.time <= resource.data.endedAt + duration.value(5, 'd')))))
+          && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount')
+          && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount')
+        )
+        || (((assigned(sessionId) && attendanceAccepting(sessionId))
+            || managesSession(sessionId))
+          && counter(request.resource.data, 'checkinCount') is int
+          && counter(request.resource.data, 'pendingCount') is int
+          && counter(request.resource.data, 'checkinCount') >= 0
+          && counter(request.resource.data, 'pendingCount') >= 0
+          && (legacyAttendanceCounterMutation()
+            || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checkinCount','pendingCount','counterMutationId','updatedAt'])
+              && request.resource.data.get('counterMutationId', '') is string
+              && request.resource.data.get('counterMutationId', '').size() > 0
+              && request.resource.data.get('counterMutationId', '').size() <= 200
+              && attendanceDocumentMutationLinked(sessionId))
+            || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checkinCount','pendingCount','counterMutationId','counterSourceId','updatedAt'])
+              && canonicalizationSessionLinked(sessionId))));
       allow delete: if highAdmin();
     }
 
@@ -265,26 +464,34 @@ service cloud.firestore {
     }
 
     match /attendanceRoster/{rosterId} {
-      allow read: if admin() || assigned(resource.data.sessionId);
-      allow create, update: if admin();
-      allow delete: if highAdmin();
+      allow read: if managesSession(resource.data.sessionId) || assigned(resource.data.sessionId);
+      allow create: if managesSessionAfter(request.resource.data.sessionId);
+      allow update: if managesSession(resource.data.sessionId)
+        && request.resource.data.sessionId == resource.data.sessionId;
+      allow delete: if highAdmin()
+        || (subAdmin() && attendanceSession(resource.data.sessionId).createdByUid == request.auth.uid);
     }
 
     match /scannerAssignments/{assignmentId} {
-      allow get: if admin() || (signedIn() && resource.data.email == email());
-      allow list: if admin();
-      allow create: if admin()
-        && attendanceSession(request.resource.data.sessionId).status != 'finalized';
-      allow update: if admin()
+      allow get: if managesSession(resource.data.sessionId)
+        || (signedIn() && resource.data.email == email());
+      allow list: if managesSession(resource.data.sessionId);
+      allow create: if managesSessionAfter(request.resource.data.sessionId)
+        && attendanceSessionAfter(request.resource.data.sessionId).status != 'finalized';
+      allow update: if managesSession(resource.data.sessionId)
         && request.resource.data.sessionId == resource.data.sessionId
         && attendanceSession(resource.data.sessionId).status != 'finalized';
       allow delete: if highAdmin()
-        || (admin() && attendanceSession(resource.data.sessionId).status != 'finalized');
+        || (subAdmin()
+          && attendanceSession(resource.data.sessionId).createdByUid == request.auth.uid
+          && attendanceSession(resource.data.sessionId).status != 'finalized');
     }
 
     match /attendanceGrants/{grantId} {
       allow read: if highAdmin();
-      allow create, update: if admin();
+      allow create: if managesSessionAfter(request.resource.data.sessionId);
+      allow update: if managesSession(resource.data.sessionId)
+        && request.resource.data.sessionId == resource.data.sessionId;
       allow delete: if highAdmin();
     }
 
@@ -297,29 +504,102 @@ service cloud.firestore {
     }
 
     match /checkins/{checkinId} {
-      allow get, list: if admin()
+      allow get, list: if managesSession(resource.data.sessionId)
         || (student() && resource.data.email == email())
         || (assigned(resource.data.sessionId)
           && attendanceSession(resource.data.sessionId).status != 'finalized');
-      allow create: if (admin() || assigned(request.resource.data.sessionId))
-        && attendanceAccepting(request.resource.data.sessionId)
-        && request.resource.data.mssv is string
-        && request.resource.data.mssv.size() <= 12
-        && request.resource.data.scannerUid == request.auth.uid
-        && request.resource.data.scannerEmail == email();
-      allow update: if (admin()
-          && attendanceSession(resource.data.sessionId).status != 'finalized')
+      allow create: if attendanceAccepting(request.resource.data.sessionId)
+        && (
+          ((assigned(request.resource.data.sessionId)
+              || managesSession(request.resource.data.sessionId))
+            && request.resource.data.scannerUid == request.auth.uid
+            && request.resource.data.scannerEmail == email()
+            && ((validMssv(request.resource.data.mssv)
+                && checkinId == canonicalCheckinId(request.resource.data.sessionId, request.resource.data.mssv))
+              || (request.resource.data.mssv == ''
+                && checkinId.matches('^' + request.resource.data.sessionId + '_photo_[A-Za-z0-9-]+$')))
+            && newCheckinCounterLinked(checkinId, request.resource.data.sessionId))
+          || ((leader(request.resource.data.sessionId)
+                || (assigned(request.resource.data.sessionId)
+                  && get(checkinPath(attendanceSessionAfter(request.resource.data.sessionId).counterSourceId)).data.scannerUid == request.auth.uid)
+                || managesSession(request.resource.data.sessionId))
+            && canonicalizationTargetLinked(checkinId, request.resource.data.sessionId))
+        );
+      allow update: if ((assigned(resource.data.sessionId) && resource.data.scannerUid == request.auth.uid)
+            && attendanceAccepting(resource.data.sessionId)
+            && resource.data.mssv == ''
+            && checkinId.matches('^' + resource.data.sessionId + '_photo_[A-Za-z0-9-]+$')
+            && validMssv(request.resource.data.mssv)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['mssv','name','email','studentUid'])
+            && !existsAfter(checkinPath(canonicalCheckinId(resource.data.sessionId, request.resource.data.mssv)))
+            && checkinCounterLinked(checkinId, resource.data.sessionId))
+        || (assigned(resource.data.sessionId)
+            && attendanceAccepting(resource.data.sessionId)
+            && checkinId == resource.data.sessionId + '_' + resource.data.mssv
+            && !activeCheckin(resource.data)
+            && activeCheckin(request.resource.data)
+            && request.resource.data.sessionId == resource.data.sessionId
+            && request.resource.data.mssv == resource.data.mssv
+            && request.resource.data.scannerUid == request.auth.uid
+            && request.resource.data.scannerEmail == email()
+            && checkinCounterLinked(checkinId, resource.data.sessionId))
         || (leader(resource.data.sessionId)
           && attendanceAccepting(resource.data.sessionId)
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deletedAt','deletedByUid','deletedByEmail']))
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deletedAt','deletedByUid','deletedByEmail'])
+          && checkinCounterLinked(checkinId, resource.data.sessionId))
+        || (((leader(resource.data.sessionId)
+              || (assigned(resource.data.sessionId) && resource.data.scannerUid == request.auth.uid)
+              || managesSession(resource.data.sessionId))
+            && attendanceAccepting(resource.data.sessionId)
+            && request.resource.data.sessionId == resource.data.sessionId
+            && resource.data.mssv == ''
+            && request.resource.data.mssv == ''
+            && activeCheckin(resource.data)
+            && !activeCheckin(request.resource.data)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deletedAt','deletedByUid','deletedByEmail','photoPath','photoUrl','photoData'])
+            && canonicalizationSourceLinked(checkinId, resource.data.sessionId))
+          || ((leader(resource.data.sessionId)
+              || (assigned(resource.data.sessionId)
+                && get(checkinPath(attendanceSessionAfter(resource.data.sessionId).counterSourceId)).data.scannerUid == request.auth.uid)
+              || managesSession(resource.data.sessionId))
+            && attendanceAccepting(resource.data.sessionId)
+            && request.resource.data.sessionId == resource.data.sessionId
+            && !activeCheckin(resource.data)
+            && activeCheckin(request.resource.data)
+            && canonicalizationTargetLinked(checkinId, resource.data.sessionId))
+        ) || (
+          managesSession(resource.data.sessionId)
+          && attendanceSession(resource.data.sessionId).status != 'finalized'
+          && request.resource.data.sessionId == resource.data.sessionId
+          && (
+            (activeCheckin(resource.data) == activeCheckin(request.resource.data)
+              && resource.data.mssv == request.resource.data.mssv)
+            || checkinCounterLinked(checkinId, resource.data.sessionId)
+          )
+        )
+        || (leader(resource.data.sessionId)
+          && attendanceAccepting(resource.data.sessionId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deletedAt','deletedByUid','deletedByEmail'])
+          && checkinCounterLinked(checkinId, resource.data.sessionId))
         || ((leader(resource.data.sessionId)
             || (assigned(resource.data.sessionId) && resource.data.scannerUid == request.auth.uid))
           && attendanceAccepting(resource.data.sessionId)
           && resource.data.mssv == ''
-          && request.resource.data.mssv is string
-          && request.resource.data.mssv.size() >= 8
-          && request.resource.data.mssv.size() <= 12
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['mssv','name','email','studentUid']));
+          && checkinId.matches('^' + resource.data.sessionId + '_photo_[A-Za-z0-9-]+$')
+          && validMssv(request.resource.data.mssv)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['mssv','name','email','studentUid'])
+          && !existsAfter(checkinPath(canonicalCheckinId(resource.data.sessionId, request.resource.data.mssv)))
+          && checkinCounterLinked(checkinId, resource.data.sessionId))
+        || (assigned(resource.data.sessionId)
+          && attendanceAccepting(resource.data.sessionId)
+          && checkinId == resource.data.sessionId + '_' + resource.data.mssv
+          && !activeCheckin(resource.data)
+          && activeCheckin(request.resource.data)
+          && request.resource.data.sessionId == resource.data.sessionId
+          && request.resource.data.mssv == resource.data.mssv
+          && request.resource.data.scannerUid == request.auth.uid
+          && request.resource.data.scannerEmail == email()
+          && checkinCounterLinked(checkinId, resource.data.sessionId));
       allow delete: if highAdmin();
     }
   }

@@ -1,0 +1,45 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+
+const read = (path) => readFileSync(path, "utf8");
+const firestore = read("firestore.rules");
+const storage = read("storage.rules");
+const admin = read("admin/admin.mjs");
+const checkin = read("check-in/check-in.mjs");
+const pages = read(".github/workflows/pages.yml");
+const firebaseDeploy = read(".github/workflows/firebase-hosting-merge.yml");
+
+assert.match(firestore, /function managesSessionAfter\(sessionId\)/);
+assert.match(firestore, /allow create: if managesSessionAfter\(request\.resource\.data\.sessionId\)/);
+assert.match(firestore, /value\.matches\('\^\[A-Z0-9\]\{8,12\}\$'\)/);
+assert.match(firestore, /function canonicalizationSessionLinked\(sessionId\)/);
+assert.match(firestore, /function canonicalizationTargetLinked\(checkinId, sessionId\)/);
+assert.match(firestore, /function canonicalizationSourceLinked\(checkinId, sessionId\)/);
+assert.match(firestore, /counterSourceId/);
+assert.match(firestore, /validRegistrationZeroCleanup/);
+assert.match(storage, /data\.get\('role', 'admin'\) != 'subadmin'/);
+assert.doesNotMatch(storage, /storageAdminAccess/);
+assert.match(admin, /const liveCheckin = checkinSnapshot\.data\(\)/);
+assert.match(admin, /failed\.push\(\{ id: item\.id/);
+assert.match(admin, /transaction\.set\(canonicalRef/);
+assert.match(checkin, /transaction\.set\(canonicalRef/);
+assert.match(checkin, /where\("mssv", "==", record\.mssv\)/);
+assert.match(checkin, /const photoObjectId = record\.mssv \? `\$\{checkinRef\.id\}_\$\{record\.requestId\}` : checkinRef\.id/);
+assert.match(pages, /workflow_run:/);
+assert.match(pages, /workflow_run\.conclusion == 'success'/);
+assert.ok(firebaseDeploy.indexOf("pnpm test:rules") < firebaseDeploy.indexOf("Authenticate Firebase service account"));
+
+for (const [name, source] of [["firestore.rules", firestore], ["storage.rules", storage]]) {
+  const stripped = source
+    .replace(/\/\/.*$/gm, "")
+    .replace(/'(?:\\.|[^'\\])*'/g, "''");
+  const stack = [];
+  const pairs = { ")": "(", "]": "[", "}": "{" };
+  for (const char of stripped) {
+    if ("([{".includes(char)) stack.push(char);
+    else if (")]}".includes(char)) assert.equal(stack.pop(), pairs[char], `${name}: unbalanced ${char}`);
+  }
+  assert.equal(stack.length, 0, `${name}: unclosed delimiter`);
+}
+
+console.log("Static security assertions passed.");

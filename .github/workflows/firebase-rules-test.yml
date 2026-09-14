@@ -1,0 +1,43 @@
+name: Test Firebase Security Rules
+
+on:
+  push:
+    branches:
+      - security/firestore-integrity-hardening
+  pull_request:
+    paths:
+      - "firestore.rules"
+      - "storage.rules"
+      - "tests/**"
+      - "firebase.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "scripts/**"
+      - "admin/admin.mjs"
+      - "student.mjs"
+      - "check-in/check-in.mjs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:syntax
+      - run: pnpm test:security-static
+      - run: pnpm test:rules

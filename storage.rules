@@ -10,24 +10,23 @@ service firebase.storage {
     function owner() {
       return signedIn() && email() == 'tranquanghai@tdtu.edu.vn';
     }
-    function storageAdmin() {
-      return signedIn()
-        && firestore.exists(/databases/(default)/documents/storageAdminAccess/$(request.auth.uid));
-    }
     function participant() {
       return signedIn() && (email().matches('^[^@]+@(student\\.)?tdtu\\.edu\\.vn$')
         || firestore.exists(/databases/(default)/documents/admins/$(request.auth.token.email)));
     }
     function highAdmin() {
-      return owner() || (storageAdmin()
-        && firestore.get(/databases/(default)/documents/storageAdminAccess/$(request.auth.uid)).data.role == 'admin')
-        || (signedIn()
+      return owner() || (signedIn()
         && firestore.exists(/databases/(default)/documents/admins/$(email()))
-        && firestore.get(/databases/(default)/documents/admins/$(email())).data.role == 'admin');
+        && firestore.get(/databases/(default)/documents/admins/$(email())).data.get('role', 'admin') != 'subadmin');
     }
     function admin() {
-      return owner() || storageAdmin()
-        || (signedIn() && firestore.exists(/databases/(default)/documents/admins/$(email())));
+      return owner() || (signedIn()
+        && firestore.exists(/databases/(default)/documents/admins/$(email())));
+    }
+    function managesSession(sessionId) {
+      return highAdmin() || (admin()
+        && firestore.get(/databases/(default)/documents/admins/$(email())).data.get('role', 'admin') == 'subadmin'
+        && firestore.get(/databases/(default)/documents/attendanceSessions/$(sessionId)).data.createdByUid == request.auth.uid);
     }
     function assigned(sessionId) {
       return signedIn()
@@ -45,8 +44,8 @@ service firebase.storage {
     }
 
     match /attendance/{sessionId}/{imageFile} {
-      allow read: if admin() || assigned(sessionId);
-      allow create, update: if (admin() || assigned(sessionId))
+      allow read: if managesSession(sessionId) || assigned(sessionId);
+      allow create, update: if (managesSession(sessionId) || assigned(sessionId))
         && imageFile.matches('^[A-Za-z0-9_.-]+\\.jpg$')
         && request.resource.size < 1536 * 1024
         && request.resource.contentType == 'image/jpeg';

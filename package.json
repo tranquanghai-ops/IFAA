@@ -4,9 +4,17 @@
   "type": "module",
   "scripts": {
     "migrate:check": "node scripts/migrate-firestore.mjs --dry-run",
-    "migrate:firestore": "node scripts/migrate-firestore.mjs"
+    "migrate:firestore": "node scripts/migrate-firestore.mjs",
+    "test:syntax": "node --check admin/admin.mjs && node --check student.mjs && node --check check-in/check-in.mjs",
+    "test:security-static": "node scripts/validate-security-static.mjs",
+    "test:rules": "firebase emulators:exec --only firestore,storage --project ifa-activities \"node --test tests/firebase-rules.test.mjs\""
   },
   "dependencies": {
     "firebase-admin": "^13.4.0"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
+    "firebase": "^11.9.1",
+    "firebase-tools": "^14.17.0"
   }
 }
