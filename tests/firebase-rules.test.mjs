@@ -182,6 +182,32 @@ describe("role matrix and session ownership", () => {
 });
 
 describe("canonical check-in and counters", () => {
+  test("Phase 1 accepts an old-client canonical check-in without mutation markers", async () => {
+    const scanner = dbFor("scanner", scannerEmail);
+    const batch = writeBatch(scanner);
+    batch.set(doc(scanner, "checkins", "OWN_52200001"), checkinData());
+    batch.update(doc(scanner, "attendanceSessions", "OWN"), {
+      checkinCount: 1, pendingCount: 0, updatedAt: new Date()
+    });
+    await assertSucceeds(batch.commit());
+  });
+
+  test("Phase 1 accepts old-client pending labelling in place", async () => {
+    await env.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), "checkins", "OWN_photo_old"), checkinData({ mssv: "" }));
+      await updateDoc(doc(context.firestore(), "attendanceSessions", "OWN"), { pendingCount: 1 });
+    });
+    const scanner = dbFor("scanner", scannerEmail);
+    const batch = writeBatch(scanner);
+    batch.update(doc(scanner, "checkins", "OWN_photo_old"), {
+      mssv: "52200001", name: "Student", email: studentEmail, studentUid: "student"
+    });
+    batch.update(doc(scanner, "attendanceSessions", "OWN"), {
+      checkinCount: 1, pendingCount: 0, updatedAt: new Date()
+    });
+    await assertSucceeds(batch.commit());
+  });
+
   test("Rules reject lowercase, spaces and punctuation in canonical MSSV", async () => {
     for (const mssv of ["5220abcd", "5220 001", "5220-001"]) {
       const scanner = dbFor("scanner", scannerEmail);
@@ -326,6 +352,26 @@ describe("registration integrity and legacy data", () => {
       transaction.update(eventRef, { registeredCount: 0, registrationMutationId: "student_E", updatedAt: new Date() });
       transaction.delete(registrationRef);
       transaction.update(limitRef, { count: 0, eventIds: [], updatedAt: new Date() });
+    }));
+  });
+
+  test("Phase 1 accepts old-client registration create/delete without mutation markers", async () => {
+    await seedEvent();
+    const db = dbFor("student", studentEmail);
+    const registrationRef = doc(db, "registrations", "student_E");
+    const eventRef = doc(db, "events", "E");
+    await assertSucceeds(runTransaction(db, async (transaction) => {
+      transaction.update(eventRef, { registeredCount: 1, updatedAt: new Date() });
+      transaction.set(registrationRef, {
+        uid: "student", email: studentEmail, identifier: "52200001", mssv: "52200001",
+        participantType: "student", name: "Student", phone: "", faculty: "IFA", major: "",
+        eventId: "E", eventTitle: "Event", eventDate: "", eventCreatorUid: "admin",
+        groupId: "", groupName: "", createdAt: new Date()
+      });
+    }));
+    await assertSucceeds(runTransaction(db, async (transaction) => {
+      transaction.update(eventRef, { registeredCount: 0, updatedAt: new Date() });
+      transaction.delete(registrationRef);
     }));
   });
 
