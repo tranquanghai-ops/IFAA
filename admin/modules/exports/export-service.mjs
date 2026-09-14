@@ -4,7 +4,7 @@ import { ref, getBytes, getMetadata, uploadBytes, deleteObject } from "https://w
 const XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const MAX_EXPORT_BYTES = 20 * 1024 * 1024;
 
-export function createAdminExportService({ db, storage, canUseStorageCache, getEvents, getGroups, getAttendanceSessions, notice, formatTimestamp, toMillis, formatVietnamDate, dayPeriod, shareCode }) {
+export function createAdminExportService({ db, storage, canUseStorageCache, getEvents, getGroups, getAttendanceSessions, fetchRegistrations, notice, formatTimestamp, toMillis, formatVietnamDate, dayPeriod, shareCode }) {
   function createWorkbookArtifact(filename, sheetName, rows, columns = []) {
     const sheet = XLSX.utils.json_to_sheet(rows);
     if (columns.length) sheet["!cols"] = columns;
@@ -64,12 +64,6 @@ export function createAdminExportService({ db, storage, canUseStorageCache, getE
     const sheet = XLSX.utils.json_to_sheet(rows), workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, sheet, sheetName);
     XLSX.writeFile(workbook, filename);
-  }
-
-  async function fetchRegistrations(field, value) {
-    if (!value) return [];
-    const snapshot = await getDocs(query(collection(db, "registrations"), where(field, "==", value)));
-    return snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => (toMillis(b.createdAt) || 0) - (toMillis(a.createdAt) || 0));
   }
 
   function writeRegistrationWorkbook(list, eventId = "", groupId = "") {
