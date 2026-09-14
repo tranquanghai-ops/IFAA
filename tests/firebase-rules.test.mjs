@@ -8,7 +8,7 @@ import {
 } from "firebase/firestore";
 import { getBytes, ref, uploadBytes } from "firebase/storage";
 
-const projectId = "ifaa-rules-test";
+const projectId = "ifa-activities";
 const ownerEmail = "tranquanghai@tdtu.edu.vn";
 const adminEmail = "admin@tdtu.edu.vn";
 const legacyAdminEmail = "legacy@tdtu.edu.vn";
