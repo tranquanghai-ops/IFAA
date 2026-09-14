@@ -1,81 +1,77 @@
-# Project
+# Dự án
 
 - Repository: `tranquanghai-ops/IFAA`
-- Current branch: `security/firestore-integrity-hardening`
-- Related PR: PR #2
+- Branch hiện tại: `fix/storage-export-permissions`
+- PR liên quan: PR mới cho bản sửa quyền Storage export; chưa tạo tại thời điểm ghi handover này.
 
-# Current Goal
+# Mục tiêu hiện tại
 
-Finish the existing Firestore integrity hardening PR with all Firebase Emulator security tests passing. The remaining work was limited to concurrent student registration and cancellation, the event capacity counter, and directly related rules behavior.
+Sửa tối thiểu luồng xuất Excel đăng ký sự kiện để Owner và Admin cấp cao tiếp tục dùng Firebase Storage cache, còn Sub-admin tạo workbook phía client và tải trực tiếp mà không có quyền đọc/ghi rộng trên `exports/**`.
 
-# Current State
+# Trạng thái hiện tại
 
-- The known concurrent registration failure has been reproduced and fixed.
-- Student registration and cancellation now update `events.registeredCount` with Firestore `increment(1)` and `increment(-1)` transforms inside the existing transaction. The transaction still reads the event and enforces status, time window, faculty, group-limit, and capacity checks before writing.
-- Registration writes still carry `registrationMutationId` and remain paired with the event counter mutation required by the existing Firestore Rules.
-- A registration transaction is retried at most once when concurrent marker evaluation returns Firestore `permission-denied`. Other errors are not retried. This handles the existing rules engine contention without weakening rules.
-- Firestore Rules were not changed by the final fix.
-- Production was not deployed and PR #2 was not merged.
-- Latest result: 19/19 Emulator tests pass, 0 fail.
+- Đã đồng bộ `main` sau khi PR #2 merge, tại commit `620ef71`.
+- Đã tạo branch `fix/storage-export-permissions`.
+- Đã sửa Storage Rules để export cache chỉ cho Owner hoặc tài khoản có document `admins/{email}` với `role == 'admin'`.
+- Sub-admin không còn gọi đọc/ghi Storage cache khi xuất Excel. Workbook vẫn được tạo ở client và tải trực tiếp.
+- Cơ chế query và kiểm tra quyền sự kiện hiện có không thay đổi. Sub-admin vẫn chỉ nhận các sự kiện do chính UID tạo và được xuất danh sách đăng ký của các sự kiện đó.
+- Student và người chưa đăng nhập không được truy cập export cache.
+- Không sửa IAM, service account, role model chung, Firestore schema hoặc dữ liệu production.
+- Không deploy production.
 
-# Decisions Already Made
+# Quyết định đã chốt
 
-- Keep the existing client-side Firestore transaction architecture; do not redesign registration around Cloud Functions.
-- Use atomic Firestore increments for the shared event registration counter. Do not restore snapshot-derived absolute counter writes.
-- Preserve the existing event, registration, and registration-limit schema and backward compatibility for cached/legacy clients.
-- Preserve server-side capacity, schedule, faculty, ownership, group-limit, mutation-pairing, and cancellation enforcement in Firestore Rules.
-- Keep Phase 1 compatibility paths already present in the rules until a separately approved rollout removes them.
-- Do not weaken Firestore Rules to make tests pass.
-- Do not work on the Excel export or Firebase Storage Admin/Sub-admin issue as part of this task.
-- Do not change auth or role architecture, add Cloud Functions, enable Blaze, deploy production, merge PR #2, migrate schema, or perform broad refactors without explicit approval.
+- `exports/**` là cache dành riêng cho Owner và Admin có `role == 'admin'`.
+- Không cấp quyền Storage export cho Sub-admin.
+- Sub-admin dùng cùng logic tạo workbook ở client rồi tải trực tiếp.
+- Giữ nguyên cross-service Firestore lookup trong Storage Rules; cảnh báo cấu hình trước đây đã được người dùng xử lý bằng “Fix issue”.
+- Không sửa IAM hoặc service account cho lỗi này.
+- Không thay đổi auth/role architecture, schema Firestore hoặc tạo migration.
+- Không đụng Cloud Functions, Blaze, check-in security hoặc registration concurrency.
+- Không refactor ngoài luồng export liên quan.
 
-# Files Changed
+# File đã thay đổi
 
-Files directly changed by the final concurrency fix:
+- `storage.rules`: thêm `exportCacheAdmin()` kiểm tra role chính xác và dùng helper này cho read/create/update/delete trong `exports/{exportType}/{exportFile}`.
+- `admin/admin.mjs`: `downloadCachedWorkbook()` bỏ qua Storage với Sub-admin; `saveAndDownloadCachedWorkbook()` tải workbook trực tiếp với Sub-admin; thông báo giao diện phản ánh đúng cache hoặc tải local.
+- `tests/firebase-rules.test.mjs`: thêm test Storage Emulator cho Owner, Admin, Sub-admin, Student và unauthenticated.
+- `scripts/validate-security-static.mjs`: thêm assertion cho helper role-aware và nhánh tải local.
+- `docs/AI-HANDOVER.md`: cập nhật trạng thái cross-machine bằng tiếng Việt.
 
-- `student.mjs`: imports Firestore `increment`, uses atomic increments for registration/cancellation counters, and adds one bounded retry for the known concurrent marker permission denial.
-- `tests/firebase-rules.test.mjs`: mirrors the atomic counter operations and bounded retry in the concurrent student registration/cancellation test.
-- `docs/AI-HANDOVER.md`: records the cross-machine continuation state and verified result.
+# Kiểm tra
 
-Other security PR files already changed before this continuation include `firestore.rules`, `storage.rules`, `admin/admin.mjs`, `check-in/check-in.mjs`, `firebase.json`, `package.json`, `pnpm-lock.yaml`, security test/validation scripts, CI workflows, and `SECURITY_ROLLOUT.md`. Do not re-audit or refactor them for this completed concurrency task unless a new test or PR review finding requires it.
+- `node --check admin/admin.mjs`: PASS.
+- `node --check tests/firebase-rules.test.mjs`: PASS.
+- `node scripts/validate-security-static.mjs`: PASS, kết quả `Static security assertions passed.`.
+- `git diff --check`: PASS.
+- Test Storage Emulator mục tiêu:
+  - Lệnh: `firebase emulators:exec --only firestore,storage --project ifa-activities "node --test --test-name-pattern=Export tests/firebase-rules.test.mjs"`
+  - Kết quả: 1/1 PASS, 0 FAIL.
+  - Owner đọc/ghi export cache: ALLOW.
+  - Admin `role=admin` đọc/ghi export cache: ALLOW.
+  - Sub-admin đọc/ghi export cache: DENY.
+  - Student đọc/ghi export cache: DENY.
+  - Unauthenticated đọc/ghi export cache: DENY.
+- Không chạy toàn bộ Emulator suite hoặc test không liên quan theo yêu cầu Fast Safe Mode.
+- Luồng tải workbook local của Sub-admin được xác minh bằng syntax/static assertion; repository không có browser unit-test framework cho hàm DOM này và không tạo framework mới.
 
-# Tests
+# Hành động tiếp theo
 
-Tests run during this continuation:
+Sau khi lấy branch, kiểm tra có commit triển khai `b8e255a869e0cf7ef3bf9cc3b69c677e05886231` và commit handover ngay sau đó. Mở PR mới vào `main`, giữ trạng thái chưa merge/deploy, rồi người dùng có thể kiểm tra thực tế bằng tài khoản Owner, Admin và Sub-admin.
 
-- Targeted reproduction before the fix:
-  - Command: `firebase emulators:exec --only firestore,storage --project ifa-activities "node --test --test-name-pattern=Concurrent tests/firebase-rules.test.mjs"`
-  - Result: 0 pass, 1 fail.
-  - Exact failure: `Concurrent students register and cancel without losing event counter updates` failed with Firestore `PERMISSION_DENIED`; rule evaluation reached the maximum of 1000 expressions during the concurrent event update/registration create.
-- Single-client diagnostic after atomic increments: 1/1 pass. This confirmed that the remaining denial was concurrency-related marker contention.
-- Targeted test after atomic increments and bounded retry: 1/1 pass.
-- Full Emulator security suite after the final fix:
-  - Command: `firebase emulators:exec --only firestore,storage --project ifa-activities "node --test tests/firebase-rules.test.mjs"`
-  - Result: 19/19 pass, 0 fail, 0 cancelled, 0 skipped.
-- Syntax checks: `node --check admin/admin.mjs`, `node --check student.mjs`, and `node --check check-in/check-in.mjs` all passed.
-- Static security checks: `node scripts/validate-security-static.mjs` passed with `Static security assertions passed.`
-- `git diff --check` passed.
+# Ràng buộc an toàn
 
-There is no remaining failing test.
+- Không deploy production.
+- Không merge PR.
+- Không sửa IAM hoặc service account cho cross-service lookup.
+- Không đổi role model chung.
+- Không đổi schema Firestore hoặc migration dữ liệu.
+- Không dùng Cloud Functions hoặc Blaze.
+- Không sửa check-in security hoặc registration concurrency.
+- Không refactor không liên quan.
 
-Local setup note for another Windows machine: the Firestore Emulator requires Java. This machine used Microsoft OpenJDK 21 and the repository dependencies from `pnpm-lock.yaml`. The Firebase CLI may print warnings about unauthenticated use and the legacy multi-bucket storage config; the local Firestore and Storage emulators still start and the full suite passes without Firebase login or production access.
+# Cập nhật lần cuối
 
-# Next Action
-
-Fetch `security/firestore-integrity-hardening`, verify that the branch contains implementation commit `6d6534b8586b3c184b2474f21b2d45234c2af068` and the subsequent handover commit, then review PR #2 and its CI checks. No further technical change is currently required. Do not merge or deploy without explicit user approval.
-
-# Safety Constraints
-
-- No production deploy.
-- No PR merge.
-- No schema migration.
-- No weakening Firestore Rules.
-- No unrelated refactor.
-- No Blaze or Cloud Functions without approval.
-- No Excel export / Firebase Storage Admin/Sub-admin work in this task.
-
-# Last Updated
-
-- Implementation commit SHA: `6d6534b8586b3c184b2474f21b2d45234c2af068`
-- Branch: `security/firestore-integrity-hardening`
-- Status: concurrency fix complete; targeted test passes; full Emulator suite passes 19/19; syntax and static security checks pass; ready for PR review, not merge.
+- Commit triển khai: `b8e255a869e0cf7ef3bf9cc3b69c677e05886231`
+- Branch: `fix/storage-export-permissions`
+- Trạng thái: bản sửa tối thiểu hoàn tất; syntax/static PASS; Storage Emulator mục tiêu 1/1 PASS; chưa deploy, chưa merge.
