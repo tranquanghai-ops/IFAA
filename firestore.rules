@@ -167,16 +167,25 @@ service cloud.firestore {
           || (eventCount(resource.data) > 0
             && request.resource.data.registeredCount == eventCount(resource.data) - 1));
     }
-    function validRegistrationCounterMutation(id){
+    function registrationCreatedMutation(id){
       let mutationId = eventAfter(id).get('registrationMutationId', '');
       let mutationPath = /databases/$(database)/documents/registrations/$(mutationId);
       return mutationId is string
         && mutationId.size() > 0
         && mutationId.size() <= 200
-        && ((!exists(mutationPath) && existsAfter(mutationPath)
-            && getAfter(mutationPath).data.eventId == id)
-          || (exists(mutationPath) && !existsAfter(mutationPath)
-            && get(mutationPath).data.eventId == id));
+        && !exists(mutationPath)
+        && existsAfter(mutationPath)
+        && getAfter(mutationPath).data.eventId == id;
+    }
+    function registrationDeletedMutation(id){
+      let mutationId = eventAfter(id).get('registrationMutationId', '');
+      let mutationPath = /databases/$(database)/documents/registrations/$(mutationId);
+      return mutationId is string
+        && mutationId.size() > 0
+        && mutationId.size() <= 200
+        && exists(mutationPath)
+        && !existsAfter(mutationPath)
+        && get(mutationPath).data.eventId == id;
     }
     function validRegistrationZeroCleanup(id){
       let mutationId = eventAfter(id).get('registrationMutationId', '');
@@ -288,28 +297,42 @@ service cloud.firestore {
         && request.resource.data.allowedFaculties.size() >= 1
         && validEventGroup(request.resource.data);
       allow update: if (participant()
-        && ((request.resource.data.diff(resource.data).affectedKeys().hasOnly(['registeredCount','registrationMutationId','updatedAt'])
-            && (validRegistrationCounterMutation(eventId) || validRegistrationZeroCleanup(eventId)))
-          || legacyRegistrationCounterMutation(eventId))
         && (
-          (request.resource.data.registeredCount == eventCount(resource.data) + 1
+          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['registeredCount','registrationMutationId','updatedAt'])
+            && request.resource.data.registeredCount == eventCount(resource.data) + 1
+            && registrationCreatedMutation(eventId)
             && resource.data.status == 'open'
             && eventCount(resource.data) < resource.data.capacity
             && facultyAllowed(eventId, request.auth.uid)
             && (resource.data.openAt == null || request.time >= resource.data.openAt)
-            && (resource.data.closeAt == null || request.time <= resource.data.closeAt)
-            && !exists(regPath(request.auth.uid, eventId))
-            && existsAfter(regPath(request.auth.uid, eventId)))
+            && (resource.data.closeAt == null || request.time <= resource.data.closeAt))
           ||
-          (eventCount(resource.data) > 0
+          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['registeredCount','registrationMutationId','updatedAt'])
+            && eventCount(resource.data) > 0
             && request.resource.data.registeredCount == eventCount(resource.data) - 1
             && request.resource.data.registeredCount >= 0
+            && registrationDeletedMutation(eventId)
             && (admin() || (resource.data.keys().hasAll(['allowCancellation'])
               && resource.data.allowCancellation == true
               && exists(regPath(request.auth.uid, eventId))
               && !existsAfter(regPath(request.auth.uid, eventId)))))
           || (validRegistrationZeroCleanup(eventId)
             && request.resource.data.registeredCount == 0)
+          || (legacyRegistrationCounterMutation(eventId)
+            && ((request.resource.data.registeredCount == eventCount(resource.data) + 1
+                && resource.data.status == 'open'
+                && eventCount(resource.data) < resource.data.capacity
+                && facultyAllowed(eventId, request.auth.uid)
+                && (resource.data.openAt == null || request.time >= resource.data.openAt)
+                && (resource.data.closeAt == null || request.time <= resource.data.closeAt)
+                && !exists(regPath(request.auth.uid, eventId))
+                && existsAfter(regPath(request.auth.uid, eventId)))
+              || (eventCount(resource.data) > 0
+                && request.resource.data.registeredCount == eventCount(resource.data) - 1
+                && (admin() || (resource.data.keys().hasAll(['allowCancellation'])
+                  && resource.data.allowCancellation == true
+                  && exists(regPath(request.auth.uid, eventId))
+                  && !existsAfter(regPath(request.auth.uid, eventId)))))))
         ))
         || ((highAdmin() || (subAdmin() && resource.data.createdByUid == request.auth.uid))
           && request.resource.data.createdByUid == resource.data.createdByUid
