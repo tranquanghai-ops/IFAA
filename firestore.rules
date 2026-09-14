@@ -170,12 +170,9 @@ service cloud.firestore {
         && mutationId.size() > 0
         && mutationId.size() <= 200
         && ((!exists(mutationPath) && existsAfter(mutationPath)
-            && getAfter(mutationPath).data.eventId == id
-            && eventCount(eventAfter(id)) == eventCount(eventBefore(id)) + 1)
+            && getAfter(mutationPath).data.eventId == id)
           || (exists(mutationPath) && !existsAfter(mutationPath)
-            && get(mutationPath).data.eventId == id
-            && eventCount(eventBefore(id)) > 0
-            && eventCount(eventAfter(id)) == eventCount(eventBefore(id)) - 1));
+            && get(mutationPath).data.eventId == id));
     }
     function validRegistrationZeroCleanup(id){
       let mutationId = eventAfter(id).get('registrationMutationId', '');
@@ -424,14 +421,14 @@ service cloud.firestore {
           && counter(request.resource.data, 'pendingCount') is int
           && counter(request.resource.data, 'checkinCount') >= 0
           && counter(request.resource.data, 'pendingCount') >= 0
-          && ((request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checkinCount','pendingCount','counterMutationId','updatedAt'])
+          && (legacyAttendanceCounterMutation()
+            || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checkinCount','pendingCount','counterMutationId','updatedAt'])
               && request.resource.data.get('counterMutationId', '') is string
               && request.resource.data.get('counterMutationId', '').size() > 0
               && request.resource.data.get('counterMutationId', '').size() <= 200
               && attendanceDocumentMutationLinked(sessionId))
             || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checkinCount','pendingCount','counterMutationId','counterSourceId','updatedAt'])
-              && canonicalizationSessionLinked(sessionId))
-            || legacyAttendanceCounterMutation()));
+              && canonicalizationSessionLinked(sessionId))));
       allow delete: if highAdmin();
     }
 
@@ -512,7 +509,15 @@ service cloud.firestore {
                 || managesSession(request.resource.data.sessionId))
             && canonicalizationTargetLinked(checkinId, request.resource.data.sessionId))
         );
-      allow update: if (assigned(resource.data.sessionId)
+      allow update: if ((assigned(resource.data.sessionId) && resource.data.scannerUid == request.auth.uid)
+            && attendanceAccepting(resource.data.sessionId)
+            && resource.data.mssv == ''
+            && checkinId.matches('^' + resource.data.sessionId + '_photo_[A-Za-z0-9-]+$')
+            && validMssv(request.resource.data.mssv)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['mssv','name','email','studentUid'])
+            && !existsAfter(checkinPath(canonicalCheckinId(resource.data.sessionId, request.resource.data.mssv)))
+            && checkinCounterLinked(checkinId, resource.data.sessionId))
+        || (assigned(resource.data.sessionId)
             && attendanceAccepting(resource.data.sessionId)
             && checkinId == resource.data.sessionId + '_' + resource.data.mssv
             && !activeCheckin(resource.data)
