@@ -18,7 +18,12 @@ assert.match(firestore, /function canonicalizationSourceLinked\(checkinId, sessi
 assert.match(firestore, /counterSourceId/);
 assert.match(firestore, /validRegistrationZeroCleanup/);
 assert.match(storage, /data\.get\('role', 'admin'\) != 'subadmin'/);
+assert.match(storage, /function exportCacheAdmin\(\)/);
+assert.match(storage, /data\.get\('role', ''\) == 'admin'/);
+assert.match(storage, /match \/exports\/\{exportType\}\/\{exportFile\}[\s\S]*allow read: if exportCacheAdmin\(\);[\s\S]*allow create, update: if exportCacheAdmin\(\)/);
 assert.doesNotMatch(storage, /storageAdminAccess/);
+assert.match(admin, /async function downloadCachedWorkbook\(path, version\) \{\s*if \(!highAdminAccess\(\)\) return false;/);
+assert.match(admin, /if \(!highAdminAccess\(\)\) \{\s*downloadWorkbookBytes\(artifact\.filename, artifact\.bytes\);\s*return false;/);
 assert.match(admin, /const liveCheckin = checkinSnapshot\.data\(\)/);
 assert.match(admin, /failed\.push\(\{ id: item\.id/);
 assert.match(admin, /transaction\.set\(canonicalRef/);

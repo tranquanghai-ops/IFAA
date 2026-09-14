@@ -847,8 +847,10 @@ async function downloadRegistrationExcel(eventId = "", groupId = "", button = nu
       return;
     }
     const artifact = writeRegistrationWorkbook(list, eventId, groupId);
-    await saveAndDownloadCachedWorkbook(cache.path, cache.version, artifact);
-    notice(`Đã tạo và lưu file ${list.length} lượt đăng ký. Những lần tải tiếp theo không đọc lại Firestore.`, "success");
+    const cachedForReuse = await saveAndDownloadCachedWorkbook(cache.path, cache.version, artifact);
+    notice(cachedForReuse
+      ? `Đã tạo và lưu file ${list.length} lượt đăng ký. Những lần tải tiếp theo không đọc lại Firestore.`
+      : `Đã tạo và tải trực tiếp file ${list.length} lượt đăng ký.`, "success");
   } catch (error) {
     notice(error.message || "Không thể xuất dữ liệu.", "error");
   } finally {
@@ -2187,6 +2189,7 @@ function downloadWorkbookBytes(filename, bytes) {
 }
 
 async function downloadCachedWorkbook(path, version) {
+  if (!highAdminAccess()) return false;
   const fileRef = ref(storage, path);
   try {
     const metadata = await getMetadata(fileRef);
@@ -2202,12 +2205,17 @@ async function downloadCachedWorkbook(path, version) {
 
 async function saveAndDownloadCachedWorkbook(path, version, artifact) {
   if (artifact.bytes.byteLength >= MAX_EXPORT_BYTES) throw Error("File Excel vượt quá giới hạn 20 MB.");
+  if (!highAdminAccess()) {
+    downloadWorkbookBytes(artifact.filename, artifact.bytes);
+    return false;
+  }
   await uploadBytes(ref(storage, path), artifact.bytes, {
     contentType: XLSX_CONTENT_TYPE,
     cacheControl: "private, no-store, max-age=0",
     customMetadata: { version, downloadName: artifact.filename }
   });
   downloadWorkbookBytes(artifact.filename, artifact.bytes);
+  return true;
 }
 
 async function deleteCachedExport(path) {
@@ -2940,8 +2948,10 @@ async function quickExportAttendance(sessionId, button) {
     const snapshot = await getDocs(query(collection(db, "checkins"), where("sessionId", "==", sessionId)));
     const rows = snapshot.docs.map((entry) => entry.data()).filter((entry) => !entry.deletedAt && entry.mssv).sort((a, b) => (millis(b.checkedAt) || 0) - (millis(a.checkedAt) || 0));
     const artifact = createWorkbookArtifact(`DIEM_DANH_${shareCode(item.title)}.xlsx`, "Danh sach diem danh", rows.map((entry, index) => ({ STT: rows.length - index, MSSV: entry.mssv, "Họ và tên": entry.name || "Không có dữ liệu", "Người quét": entry.scannerName || entry.scannerMssv || "", "Thời gian": ts(entry.checkedAt) })), [{ wch: 6 }, { wch: 15 }, { wch: 28 }, { wch: 28 }, { wch: 22 }]);
-    await saveAndDownloadCachedWorkbook(cache.path, cache.version, artifact);
-    notice(`Đã tạo và lưu file ${rows.length} lượt điểm danh. Những lần tải tiếp theo không đọc lại Firestore.`, "success");
+    const cachedForReuse = await saveAndDownloadCachedWorkbook(cache.path, cache.version, artifact);
+    notice(cachedForReuse
+      ? `Đã tạo và lưu file ${rows.length} lượt điểm danh. Những lần tải tiếp theo không đọc lại Firestore.`
+      : `Đã tạo và tải trực tiếp file ${rows.length} lượt điểm danh.`, "success");
   } catch (error) { notice("Không thể tải danh sách: " + error.message, "error"); }
   finally { button.disabled = false; button.textContent = oldText; }
 }
