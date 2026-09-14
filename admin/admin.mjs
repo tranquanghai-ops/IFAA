@@ -936,7 +936,7 @@ async function removeRegistration(registration) {
       limitRef = doc(db, "registrationLimits", `${liveRegistration.uid}_${liveRegistration.groupId}`);
       limitSnapshot = await transaction.get(limitRef);
     }
-    if (eventSnapshot.exists()) transaction.update(eventRef, { registeredCount: Math.max(0, Number(eventSnapshot.data().registeredCount || 0) - 1), updatedAt: serverTimestamp() });
+    if (eventSnapshot.exists()) transaction.update(eventRef, { registeredCount: Math.max(0, Number(eventSnapshot.data().registeredCount || 0) - 1), registrationMutationId: registration.id, updatedAt: serverTimestamp() });
     transaction.delete(registrationRef);
     if (limitRef && limitSnapshot?.exists()) {
       const limit = limitSnapshot.data();
@@ -2827,7 +2827,7 @@ async function labelPendingAttendancePhoto(id, rawMssv) {
   const student = await resolveAttendanceStudent(mssv);
   const batch = writeBatch(db);
   batch.update(doc(db, "checkins", id), { mssv, name: student.name || "Không có dữ liệu", email: student.email || "", studentUid: student.uid || "" });
-  batch.update(doc(db, "attendanceSessions", selectedAttendanceSession.id), { checkinCount: increment(1), pendingCount: increment(-1), updatedAt: serverTimestamp() });
+  batch.update(doc(db, "attendanceSessions", selectedAttendanceSession.id), { checkinCount: increment(1), pendingCount: increment(-1), counterMutationId: id, updatedAt: serverTimestamp() });
   await batch.commit();
   notice(`Đã lưu ${mssv} · ${student.name || "Không có dữ liệu"}.`, "success");
   await loadAttendanceManage();
@@ -2979,14 +2979,14 @@ document.addEventListener("click", async (event) => {
     const item = attendanceManageRows.find((row) => row.id === button.dataset.attendanceDeleteCheckin); if (!item || selectedAttendanceSession.status === "finalized") return;
     const batch = writeBatch(db);
     batch.update(doc(db, "checkins", item.id), { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email });
-    batch.update(doc(db, "attendanceSessions", selectedAttendanceSession.id), item.mssv ? { checkinCount: increment(-1), updatedAt: serverTimestamp() } : { pendingCount: increment(-1), updatedAt: serverTimestamp() });
+    batch.update(doc(db, "attendanceSessions", selectedAttendanceSession.id), item.mssv ? { checkinCount: increment(-1), counterMutationId: item.id, updatedAt: serverTimestamp() } : { pendingCount: increment(-1), counterMutationId: item.id, updatedAt: serverTimestamp() });
     await batch.commit(); await audit("checkin.trash", "checkin", item.id, { sessionId: selectedAttendanceSession.id, mssv: item.mssv || "" }); notice("Đã chuyển lượt điểm danh vào thùng rác.", "success"); await loadAttendanceManage();
   }
   if (button.dataset.attendanceRestoreCheckin) {
     const item = attendanceManageRows.find((row) => row.id === button.dataset.attendanceRestoreCheckin); if (!item || selectedAttendanceSession.status === "finalized") return;
     const batch = writeBatch(db);
     batch.update(doc(db, "checkins", item.id), { deletedAt: null, deletedByUid: "", deletedByEmail: "" });
-    batch.update(doc(db, "attendanceSessions", selectedAttendanceSession.id), item.mssv ? { checkinCount: increment(1), updatedAt: serverTimestamp() } : { pendingCount: increment(1), updatedAt: serverTimestamp() });
+    batch.update(doc(db, "attendanceSessions", selectedAttendanceSession.id), item.mssv ? { checkinCount: increment(1), counterMutationId: item.id, updatedAt: serverTimestamp() } : { pendingCount: increment(1), counterMutationId: item.id, updatedAt: serverTimestamp() });
     await batch.commit(); await audit("checkin.restore", "checkin", item.id, { sessionId: selectedAttendanceSession.id, mssv: item.mssv || "" }); notice("Đã khôi phục lượt điểm danh.", "success"); await loadAttendanceManage();
   }
   if (button.dataset.attendancePurgeCheckin) {
@@ -3043,8 +3043,19 @@ $("#attendanceDeleteAll").onclick = async () => {
   const snapshot = await getDocs(query(collection(db, "checkins"), where("sessionId", "==", selectedAttendanceSession.id), where("deletedAt", "==", null)));
   const rows = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); if (!rows.length) return;
   if (!(await confirmAction({ title: "Xóa toàn bộ lượt điểm danh?", message: `${rows.length} lượt sẽ chuyển vào thùng rác và có thể khôi phục. Nhập XÓA để tiếp tục.`, verification: "XÓA" }))) return;
-  for (let offset = 0; offset < rows.length; offset += 450) { const batch = writeBatch(db); rows.slice(offset, offset + 450).forEach((item) => batch.update(doc(db, "checkins", item.id), { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email })); await batch.commit(); }
-  await updateDoc(doc(db, "attendanceSessions", selectedAttendanceSession.id), { checkinCount: 0, pendingCount: 0, updatedAt: serverTimestamp() });
+  for (const item of rows) {
+    await runTransaction(db, async (transaction) => {
+      const checkinRef = doc(db, "checkins", item.id);
+      const sessionRef = doc(db, "attendanceSessions", selectedAttendanceSession.id);
+      const checkinSnapshot = await transaction.get(checkinRef);
+      const sessionSnapshot = await transaction.get(sessionRef);
+      if (!checkinSnapshot.exists() || checkinSnapshot.data().deletedAt || !sessionSnapshot.exists()) return;
+      transaction.update(checkinRef, { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email });
+      transaction.update(sessionRef, item.mssv
+        ? { checkinCount: Math.max(0, Number(sessionSnapshot.data().checkinCount || 0) - 1), counterMutationId: item.id, updatedAt: serverTimestamp() }
+        : { pendingCount: Math.max(0, Number(sessionSnapshot.data().pendingCount || 0) - 1), counterMutationId: item.id, updatedAt: serverTimestamp() });
+    });
+  }
   await audit("checkin.trash_all", "attendanceSession", selectedAttendanceSession.id, { count: rows.length });
   notice("Đã chuyển toàn bộ lượt điểm danh vào thùng rác.", "success"); await loadAttendanceManage();
 };
@@ -3162,8 +3173,6 @@ onAuthStateChanged(auth, async (currentUser) => {
   currentRole = resolvedRole;
   isOwner = currentRole === "owner";
   isSubAdmin = currentRole === "subadmin";
-  try { await syncStorageAdminAccess(currentUser, currentRole); }
-  catch (error) { console.warn("Không thể đồng bộ quyền Storage:", error); }
   $("#accountEmail").textContent = currentUser.email;
   $("#roleText").textContent = `Quyền hiện tại: ${isOwner ? "Chủ sở hữu" : isSubAdmin ? "Sub-admin · chỉ quản lý sự kiện tự tạo" : "Admin"}`;
   $("#adminLogin").classList.add("hidden");
