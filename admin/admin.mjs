@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
 import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, getCountFromServer, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit, startAfter, serverTimestamp, Timestamp, runTransaction, writeBatch, increment, deleteField } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
 import { getStorage, ref, getBytes, getDownloadURL, getMetadata, uploadBytes, deleteObject } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
 import { firebaseConfig, OWNER_EMAIL } from "../firebase-config.mjs";
@@ -110,7 +110,7 @@ let attendanceManageRows = [], attendancePage = 1, attendancePageSize = 10;
 let attendancePageCursors = [null], attendancePageHasNext = false, attendanceTotalCount = 0;
 let attendanceReportPage = 1, attendanceReportPageSize = 10, attendanceReportFilter = "present";
 let attendanceReportLoaded = false, attendanceReportRowsSource = [], attendanceTrashLoaded = false;
-let attendanceViewerScale = 1, attendanceViewerObjectUrl = "";
+let attendanceViewerScale = 1, attendanceViewerObjectUrl = "", attendanceViewerCheckinId = "";
 let attendanceRosterImport = [];
 let attendancePermissionMembers = [];
 let favoriteScannerStudents = [];
@@ -142,15 +142,19 @@ function setSystemStatus(selector, text, ok = true) {
 async function loadSystemStatus() {
   const button = $("#systemStatusRefresh"); if (button) button.disabled = true;
   setSystemStatus("#systemAuthStatus", user?.emailVerified ? "Hoạt động" : "Chưa xác thực", !!user?.emailVerified);
+  $("#systemStorageCard")?.classList.toggle("hidden", isSubAdmin);
+  $("#systemDatasetCard")?.classList.toggle("hidden", isSubAdmin);
   const results = await Promise.allSettled([
     getDocFromServer(doc(db, "settings", "main")),
-    getMetadata(ref(storage, "datasets/faculty-students.json.gz"))
+    isSubAdmin ? Promise.resolve(null) : getMetadata(ref(storage, "datasets/faculty-students.json.gz"))
   ]);
   const storageMissingDataset = results[1].status === "rejected" && results[1].reason?.code === "storage/object-not-found";
   const storageReachable = results[1].status === "fulfilled" || storageMissingDataset;
   setSystemStatus("#systemFirestoreStatus", results[0].status === "fulfilled" ? "Kết nối tốt" : "Không truy cập được", results[0].status === "fulfilled");
-  setSystemStatus("#systemStorageStatus", storageReachable ? "Kết nối tốt" : "Không truy cập được", storageReachable);
-  setSystemStatus("#systemDatasetStatus", results[1].status === "fulfilled" ? `${Math.ceil(Number(results[1].value.size || 0) / 1024)} KB · sẵn sàng` : "Chưa có tệp nén", results[1].status === "fulfilled");
+  if (!isSubAdmin) {
+    setSystemStatus("#systemStorageStatus", storageReachable ? "Kết nối tốt" : "Không truy cập được", storageReachable);
+    setSystemStatus("#systemDatasetStatus", results[1].status === "fulfilled" ? `${Math.ceil(Number(results[1].value.size || 0) / 1024)} KB · sẵn sàng` : "Chưa có tệp nén", results[1].status === "fulfilled");
+  }
   $("#systemStatusCheckedAt").textContent = `Kiểm tra lúc ${new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "medium" }).format(new Date())}`;
   if (button) button.disabled = false;
 }
@@ -1547,6 +1551,17 @@ $("#adminForm").onsubmit = async (event) => {
 };
 
 document.addEventListener("change", async (event) => {
+  const attendanceRole = event.target.closest("[data-attendance-assignment-role]");
+  if (attendanceRole) {
+    try {
+      const role = attendanceRole.value === "leader" ? "leader" : "scanner";
+      await updateDoc(doc(db, "scannerAssignments", attendanceRole.dataset.attendanceAssignmentRole), { role, updatedAt: serverTimestamp() });
+      await audit("scanner.role", "attendanceSession", selectedAttendanceSession?.id || "", { assignmentId: attendanceRole.dataset.attendanceAssignmentRole, role });
+      await loadAttendanceManage();
+      notice("Đã cập nhật nhanh vai trò sinh viên.", "success");
+    } catch (error) { notice(error.message || "Không thể đổi vai trò.", "error"); }
+    return;
+  }
   const select = event.target.closest("[data-admin-role]");
   if (!select || !isOwner) return;
   try {
@@ -2222,9 +2237,10 @@ function renderAttendance() {
     const rosterMeta = hasRoster ? ` · ${rosterCount} sinh viên đăng ký` : "";
     const checkinCount = attendanceCheckinCounts.get(item.id) || 0;
     const scannerCount = attendanceScannerCounts.get(item.id) || 0;
+    const pendingCount = Number(item.pendingCount || 0);
     return `<article class="att-row">
     <div><span class="att-badge ${safe(runtimeState)}" data-attendance-state="${item.id}" data-runtime-state="${safe(runtimeState)}">${safe(attendanceStatusLabel(runtimeState))}</span>
-    <h3>${safe(item.title)}</h3><div class="att-meta">${safe(vietnamDate(item.date))}${item.location ? ` · ${safe(item.location)}` : ""}${rosterMeta}</div><div class="att-meta attendance-timing" data-attendance-timing="${item.id}">${safe(attendanceTimingStatus(item))}</div><div class="attendance-card-stats"><span><b>${checkinCount}</b> SV đã điểm danh</span><span><b>${scannerCount}</b> SV được cấp quyền quét</span></div></div>
+    <h3>${safe(item.title)}</h3><div class="att-meta">${safe(vietnamDate(item.date))}${item.location ? ` · ${safe(item.location)}` : ""}${rosterMeta}</div><div class="att-meta attendance-timing" data-attendance-timing="${item.id}">${safe(attendanceTimingStatus(item))}</div><div class="attendance-card-stats"><span><b>${checkinCount}</b> SV đã điểm danh</span><span><b>${scannerCount}</b> SV được cấp quyền quét</span>${pendingCount ? `<button type="button" class="attendance-pending-stat" data-attendance-open-pending="${item.id}"><b>${pendingCount}</b> hình cần nhập MSSV</button>` : ""}</div></div>
     <div class="att-actions attendance-card-actions"><button class="btn" data-attendance-manage="${item.id}">Quản lý</button><button class="btn" data-attendance-copy="${item.id}">Copy link</button><button class="btn btn-success" data-attendance-quick-export="${item.id}">↓ Danh sách</button><button class="btn btn-danger" data-delete-attendance="${item.id}">Xóa</button></div>
   </article>`;
   }).join("") : '<div class="card empty">Không có sự kiện điểm danh trong bộ lọc này.</div>';
@@ -2357,9 +2373,9 @@ async function loadAttendanceManage() {
   $("#attendanceScannerRows").innerHTML = assignmentSnapshot.docs.map((item) => {
     const data = item.data();
     const grant = grants.get(item.id) || {};
-    return `<tr><td>${safe(data.mssv)}</td><td>${safe(data.name)}</td><td>${data.role === "leader" ? "SV Leader" : "SV quét"}</td>
+    return `<tr class="${data.role === "leader" ? "attendance-leader-row" : ""}"><td>${safe(data.mssv)}</td><td>${safe(data.name)}</td><td><select class="attendance-role-select" data-attendance-assignment-role="${item.id}"><option value="scanner" ${data.role !== "leader" ? "selected" : ""}>SV quét</option><option value="leader" ${data.role === "leader" ? "selected" : ""}>SV Leader</option></select></td>
       <td class="${isSubAdmin ? "hidden" : ""}">${safe(grant.grantedByName || grant.grantedByEmail || "")}</td>
-      <td><button class="btn btn-small btn-danger" data-attendance-remove-scanner="${item.id}" ${selectedAttendanceSession.status === "finalized" ? "disabled" : ""}>Xóa</button></td></tr>`;
+      <td><div class="actions"><button class="btn btn-small favorite-star-btn" title="Lưu vào danh sách yêu thích" data-save-scanner-favorite="${item.id}">★</button><button class="btn btn-small btn-danger" data-attendance-remove-scanner="${item.id}" ${selectedAttendanceSession.status === "finalized" ? "disabled" : ""}>Xóa</button></div></td></tr>`;
   }).join("") || '<tr><td colspan="5" class="empty">Chưa cấp quyền cho sinh viên quét.</td></tr>';
   renderAttendanceManageRows();
 }
@@ -2378,6 +2394,8 @@ function renderAttendanceManageRows() {
   const active = attendanceActiveRows(), pending = active.filter((item) => !item.mssv && (item.photoPath || item.photoData)), completed = active.filter((item) => item.mssv), trashed = attendanceTrashLoaded ? attendanceManageRows.filter((item) => item.deletedAt).sort((a, b) => (millis(b.deletedAt) || 0) - (millis(a.deletedAt) || 0)) : [];
   $("#attendancePendingSection").classList.toggle("hidden", !pending.length);
   $("#attendancePendingPhotoCount").textContent = pending.length + " ảnh";
+  $("#attendanceTabPendingBadge").textContent = pending.length;
+  $("#attendanceTabPendingBadge").classList.toggle("hidden", !pending.length);
   $("#attendancePendingPhotoRows").innerHTML = pending.map((item, index) => `<tr><td>${pending.length - index}</td><td><button type="button" class="attendance-photo-link" data-attendance-view-photo="${item.id}">Xem hình</button></td><td>${safe(item.scannerName || item.scannerMssv || "")}</td><td>${safe(ts(item.checkedAt))}</td><td><input class="attendance-inline-mssv" data-attendance-pending-input="${item.id}" maxlength="12" placeholder="Nhập MSSV" ${selectedAttendanceSession?.status === "finalized" ? "disabled" : ""}></td><td><button type="button" class="btn btn-primary" data-attendance-label-photo="${item.id}" ${selectedAttendanceSession?.status === "finalized" ? "disabled" : ""}>Lưu MSSV</button> <button type="button" class="btn btn-danger" data-attendance-delete-checkin="${item.id}" ${selectedAttendanceSession?.status === "finalized" ? "disabled" : ""}>Xóa</button></td></tr>`).join("");
 
   const totalPages = Math.max(attendancePage, Math.ceil(attendanceTotalCount / attendancePageSize), 1);
@@ -2408,6 +2426,20 @@ function renderAttendanceManageRows() {
   }
 }
 
+function setAttendanceManageTab(tab = "info") {
+  const selected = ["info", "scanners", "checkins"].includes(tab) ? tab : "info";
+  $("#attendanceManageDialog").dataset.activeTab = selected;
+  document.querySelectorAll("[data-attendance-manage-tab]").forEach((button) => button.classList.toggle("active", button.dataset.attendanceManageTab === selected));
+  $(".attendance-event-editor")?.classList.toggle("attendance-tab-hidden", selected !== "info");
+  const scannerSection = $("#attendanceScannerForm")?.closest("section");
+  scannerSection?.classList.toggle("attendance-tab-hidden", selected !== "scanners");
+  ["#attendanceReportSection", "#attendancePendingSection", "#attendanceCheckinRows", "#attendanceTrashSection"].forEach((selector) => {
+    const node = $(selector);
+    const panel = node?.closest("section") || node;
+    panel?.classList.toggle("attendance-tab-hidden", selected !== "checkins");
+  });
+}
+
 async function openAttendanceManage(sessionId) {
   attendanceRosterUnsubscribe?.(); attendanceRosterUnsubscribe = null;
   selectedAttendanceSession = attendanceSessions.find((item) => item.id === sessionId);
@@ -2421,6 +2453,7 @@ async function openAttendanceManage(sessionId) {
   $("#attendanceReopen").classList.toggle("hidden", !canReopenAttendance(selectedAttendanceSession));
   $("#attendanceScannerForm").classList.toggle("hidden", selectedAttendanceSession.status !== "open");
   $("#attendanceFavoriteManageTools").classList.toggle("hidden", selectedAttendanceSession.status !== "open");
+  setAttendanceManageTab("info");
   $("#attendanceManageDialog").showModal();
   await loadAttendanceManage();
 }
@@ -2785,10 +2818,28 @@ async function resolveAttendanceStudent(rawMssv) {
   const snapshot = await getDoc(doc(db, "facultyStudents", mssv));
   return snapshot.exists() ? { mssv, ...snapshot.data() } : { mssv, name: "Không có dữ liệu", email: mssv.toLowerCase() + "@student.tdtu.edu.vn", uid: "" };
 }
+
+async function labelPendingAttendancePhoto(id, rawMssv) {
+  const mssv = String(rawMssv || "").trim().toUpperCase();
+  if (!/^(?=.{8,12}$)(?=.*\d)[A-Z0-9]+$/.test(mssv)) throw Error("MSSV không hợp lệ; cần 8–12 chữ hoặc số.");
+  const duplicate = attendanceActiveRows().find((item) => item.id !== id && item.mssv && String(item.mssv).toUpperCase() === mssv);
+  if (duplicate) throw Error(`MSSV ${mssv} đã có trong danh sách điểm danh.`);
+  const student = await resolveAttendanceStudent(mssv);
+  const batch = writeBatch(db);
+  batch.update(doc(db, "checkins", id), { mssv, name: student.name || "Không có dữ liệu", email: student.email || "", studentUid: student.uid || "" });
+  batch.update(doc(db, "attendanceSessions", selectedAttendanceSession.id), { checkinCount: increment(1), pendingCount: increment(-1), updatedAt: serverTimestamp() });
+  await batch.commit();
+  notice(`Đã lưu ${mssv} · ${student.name || "Không có dữ liệu"}.`, "success");
+  await loadAttendanceManage();
+}
+
 async function openAttendanceImage(id) {
   const item = attendanceManageRows.find((row) => row.id === id);
   if (!item?.photoPath && !item?.photoUrl && !item?.photoData) return notice("Không tìm thấy hình điểm danh.", "error");
   const dialog = $("#attendanceImageDialog"), image = $("#attendanceViewerImage"), status = $("#attendanceImageStatus");
+  attendanceViewerCheckinId = id;
+  $("#attendanceImageMssv").value = item.mssv || "";
+  $("#attendanceImageMssvField").classList.toggle("hidden", Boolean(item.mssv) || selectedAttendanceSession?.status === "finalized");
   if (!dialog.open) dialog.showModal();
   image.removeAttribute("src"); status.textContent = "Đang tải hình…"; status.classList.remove("hidden");
   try {
@@ -2875,7 +2926,7 @@ document.addEventListener("click", async (event) => {
   }
   if (button.dataset.closeAttendanceCreate !== undefined) $("#attendanceCreateDialog").close();
   if (button.dataset.closeAttendanceManage !== undefined) { attendanceRosterUnsubscribe?.(); attendanceRosterUnsubscribe = null; $("#attendanceManageDialog").close(); }
-  if (button.dataset.closeAttendanceImage !== undefined) { $("#attendanceImageDialog").close(); if (attendanceViewerObjectUrl) { URL.revokeObjectURL(attendanceViewerObjectUrl); attendanceViewerObjectUrl = ""; } }
+  if (button.dataset.closeAttendanceImage !== undefined) { $("#attendanceImageDialog").close(); attendanceViewerCheckinId = ""; if (attendanceViewerObjectUrl) { URL.revokeObjectURL(attendanceViewerObjectUrl); attendanceViewerObjectUrl = ""; } }
   if (button.dataset.attendanceFilter) {
     attendanceFilter = button.dataset.attendanceFilter;
     document.querySelectorAll(".attendance-filter").forEach((item) => item.classList.toggle("active", item === button));
@@ -2897,21 +2948,32 @@ document.addEventListener("click", async (event) => {
     }
   }
   if (button.dataset.attendanceManage) await openAttendanceManage(button.dataset.attendanceManage);
+  if (button.dataset.attendanceManageTab) setAttendanceManageTab(button.dataset.attendanceManageTab);
+  if (button.dataset.attendanceOpenPending) {
+    await openAttendanceManage(button.dataset.attendanceOpenPending);
+    setAttendanceManageTab("checkins");
+    $("#attendancePendingSection")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
   if (button.dataset.attendanceCopy) await copyAttendanceLink(button.dataset.attendanceCopy);
   if (button.dataset.attendanceQuickExport) await quickExportAttendance(button.dataset.attendanceQuickExport, button);
   if (button.dataset.attendanceReportFilter) { attendanceReportFilter = button.dataset.attendanceReportFilter; attendanceReportPage = 1; renderAttendanceManageRows(); }
   if (button.dataset.attendanceViewPhoto) await openAttendanceImage(button.dataset.attendanceViewPhoto);
   if (button.dataset.attendanceLabelPhoto) {
     const id = button.dataset.attendanceLabelPhoto, input = document.querySelector(`[data-attendance-pending-input="${CSS.escape(id)}"]`), mssv = input?.value.trim().toUpperCase() || "";
-    if (!/^(?=.{8,12}$)(?=.*\d)[A-Z0-9]+$/.test(mssv)) return notice("MSSV không hợp lệ; cần 8–12 chữ hoặc số.", "error");
-    const duplicate = attendanceActiveRows().find((item) => item.mssv && String(item.mssv).toUpperCase() === mssv);
-    if (duplicate) return notice(`MSSV ${mssv} đã có trong danh sách điểm danh.`, "error");
-    const student = await resolveAttendanceStudent(mssv);
-    const batch = writeBatch(db);
-    batch.update(doc(db, "checkins", id), { mssv, name: student.name || "Không có dữ liệu", email: student.email || "", studentUid: student.uid || "" });
-    batch.update(doc(db, "attendanceSessions", selectedAttendanceSession.id), { checkinCount: increment(1), pendingCount: increment(-1), updatedAt: serverTimestamp() });
-    await batch.commit();
-    notice(`Đã lưu ${mssv} · ${student.name || "Không có dữ liệu"}.`, "success"); await loadAttendanceManage();
+    try { await labelPendingAttendancePhoto(id, mssv); }
+    catch (error) { notice(error.message, "error"); }
+  }
+  if (button.dataset.saveScannerFavorite) {
+    const row = button.closest("tr");
+    const mssv = row?.cells?.[0]?.textContent?.trim() || "";
+    const name = row?.cells?.[1]?.textContent?.trim() || "Không có dữ liệu";
+    const role = row?.querySelector("[data-attendance-assignment-role]")?.value || "scanner";
+    if (mssv) {
+      const map = new Map(favoriteScannerStudents.map((item) => [item.mssv, item]));
+      map.set(mssv, normalizeFavoriteScanner({ mssv, name, role }));
+      favoriteScannerStudents = [...map.values()];
+      await saveFavoriteScanners(`Đã lưu ${mssv} vào danh sách SV hỗ trợ yêu thích.`);
+    }
   }
   if (button.dataset.attendanceDeleteCheckin) {
     const item = attendanceManageRows.find((row) => row.id === button.dataset.attendanceDeleteCheckin); if (!item || selectedAttendanceSession.status === "finalized") return;
@@ -2996,6 +3058,17 @@ $("#attendanceTrashDeleteAll").onclick = async () => {
 $("#attendanceImageZoomOut").onclick = () => setAttendanceImageScale(attendanceViewerScale - .25);
 $("#attendanceImageZoomReset").onclick = () => setAttendanceImageScale(1);
 $("#attendanceImageZoomIn").onclick = () => setAttendanceImageScale(attendanceViewerScale + .25);
+$("#attendanceImageSaveMssv").onclick = async () => {
+  if (!attendanceViewerCheckinId) return;
+  const button = $("#attendanceImageSaveMssv");
+  button.disabled = true;
+  try {
+    await labelPendingAttendancePhoto(attendanceViewerCheckinId, $("#attendanceImageMssv").value);
+    $("#attendanceImageDialog").close();
+    attendanceViewerCheckinId = "";
+  } catch (error) { notice(error.message, "error"); }
+  finally { button.disabled = false; }
+};
 $("#attendanceEditForm").onsubmit = async (event) => {
   event.preventDefault(); const item = selectedAttendanceSession; if (!item || (isSubAdmin && item.createdByUid !== user.uid)) return notice("Bạn không có quyền chỉnh sửa phiên điểm danh này.", "error");
   const id = item.id;
@@ -3049,6 +3122,16 @@ $("#loginBtn").onclick = async () => {
   try {
     await signInWithPopup(auth, provider);
   } catch (error) {
+    if (["auth/popup-blocked", "auth/popup-timeout", "auth/operation-not-supported-in-this-environment"].includes(error?.code)) {
+      showAdminLoginNotice("Trình duyệt đang chặn cửa sổ Google. Hệ thống đang chuyển sang trang đăng nhập an toàn…");
+      try { await signInWithRedirect(auth, provider); }
+      catch (redirectError) { showAdminLoginNotice(`Không thể chuyển trang đăng nhập: ${redirectError?.message || error.message}`); }
+      return;
+    }
+    if (error?.code === "auth/unauthorized-domain") {
+      showAdminLoginNotice("Tên miền hiện tại chưa được thêm vào Firebase Authorized domains.");
+      return;
+    }
     if (error?.code !== "auth/popup-closed-by-user" && error?.code !== "auth/cancelled-popup-request") {
       const code = error?.code || "auth/unknown";
       showAdminLoginNotice(`Lỗi đăng nhập (${code}): ${error?.message || "Không xác định được nguyên nhân."}`);
@@ -3056,6 +3139,11 @@ $("#loginBtn").onclick = async () => {
   }
 };
 $("#logoutBtn").onclick = () => signOut(auth);
+
+getRedirectResult(auth).catch((error) => {
+  if (error?.code === "auth/unauthorized-domain") showAdminLoginNotice("Tên miền hiện tại chưa được thêm vào Firebase Authorized domains.");
+  else if (error?.code && error.code !== "auth/popup-closed-by-user") showAdminLoginNotice(`Không thể hoàn tất đăng nhập: ${error.message || error.code}`);
+});
 
 onAuthStateChanged(auth, async (currentUser) => {
   if (!currentUser) {

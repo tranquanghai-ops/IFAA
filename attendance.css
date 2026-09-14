@@ -23,4 +23,30 @@
 .favorite-scanner-table .attendance-role-select{min-width:105px}
 @media(max-width:700px){.attendance-permission-entry,.attendance-scanner-form{grid-template-columns:1fr}.favorite-scanner-actions .btn{flex:1 1 calc(50% - 7px)}.favorite-scanner-panel .table-wrap{margin:0 8px 8px}}
 .system-status-card,.audit-log-card{margin-top:16px}.system-status-card h3,.audit-log-card h3{margin:0 0 4px}.system-status-grid{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:10px;margin-top:12px}.system-status-grid span{display:flex;flex-direction:column;gap:4px;padding:12px;border:1px solid var(--line);border-radius:12px;background:#f8fafc}.system-status-grid em{font-style:normal;color:#17733b;font-weight:700}.system-status-grid em.status-error{color:#b51e35}@media(max-width:800px){.system-status-grid{grid-template-columns:1fr 1fr}}@media(max-width:480px){.system-status-grid{grid-template-columns:1fr}}
+
+/* V9: tab quản lý, ảnh gọn và thao tác SV hỗ trợ */
+.attendance-manage-tabs{position:sticky;z-index:8;top:-22px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:18px 0 4px;padding:8px;background:#fff;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.attendance-manage-tabs button{min-height:44px;border:1px solid var(--line);border-radius:10px;background:#f8fafc;color:var(--ink);font:inherit;font-weight:800;cursor:pointer}
+.attendance-manage-tabs button.active{border-color:#17213a;background:#17213a;color:#fff}
+.attendance-manage-tabs span{display:inline-grid;place-items:center;min-width:22px;height:22px;margin-left:4px;padding:0 5px;border-radius:999px;background:#b42318;color:#fff;font-size:12px}
+.attendance-tab-hidden{display:none!important}
+.attendance-pending-stat{border:1px solid #efb8b8;border-radius:8px;padding:5px 9px;background:#fff1f0;color:#b42318;font:inherit;font-size:13px;cursor:pointer}
+.favorite-star-btn{border-color:#e1aa2b!important;background:#fff8df!important;color:#8a5700!important;font-size:18px!important}
+.attendance-image-modal{padding:16px!important}
+.attendance-image-modal .attendance-image-stage{max-width:680px;max-height:52vh;margin:8px auto 0}
+.attendance-image-mssv{max-width:680px;margin:14px auto 0;padding:12px;border:1px solid #d7deea;border-radius:12px;background:#f8fafc}
+.attendance-image-mssv label{display:block;margin-bottom:7px;font-weight:850}
+.attendance-image-mssv>div{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}
+.attendance-image-mssv input{min-width:0;padding:10px 12px;border:1px solid #cfd5dd;border-radius:10px;font:inherit;text-transform:uppercase}
+@media(max-width:600px){
+  .scanner-dialog{position:fixed;top:50%;left:50%;width:calc(100vw - 14px);max-height:88dvh;margin:0;transform:translate(-50%,-50%)}
+  .scanner-dialog-card{max-height:88dvh}
+  .scanner-dialog .scanner-image-stage{max-height:38dvh}
+  .attendance-manage-tabs{top:-14px;gap:4px;margin-top:14px;padding:6px 0}
+  .attendance-manage-tabs button{min-height:42px;padding:6px 3px;font-size:11.5px;line-height:1.2}
+  .attendance-image-modal .attendance-image-stage{max-height:38vh}
+  .attendance-image-tools .btn{padding:8px 5px;font-size:12px}
+  .attendance-image-mssv>div{grid-template-columns:1fr}
+  .attendance-image-mssv .btn{width:100%}
+}
 .att-badge.scheduled{background:#fff5cc;color:#805600}.attendance-status-detail{display:inline-block;margin-left:8px;color:#687086;font-size:13px;font-weight:700}.attendance-timing{margin-top:7px;font-weight:700}
