@@ -329,11 +329,9 @@ service cloud.firestore {
       allow list: if admin() || (participant() && resource.data.uid == request.auth.uid);
       allow get: if admin() || (participant() && (regId.matches('^' + request.auth.uid + '_.*$') || resource.data.uid == request.auth.uid));
       allow create: if participant()
-        && exists(profilePath(request.auth.uid))
         && regId == request.auth.uid + '_' + request.resource.data.eventId
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.email == email()
-        && facultyAllowed(request.resource.data.eventId, request.auth.uid)
         && request.resource.data.groupId == eventBefore(request.resource.data.eventId).groupId
         && registrationEventWriteLinked(regId, request.resource.data.eventId)
         && (!groupedEvent(request.resource.data.eventId)
@@ -342,10 +340,7 @@ service cloud.firestore {
             && limitAfter(request.auth.uid,request.resource.data.groupId).count == (exists(limitPath(request.auth.uid,request.resource.data.groupId))
               ? get(limitPath(request.auth.uid,request.resource.data.groupId)).data.count + 1 : 1)));
       allow delete: if (admin() && !exists(eventPath(resource.data.eventId)))
-        || ((admin() || (participant()
-          && resource.data.uid == request.auth.uid
-          && eventBefore(resource.data.eventId).keys().hasAll(['allowCancellation'])
-          && eventBefore(resource.data.eventId).allowCancellation == true))
+        || ((admin() || (participant() && resource.data.uid == request.auth.uid))
         && registrationEventWriteLinked(regId, resource.data.eventId)
         && (!groupedEvent(resource.data.eventId)
           || (existsAfter(limitPath(resource.data.uid,resource.data.groupId))
