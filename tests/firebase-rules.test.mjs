@@ -66,44 +66,59 @@ function checkinData({ mssv = "52200001", scannerUid = "scanner", scanner = scan
 
 async function createCanonical(db, mssv = "52200001", scannerUid = "scanner", scanner = scannerEmail) {
   const id = "OWN_" + mssv;
-  await runTransaction(db, async (transaction) => {
-    const sessionRef = doc(db, "attendanceSessions", "OWN");
-    const checkinRef = doc(db, "checkins", id);
-    const [sessionSnapshot, checkinSnapshot] = await Promise.all([
-      transaction.get(sessionRef), transaction.get(checkinRef)
-    ]);
-    if (checkinSnapshot.exists() && !checkinSnapshot.data().deletedAt) return;
-    transaction.set(checkinRef, checkinData({ mssv, scannerUid, scanner }));
-    transaction.update(sessionRef, {
-      checkinCount: Number(sessionSnapshot.data().checkinCount || 0) + 1,
-      pendingCount: Number(sessionSnapshot.data().pendingCount || 0),
-      counterMutationId: id,
-      updatedAt: new Date()
-    });
-  });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const matches = await getDocs(query(collection(db, "checkins"), where("sessionId", "==", "OWN"), where("mssv", "==", mssv)));
+    const canonical = matches.docs.find((item) => item.id === id);
+    if (canonical && !canonical.data().deletedAt) return;
+    try {
+      await runTransaction(db, async (transaction) => {
+        const sessionRef = doc(db, "attendanceSessions", "OWN");
+        const checkinRef = doc(db, "checkins", id);
+        const sessionSnapshot = await transaction.get(sessionRef);
+        transaction.set(checkinRef, checkinData({ mssv, scannerUid, scanner }));
+        transaction.update(sessionRef, {
+          checkinCount: Number(sessionSnapshot.data().checkinCount || 0) + 1,
+          pendingCount: Number(sessionSnapshot.data().pendingCount || 0),
+          counterMutationId: id,
+          updatedAt: new Date()
+        });
+      });
+      return;
+    } catch (error) {
+      if (attempt === 1) throw error;
+    }
+  }
 }
 
 async function canonicalizePending(db, sourceId, mssv) {
   const targetId = "OWN_" + mssv;
-  return runTransaction(db, async (transaction) => {
-    const sourceRef = doc(db, "checkins", sourceId);
-    const targetRef = doc(db, "checkins", targetId);
-    const sessionRef = doc(db, "attendanceSessions", "OWN");
-    const [source, target, session] = await Promise.all([
-      transaction.get(sourceRef), transaction.get(targetRef), transaction.get(sessionRef)
-    ]);
-    const targetActive = target.exists() && !target.data().deletedAt;
-    if (!targetActive) transaction.set(targetRef, { ...source.data(), mssv, deletedAt: null, deletedByUid: "", deletedByEmail: "" });
-    transaction.update(sourceRef, { deletedAt: new Date(), deletedByUid: "scanner", deletedByEmail: scannerEmail });
-    transaction.update(sessionRef, {
-      checkinCount: Number(session.data().checkinCount || 0) + (targetActive ? 0 : 1),
-      pendingCount: Math.max(0, Number(session.data().pendingCount || 0) - 1),
-      counterMutationId: targetId,
-      counterSourceId: sourceId,
-      updatedAt: new Date()
-    });
-    return targetActive;
-  });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const matches = await getDocs(query(collection(db, "checkins"), where("sessionId", "==", "OWN"), where("mssv", "==", mssv)));
+    const target = matches.docs.find((item) => item.id === targetId);
+    const targetActive = Boolean(target && !target.data().deletedAt);
+    try {
+      return await runTransaction(db, async (transaction) => {
+        const sourceRef = doc(db, "checkins", sourceId);
+        const targetRef = doc(db, "checkins", targetId);
+        const sessionRef = doc(db, "attendanceSessions", "OWN");
+        const [source, session] = await Promise.all([
+          transaction.get(sourceRef), transaction.get(sessionRef)
+        ]);
+        if (!targetActive) transaction.set(targetRef, { ...source.data(), mssv, deletedAt: null, deletedByUid: "", deletedByEmail: "" });
+        transaction.update(sourceRef, { deletedAt: new Date(), deletedByUid: "scanner", deletedByEmail: scannerEmail });
+        transaction.update(sessionRef, {
+          checkinCount: Number(session.data().checkinCount || 0) + (targetActive ? 0 : 1),
+          pendingCount: Math.max(0, Number(session.data().pendingCount || 0) - 1),
+          counterMutationId: targetId,
+          counterSourceId: sourceId,
+          updatedAt: new Date()
+        });
+        return targetActive;
+      });
+    } catch (error) {
+      if (attempt === 1) throw error;
+    }
+  }
 }
 
 before(async () => {

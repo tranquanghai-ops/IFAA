@@ -54,67 +54,28 @@ service cloud.firestore {
         && counter(sessionAfter, 'checkinCount') == counter(attendanceSession(sessionId), 'checkinCount') + (targetWasActive ? 0 : 1)
         && counter(sessionAfter, 'pendingCount') == decrementedCounter(attendanceSession(sessionId), 'pendingCount');
     }
-    function legacyAttendanceCounterMutation(){
-      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checkinCount','pendingCount','updatedAt'])
-        && counter(request.resource.data, 'checkinCount') is int
+    function attendanceCounterDelta(){
+      return counter(request.resource.data, 'checkinCount') is int
         && counter(request.resource.data, 'pendingCount') is int
         && counter(request.resource.data, 'checkinCount') >= 0
         && counter(request.resource.data, 'pendingCount') >= 0
         && ((counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount') + 1
             && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount'))
-          || (counter(request.resource.data, 'checkinCount') == decrementedCounter(resource.data, 'checkinCount')
-            && counter(resource.data, 'checkinCount') > 0
+          || (counter(resource.data, 'checkinCount') > 0
+            && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount') - 1
             && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount'))
           || (counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount') + 1
             && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount'))
-          || (counter(request.resource.data, 'pendingCount') == decrementedCounter(resource.data, 'pendingCount')
-            && counter(resource.data, 'pendingCount') > 0
+          || (counter(resource.data, 'pendingCount') > 0
+            && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount') - 1
             && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount'))
           || (counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount') + 1
             && counter(resource.data, 'pendingCount') > 0
             && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount') - 1));
     }
-    function validAttendanceCounterMutation(sessionId){
-      let mutationId = request.resource.data.get('counterMutationId', '');
-      let path = checkinPath(mutationId);
-      return mutationId is string
-        && mutationId.size() > 0
-        && mutationId.size() <= 200
-        && (
-          (!exists(path) && existsAfter(path)
-            && getAfter(path).data.sessionId == sessionId
-            && activeCheckin(getAfter(path).data)
-            && ((getAfter(path).data.mssv != ''
-                && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount') + 1
-                && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount'))
-              || (getAfter(path).data.mssv == ''
-                && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount') + 1
-                && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount'))))
-          || (exists(path) && existsAfter(path)
-            && get(path).data.sessionId == sessionId
-            && getAfter(path).data.sessionId == sessionId
-            && (
-              (activeCheckin(get(path).data) && !activeCheckin(getAfter(path).data)
-                && ((get(path).data.mssv != ''
-                    && counter(request.resource.data, 'checkinCount') == decrementedCounter(resource.data, 'checkinCount')
-                    && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount'))
-                  || (get(path).data.mssv == ''
-                    && counter(request.resource.data, 'pendingCount') == decrementedCounter(resource.data, 'pendingCount')
-                    && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount'))))
-              || (!activeCheckin(get(path).data) && activeCheckin(getAfter(path).data)
-                && ((getAfter(path).data.mssv != ''
-                    && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount') + 1
-                    && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount'))
-                  || (getAfter(path).data.mssv == ''
-                    && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount') + 1
-                    && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount'))))
-              || (activeCheckin(get(path).data) && activeCheckin(getAfter(path).data)
-                && get(path).data.mssv == ''
-                && getAfter(path).data.mssv != ''
-                && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount') + 1
-                && counter(request.resource.data, 'pendingCount') == decrementedCounter(resource.data, 'pendingCount'))
-            ))
-        );
+    function legacyAttendanceCounterMutation(){
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checkinCount','pendingCount','updatedAt'])
+        && attendanceCounterDelta();
     }
     function checkinCounterLinked(checkinId, sessionId){
       return (getAfter(attendanceSessionPath(sessionId)).data.get('counterMutationId', '') == checkinId
@@ -434,7 +395,12 @@ service cloud.firestore {
           && counter(request.resource.data, 'checkinCount') >= 0
           && counter(request.resource.data, 'pendingCount') >= 0
           && ((request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checkinCount','pendingCount','counterMutationId','updatedAt'])
-              && validAttendanceCounterMutation(sessionId))
+              && request.resource.data.get('counterMutationId', '') is string
+              && request.resource.data.get('counterMutationId', '').size() > 0
+              && request.resource.data.get('counterMutationId', '').size() <= 200
+              && (attendanceCounterDelta()
+                || (counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount')
+                  && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount'))))
             || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checkinCount','pendingCount','counterMutationId','counterSourceId','updatedAt'])
               && canonicalizationLinked(sessionId))
             || legacyAttendanceCounterMutation()));

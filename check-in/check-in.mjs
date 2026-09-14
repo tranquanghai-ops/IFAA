@@ -477,47 +477,50 @@ async function flushOutbox() {
     while (outbox().length) {
       const record = outbox()[0];
       const checkinRef = doc(db, "checkins", session.id + "_" + (record.mssv || "photo_" + record.requestId));
-      if (record.mssv) {
-        const legacy = await getDocs(query(collection(db, "checkins"), where("sessionId", "==", session.id), where("mssv", "==", record.mssv)));
-        const activeLegacy = legacy.docs.find((item) => item.id !== checkinRef.id && !item.data().deletedAt);
-        if (activeLegacy) {
-          saveOutbox(outbox().filter((item) => item.requestId !== record.requestId));
-          feedback(false); showToast("warn", "Đã điểm danh trước đó", record.mssv + " · " + (activeLegacy.data().name || ""));
-          continue;
-        }
-      }
-      const existing = record.mssv ? await getDoc(checkinRef) : { exists: () => false };
-      if (record.mssv && existing.exists() && !existing.data().deletedAt) {
-        saveOutbox(outbox().filter((item) => item.requestId !== record.requestId));
-        feedback(false); showToast("warn", "Đã điểm danh trước đó", record.mssv + " · " + (existing.data().name || ""));
-        continue;
-      }
       const student = record.student;
       const data = { sessionId: session.id, eventId: session.eventId || "", mssv: record.mssv, name: student.name || "", email: student.email || "", studentUid: student.uid || "", scannerUid: user.uid, scannerEmail: user.email.toLowerCase(), scannerMssv: user.email.split("@")[0].toUpperCase(), scannerName: assignment.name || user.displayName || user.email, checkedAt: Timestamp.fromDate(new Date(record.time)), requestId: record.requestId, deletedAt: null };
       if (record.photoData) {
         const photo = await uploadCheckinPhoto(checkinRef.id, record.photoData);
         data.photoPath = photo.path; data.photoUrl = photo.url;
       }
-      const duplicate = await runTransaction(db, async (transaction) => {
-        const sessionRef = doc(db, "attendanceSessions", session.id);
-        const [liveCheckin, liveSession] = await Promise.all([transaction.get(checkinRef), transaction.get(sessionRef)]);
-        if (!liveSession.exists()) throw Error("Phiên điểm danh không còn tồn tại.");
-        if (record.mssv && liveCheckin.exists() && !liveCheckin.data().deletedAt) return true;
-        transaction.set(checkinRef, liveCheckin.exists() ? { ...data, deletedByUid: "", deletedByEmail: "" } : data);
-        const counters = liveSession.data();
-        transaction.update(sessionRef, {
-          checkinCount: Number(counters.checkinCount || 0) + (record.mssv ? 1 : 0),
-          pendingCount: Number(counters.pendingCount || 0) + (record.mssv ? 0 : 1),
-          counterMutationId: checkinRef.id,
-          updatedAt: serverTimestamp()
-        });
-        return false;
-      });
+      let duplicate = null;
+      let saved = false;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        let canonicalSnapshot = null;
+        if (record.mssv) {
+          const legacy = await getDocs(query(collection(db, "checkins"), where("sessionId", "==", session.id), where("mssv", "==", record.mssv)));
+          duplicate = legacy.docs.find((item) => item.id !== checkinRef.id && !item.data().deletedAt)
+            || legacy.docs.find((item) => item.id === checkinRef.id && !item.data().deletedAt)
+            || null;
+          if (duplicate) break;
+          canonicalSnapshot = legacy.docs.find((item) => item.id === checkinRef.id) || null;
+        }
+        try {
+          await runTransaction(db, async (transaction) => {
+            const sessionRef = doc(db, "attendanceSessions", session.id);
+            const liveSession = await transaction.get(sessionRef);
+            if (!liveSession.exists()) throw Error("Phiên điểm danh không còn tồn tại.");
+            transaction.set(checkinRef, canonicalSnapshot ? { ...data, deletedByUid: "", deletedByEmail: "" } : data);
+            const counters = liveSession.data();
+            transaction.update(sessionRef, {
+              checkinCount: Number(counters.checkinCount || 0) + (record.mssv ? 1 : 0),
+              pendingCount: Number(counters.pendingCount || 0) + (record.mssv ? 0 : 1),
+              counterMutationId: checkinRef.id,
+              updatedAt: serverTimestamp()
+            });
+          });
+          saved = true;
+          break;
+        } catch (error) {
+          if (attempt === 1) throw error;
+        }
+      }
       if (duplicate) {
         saveOutbox(outbox().filter((item) => item.requestId !== record.requestId));
-        feedback(false); showToast("warn", "Đã điểm danh trước đó", record.mssv);
+        feedback(false); showToast("warn", "Đã điểm danh trước đó", record.mssv + " · " + (duplicate.data().name || ""));
         continue;
       }
+      if (!saved) throw Error("Không thể ghi nhận lượt điểm danh.");
       saveOutbox(outbox().filter((item) => item.requestId !== record.requestId));
       feedback(true); showToast("success", record.mssv ? "Điểm danh thành công" : "Đã gửi ảnh chờ nhập MSSV", record.mssv ? record.mssv + " · " + (student.name || "") : "Ảnh đã chuyển đến danh sách quản lý.");
     }
@@ -548,20 +551,24 @@ async function labelPendingPhoto(id) {
   if (!validMssv(mssv)) return showToast("warn", "MSSV không hợp lệ", "MSSV gồm 8–12 chữ hoặc số.");
   const student = await resolveStudent(mssv);
   const canonicalId = session.id + "_" + mssv;
-  const legacy = await getDocs(query(collection(db, "checkins"), where("sessionId", "==", session.id), where("mssv", "==", mssv)));
-  const activeLegacy = legacy.docs.find((item) => item.id !== canonicalId && item.id !== id && !item.data().deletedAt);
-  if (activeLegacy) return showToast("warn", "Sinh viên đã điểm danh", mssv + " · " + (activeLegacy.data().name || ""));
-  const result = await runTransaction(db, async (transaction) => {
+  let result;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const legacy = await getDocs(query(collection(db, "checkins"), where("sessionId", "==", session.id), where("mssv", "==", mssv)));
+    const activeLegacy = legacy.docs.find((item) => item.id !== canonicalId && item.id !== id && !item.data().deletedAt);
+    if (activeLegacy) return showToast("warn", "Sinh viên đã điểm danh", mssv + " · " + (activeLegacy.data().name || ""));
+    const canonicalSnapshot = legacy.docs.find((item) => item.id === canonicalId) || null;
+    try {
+      result = await runTransaction(db, async (transaction) => {
     const pendingRef = doc(db, "checkins", id);
     const canonicalRef = doc(db, "checkins", canonicalId);
     const sessionRef = doc(db, "attendanceSessions", session.id);
-    const [pendingSnapshot, canonicalSnapshot, sessionSnapshot] = await Promise.all([
-      transaction.get(pendingRef), transaction.get(canonicalRef), transaction.get(sessionRef)
+    const [pendingSnapshot, sessionSnapshot] = await Promise.all([
+      transaction.get(pendingRef), transaction.get(sessionRef)
     ]);
     if (!pendingSnapshot.exists() || pendingSnapshot.data().deletedAt) throw Error("Ảnh chờ không còn hoạt động.");
     if (pendingSnapshot.data().mssv) throw Error("Ảnh này đã được gắn MSSV.");
     if (!sessionSnapshot.exists()) throw Error("Phiên điểm danh không còn tồn tại.");
-    const canonicalActive = canonicalSnapshot.exists() && !canonicalSnapshot.data().deletedAt;
+    const canonicalActive = Boolean(canonicalSnapshot && !canonicalSnapshot.data().deletedAt);
     const pending = pendingSnapshot.data();
     if (!canonicalActive) {
       transaction.set(canonicalRef, {
@@ -585,7 +592,12 @@ async function labelPendingPhoto(id) {
       updatedAt: serverTimestamp()
     });
     return { canonicalActive, name: canonicalActive ? canonicalSnapshot.data().name || "" : student.name || "" };
-  });
+      });
+      break;
+    } catch (error) {
+      if (attempt === 1) throw error;
+    }
+  }
   feedback(!result.canonicalActive);
   showToast(result.canonicalActive ? "warn" : "success", result.canonicalActive ? "Sinh viên đã điểm danh" : "Đã lưu MSSV", mssv + " · " + (result.name || "Không có dữ liệu"));
 }

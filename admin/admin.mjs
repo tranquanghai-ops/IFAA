@@ -2825,20 +2825,24 @@ async function labelPendingAttendancePhoto(id, rawMssv) {
   const student = await resolveAttendanceStudent(mssv);
   const sessionId = selectedAttendanceSession.id;
   const canonicalId = sessionId + "_" + mssv;
-  const legacy = await getDocs(query(collection(db, "checkins"), where("sessionId", "==", sessionId), where("mssv", "==", mssv)));
-  const activeLegacy = legacy.docs.find((item) => item.id !== canonicalId && item.id !== id && !item.data().deletedAt);
-  if (activeLegacy) throw Error(`MSSV ${mssv} đã có trong dữ liệu điểm danh cũ (${activeLegacy.id}).`);
-  const result = await runTransaction(db, async (transaction) => {
+  let result;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const legacy = await getDocs(query(collection(db, "checkins"), where("sessionId", "==", sessionId), where("mssv", "==", mssv)));
+    const activeLegacy = legacy.docs.find((item) => item.id !== canonicalId && item.id !== id && !item.data().deletedAt);
+    if (activeLegacy) throw Error(`MSSV ${mssv} đã có trong dữ liệu điểm danh cũ (${activeLegacy.id}).`);
+    const canonicalSnapshot = legacy.docs.find((item) => item.id === canonicalId) || null;
+    try {
+      result = await runTransaction(db, async (transaction) => {
     const pendingRef = doc(db, "checkins", id);
     const canonicalRef = doc(db, "checkins", canonicalId);
     const sessionRef = doc(db, "attendanceSessions", sessionId);
-    const [pendingSnapshot, canonicalSnapshot, sessionSnapshot] = await Promise.all([
-      transaction.get(pendingRef), transaction.get(canonicalRef), transaction.get(sessionRef)
+    const [pendingSnapshot, sessionSnapshot] = await Promise.all([
+      transaction.get(pendingRef), transaction.get(sessionRef)
     ]);
     if (!pendingSnapshot.exists() || pendingSnapshot.data().deletedAt) throw Error("Ảnh chờ không còn hoạt động.");
     if (pendingSnapshot.data().mssv) throw Error("Ảnh này đã được gắn MSSV.");
     if (!sessionSnapshot.exists()) throw Error("Phiên điểm danh không còn tồn tại.");
-    const canonicalActive = canonicalSnapshot.exists() && !canonicalSnapshot.data().deletedAt;
+    const canonicalActive = Boolean(canonicalSnapshot && !canonicalSnapshot.data().deletedAt);
     const pending = pendingSnapshot.data();
     if (!canonicalActive) {
       transaction.set(canonicalRef, {
@@ -2862,7 +2866,12 @@ async function labelPendingAttendancePhoto(id, rawMssv) {
       updatedAt: serverTimestamp()
     });
     return { canonicalActive, name: canonicalActive ? canonicalSnapshot.data().name || "" : student.name || "" };
-  });
+      });
+      break;
+    } catch (error) {
+      if (attempt === 1) throw error;
+    }
+  }
   notice(result.canonicalActive
     ? `${mssv} đã điểm danh; ảnh chờ đã được đóng mà không tăng bộ đếm.`
     : `Đã lưu ${mssv} · ${result.name || "Không có dữ liệu"}.`,
