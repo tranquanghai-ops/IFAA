@@ -154,6 +154,10 @@ service cloud.firestore {
       return eventAfter(id).get('registrationMutationId', '') == regId
         || eventAfter(id).get('registrationMutationId', '') == eventBefore(id).get('registrationMutationId', '');
     }
+    function registrationEventWriteLinked(regId, id){
+      return registrationMarkerLinked(regId, id)
+        && eventAfter(id).get('updatedAt', null) != eventBefore(id).get('updatedAt', null);
+    }
     function legacyRegistrationCounterMutation(id){
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['registeredCount','updatedAt'])
         && request.resource.data.registeredCount is int
@@ -331,8 +335,7 @@ service cloud.firestore {
         && request.resource.data.email == email()
         && facultyAllowed(request.resource.data.eventId, request.auth.uid)
         && request.resource.data.groupId == eventBefore(request.resource.data.eventId).groupId
-        && registrationMarkerLinked(regId, request.resource.data.eventId)
-        && eventCount(eventAfter(request.resource.data.eventId)) == eventCount(eventBefore(request.resource.data.eventId)) + 1
+        && registrationEventWriteLinked(regId, request.resource.data.eventId)
         && (!groupedEvent(request.resource.data.eventId)
           || (existsAfter(limitPath(request.auth.uid,request.resource.data.groupId))
             && limitAfter(request.auth.uid,request.resource.data.groupId).eventIds.hasAll([request.resource.data.eventId])
@@ -343,12 +346,7 @@ service cloud.firestore {
           && resource.data.uid == request.auth.uid
           && eventBefore(resource.data.eventId).keys().hasAll(['allowCancellation'])
           && eventBefore(resource.data.eventId).allowCancellation == true))
-        && registrationMarkerLinked(regId, resource.data.eventId)
-        && ((eventCount(eventBefore(resource.data.eventId)) > 0
-            && eventCount(eventAfter(resource.data.eventId)) == eventCount(eventBefore(resource.data.eventId)) - 1)
-          || (admin()
-            && eventCount(eventBefore(resource.data.eventId)) == 0
-            && eventCount(eventAfter(resource.data.eventId)) == 0))
+        && registrationEventWriteLinked(regId, resource.data.eventId)
         && (!groupedEvent(resource.data.eventId)
           || (existsAfter(limitPath(resource.data.uid,resource.data.groupId))
             && !limitAfter(resource.data.uid,resource.data.groupId).eventIds.hasAny([resource.data.eventId])
