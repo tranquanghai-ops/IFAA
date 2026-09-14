@@ -4,6 +4,7 @@ import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, getCo
 import { getStorage, ref, getBytes, getDownloadURL, getMetadata, uploadBytes, deleteObject } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
 import { firebaseConfig, OWNER_EMAIL } from "../firebase-config.mjs";
 import { loadFacultyDataset, publishFacultyDataset } from "../faculty-dataset.mjs";
+import { createAdminExportService } from "./modules/exports/export-service.mjs";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
 const DEFAULT_PUBLIC_BASE_URL = "https://ifa.tdtu.edu.vn/dang-ky-su-kien";
@@ -13,8 +14,6 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const storage = getStorage(app);
-const XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-const MAX_EXPORT_BYTES = 20 * 1024 * 1024;
 const provider = new GoogleAuthProvider();
 provider.setCustomParameters({ prompt: "select_account" });
 const $ = (selector) => document.querySelector(selector);
@@ -127,6 +126,26 @@ const purgingGroupIds = new Set();
 let regs = [];
 let admins = [];
 let groups = [];
+
+const {
+  deleteCachedExport,
+  downloadRegistrationExcel,
+  downloadWorkbook,
+  quickExportAttendance
+} = createAdminExportService({
+  db,
+  storage,
+  canUseStorageCache: highAdminAccess,
+  getEvents: () => events,
+  getGroups: () => groups,
+  getAttendanceSessions: () => attendanceSessions,
+  notice,
+  formatTimestamp: ts,
+  toMillis: millis,
+  formatVietnamDate: vietnamDate,
+  dayPeriod,
+  shareCode
+});
 
 async function audit(action, targetType, targetId, details = {}) {
   try {
@@ -775,90 +794,6 @@ function renderRegs() {
   }
   $("#registrationLoadHint").textContent = list.length ? `Đang hiển thị ${list.length} người ở trang ${registrationPageIndex + 1}.` : "Sự kiện này chưa có người đăng ký.";
   $("#regRows").innerHTML = list.map((registration, index) => `<tr><td class="col-stt">${registrationPageIndex * registrationPageSize + index + 1}</td><td class="col-identifier"><b>${safe(registration.identifier || registration.mssv)}</b></td><td>${safe(registration.name)}</td><td>${safe(registration.faculty)}</td><td>${safe(registration.participantType || "Sinh viên")}</td><td>${safe(registration.eventTitle)}</td><td>${ts(registration.createdAt)}</td><td><button class="btn btn-small btn-danger" data-delete-registration="${registration.id}">Xóa</button></td></tr>`).join("") || '<tr><td colspan="8" class="empty">Sự kiện này chưa có người đăng ký.</td></tr>';
-}
-
-async function fetchRegistrations(field, value) {
-  if (!value) return [];
-  const snapshot = await getDocs(query(collection(db, "registrations"), where(field, "==", value)));
-  return snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => (millis(b.createdAt) || 0) - (millis(a.createdAt) || 0));
-}
-
-function writeRegistrationWorkbook(list, eventId = "", groupId = "") {
-  const selectedEvent = events.find((event) => event.id === eventId);
-  const selectedGroup = groups.find((group) => group.id === groupId);
-  const rows = list.map((registration, index) => {
-    const registrationEvent = events.find((event) => event.id === registration.eventId);
-    const row = { STT: index + 1, "MSSV/Mã số": registration.identifier || registration.mssv, "Họ tên": registration.name, "Khoa/Đơn vị": registration.faculty, "Đối tượng": registration.participantType || "Sinh viên", Email: registration.email, "Sự kiện": registrationEvent?.title || registration.eventTitle, "Ngày sự kiện": vietnamDate(registrationEvent?.date || registration.eventDate), "Giờ bắt đầu": registrationEvent?.startTime || "", "Giờ kết thúc": registrationEvent?.endTime || "", "Buổi": dayPeriod(registrationEvent?.startTime), "Thời gian đăng ký": ts(registration.createdAt) };
-    if (!groupId) row["Nhóm sự kiện"] = registration.groupName || "Không nhóm";
-    return row;
-  });
-  const exportName = selectedEvent?.title || (selectedGroup ? `Nhom_${selectedGroup.name}` : "Danh_sach_dang_ky");
-  const cleanName = exportName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 70) || "Su_kien";
-  return createWorkbookArtifact(
-    `IFAA_${cleanName}_${new Date().toISOString().slice(0, 10)}.xlsx`,
-    (selectedEvent?.title || selectedGroup?.name || "Đăng ký").slice(0, 31),
-    rows,
-    [{ wch: 6 }, { wch: 15 }, { wch: 24 }, { wch: 28 }, { wch: 14 }, { wch: 32 }, { wch: 32 }, { wch: 14 }, { wch: 13 }, { wch: 13 }, { wch: 14 }, { wch: 20 }, { wch: 24 }]
-  );
-}
-
-function timestampCachePart(value) {
-  if (Number.isFinite(value?.seconds)) return `${value.seconds}-${Number(value.nanoseconds || 0)}`;
-  return value ? String(millis(value) || value) : "0";
-}
-
-function shortCacheHash(value) {
-  let hash = 2166136261;
-  for (const char of String(value)) {
-    hash ^= char.charCodeAt(0);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(36);
-}
-
-function registrationCacheInfo(eventId = "", groupId = "") {
-  if (eventId) {
-    const item = events.find((event) => event.id === eventId) || {};
-    const version = shortCacheHash(["registration-v1", eventId, item.registeredCount || 0, timestampCachePart(item.updatedAt), item.title || "", item.date || ""].join("|"));
-    return { path: `exports/registrations/event-${eventId}.xlsx`, version };
-  }
-  const related = events.filter((event) => event.groupId === groupId).sort((a, b) => a.id.localeCompare(b.id));
-  const selectedGroup = groups.find((group) => group.id === groupId) || {};
-  const signature = related.map((event) => [event.id, event.registeredCount || 0, timestampCachePart(event.updatedAt), event.title || "", event.date || ""].join(":"));
-  return { path: `exports/registrations/group-${groupId}.xlsx`, version: shortCacheHash(["registration-group-v1", groupId, timestampCachePart(selectedGroup.updatedAt), ...signature].join("|")) };
-}
-
-async function downloadRegistrationExcel(eventId = "", groupId = "", button = null) {
-  const originalHtml = button?.innerHTML;
-  if (button) {
-    button.disabled = true;
-    button.textContent = "Đang tải…";
-  }
-  try {
-    const cache = registrationCacheInfo(eventId, groupId);
-    const cached = await downloadCachedWorkbook(cache.path, cache.version);
-    if (cached) {
-      notice("Đã tải file Excel lưu sẵn từ Storage, không đọc lại danh sách Firestore.", "success");
-      return;
-    }
-    const list = eventId ? await fetchRegistrations("eventId", eventId) : await fetchRegistrations("groupId", groupId);
-    if (!list.length) {
-      notice("Chưa có dữ liệu đăng ký để xuất.", "error");
-      return;
-    }
-    const artifact = writeRegistrationWorkbook(list, eventId, groupId);
-    const cachedForReuse = await saveAndDownloadCachedWorkbook(cache.path, cache.version, artifact);
-    notice(cachedForReuse
-      ? `Đã tạo và lưu file ${list.length} lượt đăng ký. Những lần tải tiếp theo không đọc lại Firestore.`
-      : `Đã tạo và tải trực tiếp file ${list.length} lượt đăng ký.`, "success");
-  } catch (error) {
-    notice(error.message || "Không thể xuất dữ liệu.", "error");
-  } finally {
-    if (button) {
-      button.disabled = false;
-      button.innerHTML = originalHtml;
-    }
-  }
 }
 
 function renderQuickRegistrations() {
@@ -2168,67 +2103,6 @@ function populatePermissionCopyOptions() {
   select.innerHTML = '<option value="">— Copy quyền từ sự kiện khác —</option>' + attendanceSessions.map((item) => `<option value="${item.id}">${safe(item.title)} · ${safe(vietnamDate(item.date))}</option>`).join("");
 }
 
-function createWorkbookArtifact(filename, sheetName, rows, columns = []) {
-  const sheet = XLSX.utils.json_to_sheet(rows);
-  if (columns.length) sheet["!cols"] = columns;
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, sheet, String(sheetName || "Danh sách").slice(0, 31));
-  const output = XLSX.write(workbook, { bookType: "xlsx", type: "array", compression: true });
-  return { filename, bytes: output instanceof Uint8Array ? output : new Uint8Array(output) };
-}
-
-function downloadWorkbookBytes(filename, bytes) {
-  const url = URL.createObjectURL(new Blob([bytes], { type: XLSX_CONTENT_TYPE }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-async function downloadCachedWorkbook(path, version) {
-  if (!highAdminAccess()) return false;
-  const fileRef = ref(storage, path);
-  try {
-    const metadata = await getMetadata(fileRef);
-    if (metadata.customMetadata?.version !== version) return false;
-    const bytes = await getBytes(fileRef, MAX_EXPORT_BYTES);
-    downloadWorkbookBytes(metadata.customMetadata?.downloadName || path.split("/").pop(), bytes);
-    return true;
-  } catch (error) {
-    if (error?.code === "storage/object-not-found") return false;
-    throw error;
-  }
-}
-
-async function saveAndDownloadCachedWorkbook(path, version, artifact) {
-  if (artifact.bytes.byteLength >= MAX_EXPORT_BYTES) throw Error("File Excel vượt quá giới hạn 20 MB.");
-  if (!highAdminAccess()) {
-    downloadWorkbookBytes(artifact.filename, artifact.bytes);
-    return false;
-  }
-  await uploadBytes(ref(storage, path), artifact.bytes, {
-    contentType: XLSX_CONTENT_TYPE,
-    cacheControl: "private, no-store, max-age=0",
-    customMetadata: { version, downloadName: artifact.filename }
-  });
-  downloadWorkbookBytes(artifact.filename, artifact.bytes);
-  return true;
-}
-
-async function deleteCachedExport(path) {
-  try { await deleteObject(ref(storage, path)); }
-  catch (error) { if (error?.code !== "storage/object-not-found") console.warn("Không thể xóa file Excel cache:", error); }
-}
-
-function downloadWorkbook(filename, sheetName, rows) {
-  const sheet = XLSX.utils.json_to_sheet(rows), workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, sheet, sheetName);
-  XLSX.writeFile(workbook, filename);
-}
-
 function renderAttendance() {
   const target = $("#attendanceRows");
   if (!target) return;
@@ -2926,36 +2800,6 @@ async function openAttendanceImage(id) {
 function setAttendanceImageScale(value) {
   attendanceViewerScale = Math.min(3, Math.max(.5, value)); $("#attendanceViewerImage").style.width = `${attendanceViewerScale * 100}%`;
 }
-function attendanceExportRows() {
-  return attendanceActiveRows().filter((item) => item.mssv).map((item, index, rows) => ({ STT: rows.length - index, MSSV: item.mssv, "Họ và tên": item.name || "Không có dữ liệu", "Người quét": item.scannerName || item.scannerMssv || "", "Thời gian": ts(item.checkedAt) }));
-}
-
-function attendanceCacheInfo(item) {
-  const version = shortCacheHash(["attendance-v1", item.id, item.checkinCount || 0, item.pendingCount || 0, timestampCachePart(item.updatedAt), item.title || ""].join("|"));
-  return { path: `exports/attendance/session-${item.id}.xlsx`, version };
-}
-
-async function quickExportAttendance(sessionId, button) {
-  const item = attendanceSessions.find((value) => value.id === sessionId); if (!item) return;
-  const oldText = button.textContent; button.disabled = true; button.textContent = "Đang tải…";
-  try {
-    const cache = attendanceCacheInfo(item);
-    const cached = await downloadCachedWorkbook(cache.path, cache.version);
-    if (cached) {
-      notice("Đã tải file điểm danh lưu sẵn từ Storage, không đọc lại danh sách Firestore.", "success");
-      return;
-    }
-    const snapshot = await getDocs(query(collection(db, "checkins"), where("sessionId", "==", sessionId)));
-    const rows = snapshot.docs.map((entry) => entry.data()).filter((entry) => !entry.deletedAt && entry.mssv).sort((a, b) => (millis(b.checkedAt) || 0) - (millis(a.checkedAt) || 0));
-    const artifact = createWorkbookArtifact(`DIEM_DANH_${shareCode(item.title)}.xlsx`, "Danh sach diem danh", rows.map((entry, index) => ({ STT: rows.length - index, MSSV: entry.mssv, "Họ và tên": entry.name || "Không có dữ liệu", "Người quét": entry.scannerName || entry.scannerMssv || "", "Thời gian": ts(entry.checkedAt) })), [{ wch: 6 }, { wch: 15 }, { wch: 28 }, { wch: 28 }, { wch: 22 }]);
-    const cachedForReuse = await saveAndDownloadCachedWorkbook(cache.path, cache.version, artifact);
-    notice(cachedForReuse
-      ? `Đã tạo và lưu file ${rows.length} lượt điểm danh. Những lần tải tiếp theo không đọc lại Firestore.`
-      : `Đã tạo và tải trực tiếp file ${rows.length} lượt điểm danh.`, "success");
-  } catch (error) { notice("Không thể tải danh sách: " + error.message, "error"); }
-  finally { button.disabled = false; button.textContent = oldText; }
-}
-
 $("#attendanceScannerForm").onsubmit = async (event) => {
   event.preventDefault();
   const raw = $("#attendanceScannerLookup").value.trim();
