@@ -1,93 +1,78 @@
 # Dự án
 
 - Repository: `tranquanghai-ops/IFAA`
-- Branch hiện tại: `refactor/events-module`
+- Branch hiện tại: `refactor/students-module`
 - Nhánh đích: `main`
-- Base commit: `2b5dfc4` (`Merge pull request #5 from tranquanghai-ops/refactor/registrations-module`)
+- Base commit: `41cd524` (`Merge pull request #6 from tranquanghai-ops/refactor/events-module`)
 
 # Mục tiêu hiện tại
 
-Modular hóa có giới hạn bằng cách tách logic quản lý events khỏi `admin/admin.mjs`, chỉ refactor cấu trúc và giữ nguyên hành vi production.
+Modular hóa có giới hạn bằng cách tách logic quản lý sinh viên phía Admin khỏi `admin/admin.mjs`, chỉ refactor cấu trúc và giữ nguyên hành vi production.
 
 # Trạng thái hiện tại
 
-- Logic quản lý events đã được chuyển phần lớn sang module riêng `admin/modules/events/event-service.mjs`.
-- Module mới giữ state riêng cho event status filter và kiểu hiển thị cards/list.
-- Module mới chứa event date/time/status/capacity/HOT/NEW/external helpers, render danh sách và thùng rác event, realtime event subscription, chuẩn bị dialog, validation dữ liệu, move, tạo link, trash, restore và permanent delete.
-- Event list vẫn được giữ ở top-level `admin.mjs` vì registrations, export, groups và attendance cùng đọc danh sách này; service cập nhật qua dependency `setEvents`.
-- `admin/admin.mjs` giữ event binding chính và orchestration với groups/registrations/attendance/export.
-- `admin/admin.mjs` giảm từ 2.924 xuống 2.472 dòng.
+- Students đã được modularize vào `admin/modules/students/student-service.mjs`.
+- Module mới giữ student list/cache, metadata dataset, filter, search, pagination, page size và danh sách sinh viên hết hạn.
+- Module mới chứa chuẩn hóa/validation bản ghi sinh viên, render danh sách, đọc/import file, add/update/delete, xử lý trùng MSSV, rebuild/publish dataset và binding riêng của màn hình Students.
+- `admin/admin.mjs` giảm từ 2.472 xuống 2.248 dòng.
 - Không thay đổi UI, quyền Owner/Admin/Sub-admin, Auth, Firestore schema, Firestore Rules hoặc Storage Rules.
-- Không thay đổi Firestore path, timestamp/date behavior, transaction/batch behavior, event lifecycle, capacity hoặc registration integration.
-- Không sửa `student.mjs`, registrations module hoặc export module.
+- Không thay đổi Firestore path, batch behavior, import format, student data format hoặc validation behavior.
+- Không sửa `student.mjs`, registrations module, events module hoặc exports module.
 
-# Logic event cố ý còn lại trong admin/admin.mjs
+# Logic student cố ý còn lại trong admin/admin.mjs
 
-- Event binding cho filter/view, dialog, form submit, quick actions và các module liên quan.
-- Phần cuối của event form submit: tạo group mới ngay trong dialog event, gắn event vào group và đồng bộ các field được chọn cho sibling events.
-- Firestore create/update event trong form submit vì đoạn này phối hợp trực tiếp với group creation và group-wide synchronization.
-- Group bulk status, group trash/restore/purge và các event write phát sinh từ group lifecycle.
-- Cleanup scheduler gọi permanent delete API của events module.
-- Attendance source selection và roster linkage dùng event list, vì đây là orchestration attendance.
-- Quick registrations và export gọi registrations/export module bằng event ID.
+- Attendance dùng `studentRecord`, `validStudentId` và `normalizeSearch` qua API của Students module.
+- Attendance đọc student list/cache qua `getFacultyStudents()` để bổ sung thông tin khi nhập danh sách cấp quyền.
+- Attendance đọc metadata dataset qua `getFacultyStudentDatasetMeta()` để enrich tên sinh viên.
+- Tra cứu trực tiếp `facultyStudents` phục vụ attendance/check-in vẫn ở `admin.mjs` vì đây là orchestration attendance, không phải quản lý student master list.
 
-# Dependencies với groups/registrations
+# Dependencies
 
-- Events module nhận `getGroups`, `groupCode` và `groupPosition` qua dependency để render event theo nhóm và tạo share code không trùng; không import group module.
-- Events module gọi `fetchRegistrations` và `removeRegistration` được inject khi permanent delete event; không import registrations module.
-- `admin.mjs` giữ shared `events` list và truyền getter cho registrations/export/attendance.
-- Không có module nào import ngược `admin.mjs`; không có circular dependency.
+- Students module nhận `db`, `storage`, DOM selector, escaping helper, user/access getter, notice/confirm, XLSX header normalizer, faculty dataset helpers và workbook downloader qua dependency injection.
+- `admin.mjs` gọi `loadFacultyStudentMeta()` khi khởi tạo dữ liệu Admin.
+- Students module không import ngược `admin.mjs`; không có circular dependency.
 
 # File đã thay đổi
 
-- `admin/modules/events/event-service.mjs`: module mới chứa logic thuần event và event lifecycle.
-- `admin/admin.mjs`: bỏ logic event nội tuyến đã chuyển, khởi tạo events service và giữ orchestration/event binding.
-- `scripts/validate-security-static.mjs`: thêm assertion cho wiring, Sub-admin event scope và owner-only permanent delete.
-- `docs/AI-HANDOVER.md`: cập nhật handover cho refactor events.
+- `admin/modules/students/student-service.mjs`: module mới chứa logic quản lý Students.
+- `admin/admin.mjs`: khởi tạo Students service, bỏ logic/state Students nội tuyến và giữ attendance orchestration.
+- `scripts/validate-security-static.mjs`: thêm assertion cho wiring Students, quyền cập nhật và Firestore paths hiện hữu.
+- `docs/AI-HANDOVER.md`: cập nhật handover cho refactor Students.
 
 # Kiểm tra
 
 - `node --check admin/admin.mjs`: PASS.
-- `node --check admin/modules/events/event-service.mjs`: PASS.
-- `node --check admin/modules/registrations/registration-service.mjs`: PASS.
-- `node --check admin/modules/exports/export-service.mjs`: PASS.
+- `node --check admin/modules/students/student-service.mjs`: PASS.
 - `node --check scripts/validate-security-static.mjs`: PASS.
 - `node scripts/validate-security-static.mjs`: PASS, kết quả `Static security assertions passed.`.
 - `git diff --check`: PASS.
-- Targeted Firebase Emulator registrations integration:
-  - Lệnh: `firebase emulators:exec --only firestore,storage --project ifa-activities "node --test --test-name-pattern=registration tests/firebase-rules.test.mjs"`
-  - Kết quả: 6/6 PASS, 0 FAIL.
-- Repository không có targeted test riêng cho admin event CRUD/render.
-- Không chạy toàn bộ emulator suite vì không thay đổi Rules.
-- Không tạo test framework mới.
+- Không có targeted test riêng cho admin student CRUD/render.
+- Không chạy Firebase Emulator hoặc full test suite vì không thay đổi Rules.
 
 # Quyết định đã chốt
 
-- Giữ một file `event-service.mjs` để tránh chia nhỏ quá mức.
-- Shared event list tiếp tục ở `admin.mjs`; event-only filter/view state chuyển vào service.
-- Không tách group management trong task này.
-- Event form validation chuyển vào service; phần write có group creation/synchronization ở lại `admin.mjs` để giữ ranh giới orchestration rõ ràng.
-- Commit triển khai dùng message: `refactor: extract admin events module`.
+- Giữ một file `student-service.mjs` để tránh chia nhỏ quá mức.
+- Student list/cache và UI state thuộc Students module; attendance chỉ truy cập qua getter/API được inject.
+- Giữ nguyên toàn bộ collection/document path, batch size 450, duplicate MSSV handling, import/export format và dataset fallback.
+- Commit triển khai dùng message: `refactor: extract admin students module`.
 - Không deploy production và không merge PR trong task này.
 
 # Hành động tiếp theo
 
-Review Draft PR của branch `refactor/events-module`, tập trung xác nhận diff chỉ di chuyển logic events, event lifecycle và permission scope không đổi. Sau refactor này, module phù hợp tiếp theo được đề xuất là `students`; không bắt đầu việc đó khi chưa có task/phê duyệt riêng.
+Review Draft PR của branch `refactor/students-module`, tập trung xác nhận diff chỉ di chuyển logic quản lý Students và không đổi permission, dữ liệu, import hoặc Firestore behavior. Module phù hợp tiếp theo được đề xuất là `groups`; không bắt đầu khi chưa có task riêng.
 
 # Ràng buộc an toàn
 
-- Không thay đổi hành vi hoặc giao diện events.
+- Không thay đổi hành vi hoặc giao diện Students.
 - Không thay đổi Owner/Admin/Sub-admin permissions hoặc Auth.
-- Không thay đổi Firestore Rules hoặc Storage Rules.
-- Không thay đổi Firestore schema, collection hoặc document.
-- Không thay đổi transaction/batch behavior.
-- Không thay đổi student-facing event flow.
+- Không thay đổi Firestore Rules, Storage Rules, schema, collection hoặc document path.
+- Không thay đổi import format, validation hoặc dữ liệu sinh viên hiện có.
 - Không deploy production.
 - Không merge PR.
-- Không refactor groups, registrations, export hoặc attendance ngoài dependency wiring cần thiết.
+- Không refactor groups, registrations, events, exports hoặc attendance ngoài dependency wiring cần thiết.
 
 # Cập nhật lần cuối
 
-- Branch: `refactor/events-module`.
-- Commit: `refactor: extract admin events module`.
-- Trạng thái: refactor events hoàn tất; syntax/static PASS; targeted registrations integration 6/6 PASS; sẵn sàng tạo Draft PR.
+- Branch: `refactor/students-module`.
+- Commit: `refactor: extract admin students module`.
+- Trạng thái: refactor Students hoàn tất; syntax/static PASS; không có targeted student test; sẵn sàng tạo Draft PR.
