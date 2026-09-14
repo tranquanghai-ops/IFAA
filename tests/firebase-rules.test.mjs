@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
 import {
-  collection, deleteDoc, deleteField, doc, getDoc, getDocs, query, runTransaction,
+  collection, deleteDoc, deleteField, doc, getDoc, getDocs, increment, query, runTransaction,
   serverTimestamp, setDoc, updateDoc, where, writeBatch
 } from "firebase/firestore";
 import { getBytes, ref, uploadBytes } from "firebase/storage";
@@ -332,6 +332,17 @@ describe("canonical check-in and counters", () => {
 });
 
 describe("registration integrity and legacy data", () => {
+  async function runRegistrationTransaction(db, operation) {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        return await runTransaction(db, operation);
+      } catch (error) {
+        const permissionDenied = error?.code === "permission-denied" || error?.code === "firestore/permission-denied";
+        if (!permissionDenied || attempt === 1) throw error;
+      }
+    }
+  }
+
   async function seedEvent({ grouped = false, withLimit = false } = {}) {
     await env.withSecurityRulesDisabled(async (context) => {
       const db = context.firestore();
@@ -403,13 +414,12 @@ describe("registration integrity and legacy data", () => {
       const db = dbFor(uid, email);
       const eventRef = doc(db, "events", "E");
       const registrationRef = doc(db, "registrations", `${uid}_E`);
-      await runTransaction(db, async (transaction) => {
-        const [event, registration] = await Promise.all([
-          transaction.get(eventRef), transaction.get(registrationRef)
-        ]);
+      await runRegistrationTransaction(db, async (transaction) => {
+        const event = await transaction.get(eventRef);
+        const registration = await transaction.get(registrationRef);
         if (registration.exists()) return;
         transaction.update(eventRef, {
-          registeredCount: Number(event.data().registeredCount || 0) + 1,
+          registeredCount: increment(1),
           registrationMutationId: registrationRef.id, updatedAt: serverTimestamp()
         });
         transaction.set(registrationRef, {
@@ -429,13 +439,12 @@ describe("registration integrity and legacy data", () => {
       const db = dbFor(uid, email);
       const eventRef = doc(db, "events", "E");
       const registrationRef = doc(db, "registrations", `${uid}_E`);
-      await runTransaction(db, async (transaction) => {
-        const [event, registration] = await Promise.all([
-          transaction.get(eventRef), transaction.get(registrationRef)
-        ]);
+      await runRegistrationTransaction(db, async (transaction) => {
+        const event = await transaction.get(eventRef);
+        const registration = await transaction.get(registrationRef);
         if (!registration.exists()) return;
         transaction.update(eventRef, {
-          registeredCount: Number(event.data().registeredCount || 0) - 1,
+          registeredCount: increment(-1),
           registrationMutationId: registrationRef.id, updatedAt: serverTimestamp()
         });
         transaction.delete(registrationRef);

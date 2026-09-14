@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
-import { getFirestore, collection, doc, getDoc, setDoc, updateDoc, onSnapshot, query, where, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
+import { getFirestore, collection, doc, getDoc, setDoc, updateDoc, onSnapshot, query, where, runTransaction, serverTimestamp, increment } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
 import { firebaseConfig, STUDENT_DOMAIN, OWNER_EMAIL } from "./firebase-config.mjs";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
@@ -242,6 +242,17 @@ function eventState(event) {
   if (now > close) return "closed";
   if (!event.unlimitedCapacity && (event.registeredCount || 0) >= (event.capacity || 0)) return "full";
   return "open";
+}
+
+async function runRegistrationTransaction(operation) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await runTransaction(db, operation);
+    } catch (error) {
+      const permissionDenied = error?.code === "permission-denied" || error?.code === "firestore/permission-denied";
+      if (!permissionDenied || attempt === 1) throw error;
+    }
+  }
 }
 
 function countdown(target) {
@@ -627,7 +638,7 @@ async function register(eventId) {
   const eventRef = doc(db, "events", eventId);
   const registrationRef = doc(db, "registrations", `${user.uid}_${eventId}`);
   try {
-    await runTransaction(db, async (transaction) => {
+    await runRegistrationTransaction(async (transaction) => {
       const eventSnapshot = await transaction.get(eventRef);
       const registrationSnapshot = await transaction.get(registrationRef);
       if (!eventSnapshot.exists()) throw Error("Sự kiện không tồn tại.");
@@ -655,7 +666,7 @@ async function register(eventId) {
       const now = Date.now();
       if (event.status !== "open" || (event.registeredCount || 0) >= event.capacity || now < (millis(event.openAt) ?? 0) || now > (millis(event.closeAt) ?? Infinity)) throw Error("Sự kiện đã đủ, chưa mở hoặc đã đóng.");
       const identifier = profile.identifier || profile.mssv || user.email.split("@")[0].toUpperCase();
-      transaction.update(eventRef, { registeredCount: (event.registeredCount || 0) + 1, registrationMutationId: registrationRef.id, updatedAt: serverTimestamp() });
+      transaction.update(eventRef, { registeredCount: increment(1), registrationMutationId: registrationRef.id, updatedAt: serverTimestamp() });
       transaction.set(registrationRef, { uid: user.uid, email: user.email.toLowerCase(), identifier, mssv: identifier, participantType: profile.participantType, name: profile.name, phone: profile.phone || "", faculty: profile.faculty, major: profile.major || "", eventId, eventTitle: event.title, eventDate: event.date, eventCreatorUid: event.createdByUid || "", groupId: event.groupId || "", groupName: event.groupName || "", createdAt: serverTimestamp() });
       if (event.groupId) transaction.set(limitRef, { uid: user.uid, email: user.email.toLowerCase(), groupId: event.groupId, groupName: group.name, maxRegistrations: group.maxRegistrations, count: (current.count || 0) + 1, eventIds: [...(current.eventIds || []), eventId], updatedAt: serverTimestamp() });
     });
@@ -673,7 +684,7 @@ async function cancel(eventId) {
   if (!currentRegistration?.id) return show("Không tìm thấy đăng ký cần hủy.", "error");
   const registrationRef = doc(db, "registrations", currentRegistration.id);
   try {
-    await runTransaction(db, async (transaction) => {
+    await runRegistrationTransaction(async (transaction) => {
       const eventSnapshot = await transaction.get(eventRef);
       const registrationSnapshot = await transaction.get(registrationRef);
       if (!eventSnapshot.exists() || !registrationSnapshot.exists()) throw Error("Không tìm thấy đăng ký.");
@@ -692,7 +703,7 @@ async function cancel(eventId) {
         current = limitSnapshot.data();
         currentGroup = groupSnapshot.data();
       }
-      transaction.update(eventRef, { registeredCount: Math.max(0, (event.registeredCount || 0) - 1), registrationMutationId: registrationRef.id, updatedAt: serverTimestamp() });
+      transaction.update(eventRef, { registeredCount: increment(-1), registrationMutationId: registrationRef.id, updatedAt: serverTimestamp() });
       transaction.delete(registrationRef);
       if (limitRef) transaction.set(limitRef, { ...current, groupName: currentGroup.name, maxRegistrations: currentGroup.maxRegistrations, count: Math.max(0, current.count - 1), eventIds: (current.eventIds || []).filter((id) => id !== eventId), updatedAt: serverTimestamp() });
     });
