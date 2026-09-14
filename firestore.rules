@@ -283,17 +283,7 @@ service cloud.firestore {
         && request.resource.data.allowedFaculties is list
         && request.resource.data.allowedFaculties.size() >= 1
         && validEventGroup(request.resource.data);
-      allow update: if ((highAdmin() || (subAdmin() && resource.data.createdByUid == request.auth.uid))
-        && request.resource.data.createdByUid == resource.data.createdByUid
-        && request.resource.data.createdByEmail == resource.data.createdByEmail
-        && request.resource.data.createdAt == resource.data.createdAt
-        && eventCount(request.resource.data) == eventCount(resource.data)
-        && request.resource.data.capacity >= eventCount(resource.data)
-        && request.resource.data.allowedFaculties is list
-        && request.resource.data.allowedFaculties.size() >= 1
-        && (eventCount(resource.data) == 0 || request.resource.data.groupId == resource.data.groupId)
-        && validEventGroup(request.resource.data))
-        || (participant()
+      allow update: if (participant()
         && ((request.resource.data.diff(resource.data).affectedKeys().hasOnly(['registeredCount','registrationMutationId','updatedAt'])
             && (validRegistrationCounterMutation(eventId) || validRegistrationZeroCleanup(eventId)))
           || legacyRegistrationCounterMutation(eventId))
@@ -316,7 +306,17 @@ service cloud.firestore {
               && !existsAfter(regPath(request.auth.uid, eventId)))))
           || (validRegistrationZeroCleanup(eventId)
             && request.resource.data.registeredCount == 0)
-        ));
+        ))
+        || ((highAdmin() || (subAdmin() && resource.data.createdByUid == request.auth.uid))
+          && request.resource.data.createdByUid == resource.data.createdByUid
+          && request.resource.data.createdByEmail == resource.data.createdByEmail
+          && request.resource.data.createdAt == resource.data.createdAt
+          && eventCount(request.resource.data) == eventCount(resource.data)
+          && request.resource.data.capacity >= eventCount(resource.data)
+          && request.resource.data.allowedFaculties is list
+          && request.resource.data.allowedFaculties.size() >= 1
+          && (eventCount(resource.data) == 0 || request.resource.data.groupId == resource.data.groupId)
+          && validEventGroup(request.resource.data));
       allow delete: if eventCount(resource.data) == 0
         && (owner() || (admin() && resource.data.createdByUid == request.auth.uid));
     }
