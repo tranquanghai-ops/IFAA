@@ -24,6 +24,7 @@ let env;
 const auth = (uid, email) => env.authenticatedContext(uid, { email, email_verified: true });
 const dbFor = (uid, email) => auth(uid, email).firestore();
 const storageFor = (uid, email) => auth(uid, email).storage();
+const unauthenticatedStorage = () => env.unauthenticatedContext().storage();
 
 async function seedBase() {
   await env.withSecurityRulesDisabled(async (context) => {
@@ -148,6 +149,24 @@ describe("role matrix and session ownership", () => {
     const body = new Uint8Array([31, 139, 8, 0]);
     for (const [uid, email] of [["owner", ownerEmail], ["admin", adminEmail], ["legacy", legacyAdminEmail]]) {
       await assertSucceeds(uploadBytes(ref(storageFor(uid, email), "datasets/faculty-students.json.gz"), body, { contentType: "application/gzip" }));
+    }
+  });
+
+  test("Export cache permits Owner and explicit Admin but denies Sub-admin, Student and unauthenticated users", async () => {
+    const body = new Uint8Array([80, 75, 3, 4]);
+    const path = "exports/registrations/event-E.xlsx";
+    const metadata = { contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" };
+    await assertSucceeds(uploadBytes(ref(storageFor("owner", ownerEmail), path), body, metadata));
+    await assertSucceeds(getBytes(ref(storageFor("owner", ownerEmail), path)));
+    await assertSucceeds(getBytes(ref(storageFor("admin", adminEmail), path)));
+    await assertSucceeds(uploadBytes(ref(storageFor("admin", adminEmail), path), body, metadata));
+    for (const storage of [
+      storageFor("sub", subEmail),
+      storageFor("student", studentEmail),
+      unauthenticatedStorage()
+    ]) {
+      await assertFails(getBytes(ref(storage, path)));
+      await assertFails(uploadBytes(ref(storage, path), body, metadata));
     }
   });
 
