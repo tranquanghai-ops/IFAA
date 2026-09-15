@@ -55,7 +55,7 @@ const vietnamDate = (value) => {
 const successKey = "ifaa-checkin-success-sound";
 const duplicateKey = "ifaa-checkin-duplicate-sound";
 
-let user = null, session = null, assignment = null, isManager = false, managerName = "";
+let user = null, session = null, assignment = null, isManager = false, isAttendanceCoManager = false, managerName = "";
 let unsubscribeRows = null, unsubscribeSession = null;
 let cameraStream = null, cameraControls = null, nativeDetector = null, enhancedReader = null;
 let cameraRequest = 0, scanning = false, pendingPhoto = "", lastDecoded = "", lastDecodedAt = 0;
@@ -443,7 +443,7 @@ async function startSession(preloadedSnapshot = null) {
   rosterCache = new Map();
   $("#loginCard").classList.add("hidden"); $("#app").classList.remove("hidden"); $("#title").textContent = session.title;
   $("#meta").textContent = [vietnamDate(session.date), session.startTime && session.endTime ? session.startTime + "–" + session.endTime : session.startTime || session.endTime, session.location].filter(Boolean).join(" · ");
-  $("#roleText").textContent = isManager ? "Quản trị hệ thống" : assignment.role === "leader" ? "SV Leader" : "SV quét";
+  $("#roleText").textContent = isAttendanceCoManager ? "Đồng quản lý điểm danh" : isManager ? "Quản trị hệ thống" : assignment.role === "leader" ? "SV Leader" : "SV quét";
   renderSession();
   void prepareFacultyDataset();
   void loadZxingLibrary().catch((error) => console.warn(error.message));
@@ -653,6 +653,7 @@ getRedirectResult(auth).catch((error) => {
 
 onAuthStateChanged(auth, async (currentUser) => {
   user = currentUser; $("#logoutBtn").classList.toggle("hidden", !currentUser); $("#app").classList.add("hidden");
+  isManager = false; isAttendanceCoManager = false; managerName = "";
   releaseCamera(); unsubscribeRows?.(); unsubscribeSession?.();
   const loginCard = $("#loginCard"), loginButton = $("#loginCardBtn");
   loginCard.classList.remove("hidden");
@@ -673,7 +674,8 @@ onAuthStateChanged(auth, async (currentUser) => {
       sessionId ? getDoc(doc(db, "attendanceSessions", sessionId)) : Promise.resolve(null)
     ]);
     if (!sessionSnapshot) throw Error("Liên kết điểm danh không hợp lệ.");
-    isManager = email === OWNER_EMAIL || !!adminSnapshot?.exists();
+    isAttendanceCoManager = Boolean(sessionSnapshot.data()?.coManagerUids?.includes(currentUser.uid));
+    isManager = email === OWNER_EMAIL || !!adminSnapshot?.exists() || isAttendanceCoManager;
     if (!isManager && !email.endsWith(STUDENT_DOMAIN)) throw Error("Chỉ chấp nhận tài khoản TDTU đã được cấp quyền.");
     if (isManager) managerName = String(adminSnapshot?.data()?.name || currentUser.displayName || email).trim();
     $("#account").textContent = (isManager ? managerName + " · " : "") + email; await startSession(sessionSnapshot);

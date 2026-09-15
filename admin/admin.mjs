@@ -5,12 +5,13 @@ import { getStorage, ref, getBytes, getDownloadURL, getMetadata, uploadBytes, de
 import { firebaseConfig, OWNER_EMAIL } from "../firebase-config.mjs";
 import { activeAttendanceSessionById, activeAttendanceSessionForEvent, activeAttendanceSessions, countdown } from "../attendance-link.mjs";
 import { loadFacultyDataset, publishFacultyDataset } from "../faculty-dataset.mjs";
-import { createAdminEventService } from "./modules/events/event-service.mjs?v=4";
+import { createAdminEventService } from "./modules/events/event-service.mjs?v=5";
 import { createEventAttachmentService } from "./modules/events/event-attachment-service.mjs?v=1";
 import { createAdminExportService } from "./modules/exports/export-service.mjs?v=2";
 import { createAdminGroupService } from "./modules/groups/group-service.mjs";
 import { createAdminRegistrationService } from "./modules/registrations/registration-service.mjs?v=2";
 import { createAdminStudentService } from "./modules/students/student-service.mjs?v=2";
+import { addCoManagerUid, canEditResourceCoManagers, inheritedAttendanceCoManagerUids, isResourceCoManager, normalizeCoManagerUids } from "./modules/co-managers.mjs?v=1";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
 const DEFAULT_PUBLIC_BASE_URL = "https://ifa.tdtu.edu.vn/dang-ky-su-kien";
@@ -101,8 +102,13 @@ let user = null;
 let isOwner = false;
 let currentRole = "admin";
 let isSubAdmin = false;
+let isScopedManager = false;
 let events = [];
 let attendanceSessions = [];
+let eventCoManagerUids = [];
+let attendanceCoManagerUids = [];
+let attendanceManageCoManagerUids = [];
+const coManagerProfiles = new Map();
 let attendanceFilter = "all";
 let attendanceView = localStorage.getItem("ifaa-attendance-view") === "list" ? "list" : "cards";
 let attendanceCheckinCounts = new Map();
@@ -128,6 +134,61 @@ let admins = [];
 let groups = [];
 const trashSelection = { events: new Set(), attendance: new Set(), groups: new Set() };
 const trashBulkBusy = { events: false, attendance: false, groups: false };
+
+function canEditCoManagers(record) {
+  return canEditResourceCoManagers(record, user?.uid, highAdminAccess());
+}
+async function loadCoManagerProfiles(uids) {
+  const missing = normalizeCoManagerUids(uids).filter((uid) => !coManagerProfiles.has(uid));
+  await Promise.all(missing.map(async (uid) => {
+    try {
+      const snapshot = await getDoc(doc(db, "profiles", uid));
+      const data = snapshot.exists() ? snapshot.data() : {};
+      coManagerProfiles.set(uid, { uid, email: data.email || "", name: data.name || data.displayName || "" });
+    } catch {
+      coManagerProfiles.set(uid, { uid, email: "", name: "" });
+    }
+  }));
+}
+function coManagerRows(target, uids, editable, context) {
+  const node = $(target);
+  if (!node) return;
+  const normalized = normalizeCoManagerUids(uids);
+  node.innerHTML = normalized.length ? normalized.map((uid) => {
+    const profile = coManagerProfiles.get(uid) || {};
+    const label = [profile.name, profile.email].filter(Boolean).join(" · ") || uid;
+    return `<span class="tag event-category">${safe(label)}${editable ? ` <button type="button" class="btn btn-small" data-remove-co-manager="${safe(uid)}" data-co-manager-target="${context}">×</button>` : ""}</span>`;
+  }).join(" ") : '<p class="empty">Chưa có đồng quản lý.</p>';
+}
+async function resolveCoManagerEmail(email) {
+  const normalized = String(email || "").trim().toLowerCase();
+  if (!/^\S+@\S+\.\S+$/.test(normalized)) throw Error("Email đồng quản lý không hợp lệ.");
+  const snapshot = await getDocs(query(collection(db, "profiles"), where("email", "==", normalized), limit(1)));
+  if (snapshot.empty) throw Error("Người này chưa có hồ sơ IFA+. Họ cần đăng nhập IFA+ ít nhất một lần trước.");
+  const profile = snapshot.docs[0];
+  coManagerProfiles.set(profile.id, { uid: profile.id, email: profile.data().email || normalized, name: profile.data().name || profile.data().displayName || "" });
+  return profile.id;
+}
+async function setEventCoManagers(event, copy = false) {
+  eventCoManagerUids = copy ? [] : normalizeCoManagerUids(event?.coManagerUids);
+  const editable = !event || copy || canEditCoManagers(event);
+  $("#eventCoManagerSection")?.classList.toggle("hidden", !editable);
+  if (!editable) return;
+  await loadCoManagerProfiles(eventCoManagerUids);
+  coManagerRows("#eventCoManagerRows", eventCoManagerUids, true, "event");
+}
+async function attendanceCoManagerSection() {
+  await loadCoManagerProfiles(attendanceCoManagerUids);
+  coManagerRows("#attendanceCoManagerRows", attendanceCoManagerUids, true, "attendance-create");
+}
+async function attendanceManageCoManagerSection(item) {
+  const editable = canEditCoManagers(item);
+  $("#attendanceManageCoManagerSection")?.classList.toggle("hidden", !editable);
+  if (!editable) return;
+  attendanceManageCoManagerUids = normalizeCoManagerUids(item?.coManagerUids);
+  await loadCoManagerProfiles(attendanceManageCoManagerUids);
+  coManagerRows("#attendanceManageCoManagerRows", attendanceManageCoManagerUids, true, "attendance-manage");
+}
 
 const {
   bindGroupControls,
@@ -220,6 +281,7 @@ const {
   getUser: () => user,
   getIsOwner: () => isOwner,
   getIsSubAdmin: () => isSubAdmin,
+  getIsScopedManager: () => isScopedManager,
   getTrashSelection: () => trashSelection,
   defaultFaculty: DEFAULT_FACULTY,
   externalCategories: EXTERNAL_CATEGORIES,
@@ -239,6 +301,8 @@ const {
   deleteCachedExport: (...args) => deleteCachedExport(...args),
   openEventAttachments,
   cleanupEventAttachments,
+  getCoManagerUids: () => eventCoManagerUids,
+  onEventOpen: setEventCoManagers,
   onRender: () => render()
 });
 
@@ -493,8 +557,12 @@ function notice(message, type = "") {
 async function accessRole(currentUser) {
   if (currentUser.email.toLowerCase() === OWNER_EMAIL) return "owner";
   const snapshot = await getDoc(doc(db, "admins", currentUser.email.toLowerCase()));
-  if (!snapshot.exists()) return "";
-  return snapshot.data().role === "subadmin" ? "subadmin" : "admin";
+  if (snapshot.exists()) return snapshot.data().role === "subadmin" ? "subadmin" : "admin";
+  const [eventAssignments, attendanceAssignments] = await Promise.all([
+    getDocs(query(collection(db, "events"), where("coManagerUids", "array-contains", currentUser.uid), limit(1))),
+    getDocs(query(collection(db, "attendanceSessions"), where("coManagerUids", "array-contains", currentUser.uid), limit(1)))
+  ]);
+  return eventAssignments.empty && attendanceAssignments.empty ? "" : "scoped";
 }
 
 async function syncStorageAdminAccess(currentUser, role) {
@@ -524,7 +592,7 @@ function showPane(name) {
 
 function normalizeAttendanceSession(snapshotDoc) {
   const data = snapshotDoc.data() || {};
-  return { ...data, id: snapshotDoc.id, status: data.status || "open", title: data.title || "Điểm danh sự kiện", eventId: data.eventId || "", date: data.date || "" };
+  return { ...data, id: snapshotDoc.id, status: data.status || "open", title: data.title || "Điểm danh sự kiện", eventId: data.eventId || "", date: data.date || "", coManagerUids: normalizeCoManagerUids(data.coManagerUids) };
 }
 
 function setMobileMenu(open) {
@@ -692,6 +760,38 @@ async function cleanupExpiredTrash() {
   }
 }
 
+function applyAttendanceSessions(nextSessions) {
+  attendanceSessions = nextSessions;
+  if (selectedAttendanceSession && !activeAttendanceSessionById(attendanceSessions, selectedAttendanceSession.id)) {
+    selectedAttendanceSession = null;
+    attendanceRosterUnsubscribe?.(); attendanceRosterUnsubscribe = null;
+    if ($("#attendanceManageDialog")?.open) $("#attendanceManageDialog").close();
+  }
+  renderAttendance();
+  render();
+  void refreshAttendanceCardCounts();
+  void closeExpiredAttendanceSessions();
+}
+
+function subscribeAttendanceSessions() {
+  const handleError = (error) => notice("Không thể tải dữ liệu điểm danh: " + error.message, "error");
+  if (isSubAdmin) {
+    const own = new Map(), assigned = new Map();
+    const apply = (target, snapshot) => {
+      target.clear();
+      snapshot.docs.map(normalizeAttendanceSession).forEach((item) => target.set(item.id, item));
+      applyAttendanceSessions([...new Map([...own, ...assigned]).values()]);
+    };
+    const unsubscribeOwn = onSnapshot(query(collection(db, "attendanceSessions"), where("createdByUid", "==", user.uid)), (snapshot) => apply(own, snapshot), handleError);
+    const unsubscribeAssigned = onSnapshot(query(collection(db, "attendanceSessions"), where("coManagerUids", "array-contains", user.uid)), (snapshot) => apply(assigned, snapshot), handleError);
+    return () => { unsubscribeOwn(); unsubscribeAssigned(); };
+  }
+  const sessionsQuery = isScopedManager
+    ? query(collection(db, "attendanceSessions"), where("coManagerUids", "array-contains", user.uid))
+    : collection(db, "attendanceSessions");
+  return onSnapshot(sessionsQuery, (snapshot) => applyAttendanceSessions(snapshot.docs.map(normalizeAttendanceSession)), handleError);
+}
+
 function listen() {
   onSnapshot(doc(db, "settings", "main"), (snapshot) => {
     if (snapshot.exists()) settings = { ...settings, ...snapshot.data() };
@@ -714,24 +814,10 @@ function listen() {
     if (isOwner) void cleanupExpiredTrash();
   });
 
-  const attendanceSessionsQuery = isSubAdmin
-    ? query(collection(db, "attendanceSessions"), where("createdByUid", "==", user.uid))
-    : collection(db, "attendanceSessions");
-  onSnapshot(attendanceSessionsQuery, (snapshot) => {
-    attendanceSessions = snapshot.docs.map(normalizeAttendanceSession);
-    if (selectedAttendanceSession && !activeAttendanceSessionById(attendanceSessions, selectedAttendanceSession.id)) {
-      selectedAttendanceSession = null;
-      attendanceRosterUnsubscribe?.(); attendanceRosterUnsubscribe = null;
-      if ($("#attendanceManageDialog")?.open) $("#attendanceManageDialog").close();
-    }
-    renderAttendance();
-    render();
-    void refreshAttendanceCardCounts();
-    void closeExpiredAttendanceSessions();
-  }, (error) => notice("Không thể tải dữ liệu điểm danh: " + error.message, "error"));
+  subscribeAttendanceSessions();
 
   loadFacultyStudentMeta();
-  loadFavoriteScanners();
+  if (!isScopedManager) loadFavoriteScanners();
 
   // Danh sách đăng ký chỉ được truy vấn sau khi Admin chọn một sự kiện.
 
@@ -973,6 +1059,58 @@ document.addEventListener("change", async (event) => {
 document.addEventListener("click", async (event) => {
   const button = event.target.closest("button");
   if (!button) return;
+  if (button.id === "eventCoManagerAdd") {
+    try {
+      const selected = events.find((item) => item.id === $("#eventId").value);
+      if (isScopedManager || (selected && !canEditCoManagers(selected))) throw Error("Bạn không có quyền thay đổi đồng quản lý.");
+      const uid = await resolveCoManagerEmail($("#eventCoManagerEmail").value);
+      eventCoManagerUids = addCoManagerUid(eventCoManagerUids, uid, selected?.createdByUid || user.uid);
+      $("#eventCoManagerEmail").value = "";
+      coManagerRows("#eventCoManagerRows", eventCoManagerUids, true, "event");
+    } catch (error) { notice(error.message, "error"); }
+  }
+  if (button.id === "attendanceCoManagerAdd") {
+    try {
+      const uid = await resolveCoManagerEmail($("#attendanceCoManagerEmail").value);
+      attendanceCoManagerUids = addCoManagerUid(attendanceCoManagerUids, uid, user.uid);
+      $("#attendanceCoManagerEmail").value = "";
+      await attendanceCoManagerSection();
+    } catch (error) { notice(error.message, "error"); }
+  }
+  if (button.id === "attendanceManageCoManagerAdd") {
+    try {
+      if (!canEditCoManagers(selectedAttendanceSession)) throw Error("Bạn không có quyền thay đổi đồng quản lý.");
+      const uid = await resolveCoManagerEmail($("#attendanceManageCoManagerEmail").value);
+      attendanceManageCoManagerUids = addCoManagerUid(attendanceManageCoManagerUids, uid, selectedAttendanceSession.createdByUid);
+      $("#attendanceManageCoManagerEmail").value = "";
+      coManagerRows("#attendanceManageCoManagerRows", attendanceManageCoManagerUids, true, "attendance-manage");
+    } catch (error) { notice(error.message, "error"); }
+  }
+  if (button.id === "attendanceManageCoManagerSave") {
+    try {
+      if (!canEditCoManagers(selectedAttendanceSession)) throw Error("Bạn không có quyền thay đổi đồng quản lý.");
+      await updateDoc(doc(db, "attendanceSessions", selectedAttendanceSession.id), { coManagerUids: normalizeCoManagerUids(attendanceManageCoManagerUids), updatedAt: serverTimestamp() });
+      selectedAttendanceSession.coManagerUids = normalizeCoManagerUids(attendanceManageCoManagerUids);
+      await audit("attendance.co_managers.update", "attendanceSession", selectedAttendanceSession.id, { count: attendanceManageCoManagerUids.length });
+      notice("Đã lưu danh sách đồng quản lý điểm danh.", "success");
+    } catch (error) { notice(error.message, "error"); }
+  }
+  if (button.dataset.removeCoManager) {
+    const uid = button.dataset.removeCoManager;
+    if (button.dataset.coManagerTarget === "event") {
+      const selected = events.find((item) => item.id === $("#eventId").value);
+      if (isScopedManager || (selected && !canEditCoManagers(selected))) return notice("Bạn không có quyền thay đổi đồng quản lý.", "error");
+      eventCoManagerUids = eventCoManagerUids.filter((value) => value !== uid);
+      coManagerRows("#eventCoManagerRows", eventCoManagerUids, true, "event");
+    } else if (button.dataset.coManagerTarget === "attendance-manage") {
+      if (!canEditCoManagers(selectedAttendanceSession)) return notice("Bạn không có quyền thay đổi đồng quản lý.", "error");
+      attendanceManageCoManagerUids = attendanceManageCoManagerUids.filter((value) => value !== uid);
+      coManagerRows("#attendanceManageCoManagerRows", attendanceManageCoManagerUids, true, "attendance-manage");
+    } else {
+      attendanceCoManagerUids = attendanceCoManagerUids.filter((value) => value !== uid);
+      await attendanceCoManagerSection();
+    }
+  }
   if (await handleGroupClick(button)) return;
   if (button.dataset.pane) showPane(button.dataset.pane);
   if (button.dataset.eventFilter) {
@@ -1146,6 +1284,7 @@ function highAdminAccess() { return isOwner || currentRole === "admin"; }
 function canReopenAttendance(item) {
   if (!item || !["ended", "finalized"].includes(item.status)) return false;
   if (highAdminAccess()) return true;
+  if (isResourceCoManager(item, user?.uid)) return true;
   const endedAt = millis(item.endedAt);
   return isSubAdmin && item.createdByUid === user?.uid && endedAt && Date.now() <= endedAt + 5 * 86400000;
 }
@@ -1259,10 +1398,11 @@ function renderAttendance() {
     const checkinCount = attendanceCheckinCounts.get(item.id) || 0;
     const scannerCount = attendanceScannerCounts.get(item.id) || 0;
     const pendingCount = Number(item.pendingCount || 0);
+    const canDeleteAttendance = highAdminAccess() || item.createdByUid === user?.uid;
     return `<article class="att-row">
     <div><span class="att-badge ${safe(runtimeState)}" data-attendance-state="${item.id}" data-runtime-state="${safe(runtimeState)}">${safe(attendanceStatusLabel(runtimeState))}</span>
     <h3>${safe(item.title)}</h3><div class="att-meta">${safe(vietnamDate(item.date))}${item.location ? ` · ${safe(item.location)}` : ""}${rosterMeta}</div><div class="att-meta attendance-timing" data-attendance-timing="${item.id}">${safe(attendanceTimingStatus(item))}</div><div class="attendance-card-stats"><span><b>${checkinCount}</b> SV đã điểm danh</span><span><b>${scannerCount}</b> SV được cấp quyền quét</span>${pendingCount ? `<button type="button" class="attendance-pending-stat" data-attendance-open-pending="${item.id}"><b>${pendingCount}</b> hình cần nhập MSSV</button>` : ""}</div></div>
-    <div class="att-actions attendance-card-actions"><button class="btn" data-attendance-manage="${item.id}">Quản lý</button><button class="btn" data-attendance-copy="${item.id}">Copy link</button><button class="btn btn-success" data-attendance-quick-export="${item.id}">↓ Danh sách</button><button class="btn btn-danger" data-delete-attendance="${item.id}">Xóa</button></div>
+    <div class="att-actions attendance-card-actions"><button class="btn" data-attendance-manage="${item.id}">Quản lý</button><button class="btn" data-attendance-copy="${item.id}">Copy link</button><button class="btn btn-success" data-attendance-quick-export="${item.id}">↓ Danh sách</button>${canDeleteAttendance ? `<button class="btn btn-danger" data-delete-attendance="${item.id}">Xóa</button>` : ""}</div>
   </article>`;
   }).join("") : '<div class="card empty">Không có sự kiện điểm danh trong bộ lọc này.</div>';
 }
@@ -1469,8 +1609,9 @@ async function openAttendanceManage(sessionId) {
   $("#attendanceManageTitle").textContent = selectedAttendanceSession.title;
   $("#attendanceManageMeta").textContent = `${attendanceTimingStatus(selectedAttendanceSession)} · ${vietnamDate(selectedAttendanceSession.date)}`;
   populateAttendanceEditForm(selectedAttendanceSession);
+  await attendanceManageCoManagerSection(selectedAttendanceSession);
   $("#attendanceEnd").classList.toggle("hidden", selectedAttendanceSession.status !== "open");
-  $("#attendanceFinalize").disabled = !highAdminAccess() || selectedAttendanceSession.status === "finalized";
+  $("#attendanceFinalize").disabled = selectedAttendanceSession.status === "finalized";
   $("#attendanceReopen").classList.toggle("hidden", !canReopenAttendance(selectedAttendanceSession));
   $("#attendanceScannerForm").classList.toggle("hidden", selectedAttendanceSession.status !== "open");
   $("#attendanceFavoriteManageTools").classList.toggle("hidden", selectedAttendanceSession.status !== "open");
@@ -1566,6 +1707,8 @@ function fillAttendanceForm(eventId = "") {
   populatePermissionCopyOptions();
   $("#attendancePermissionLookup").value = "";
   attendanceRosterImport = [];
+  attendanceCoManagerUids = inheritedAttendanceCoManagerUids(selected);
+  void attendanceCoManagerSection();
   $("#attendanceRosterFile").value = "";
   $("#attendanceRosterFileName").textContent = "Chưa chọn tệp (không bắt buộc)";
 }
@@ -1576,6 +1719,8 @@ function resetAttendanceCreateState() {
   attendanceRosterUnsubscribe = null;
   attendancePermissionMembers = [];
   attendanceRosterImport = [];
+  attendanceCoManagerUids = [];
+  attendanceManageCoManagerUids = [];
 }
 
 function openAttendanceCreate(eventId = "") {
@@ -1610,7 +1755,7 @@ async function createStandaloneAttendance() {
   const hasRegistrationRoster = Boolean(eventId) || roster.length > 0;
   const permissionMembers = attendancePermissionMembers;
   const writes = [
-    { ref: doc(db, "attendanceSessions", sessionId), data: { eventId, source: eventId ? "registration" : "standalone", hasRegistrationRoster, liveRegistrationRoster: Boolean(eventId), title, date, endDate, startAt: attendanceStartTimestamp(date, startTime), endAt: attendanceEndTimestamp(endDate, endTime), location, startTime, endTime, status: "open", rosterCount: eventId ? Number(events.find((item) => item.id === eventId)?.registeredCount || 0) : roster.length, checkinCount: 0, pendingCount: 0, scannerCount: permissionMembers.length, createdByUid: user.uid, createdByEmail: user.email, createdByName: user.displayName || "", createdAt: serverTimestamp() } },
+    { ref: doc(db, "attendanceSessions", sessionId), data: { eventId, source: eventId ? "registration" : "standalone", hasRegistrationRoster, liveRegistrationRoster: Boolean(eventId), title, date, endDate, startAt: attendanceStartTimestamp(date, startTime), endAt: attendanceEndTimestamp(endDate, endTime), location, startTime, endTime, status: "open", rosterCount: eventId ? Number(events.find((item) => item.id === eventId)?.registeredCount || 0) : roster.length, checkinCount: 0, pendingCount: 0, scannerCount: permissionMembers.length, coManagerUids: [...new Set(attendanceCoManagerUids)], createdByUid: user.uid, createdByEmail: user.email, createdByName: user.displayName || "", createdAt: serverTimestamp() } },
     ...roster.map((item) => ({ ref: doc(db, "attendanceRoster", sessionId + "_" + item.mssv), data: { sessionId, eventId, mssv: item.mssv, name: item.name || "", email: item.email || item.mssv.toLowerCase() + "@student.tdtu.edu.vn", uid: item.uid || "", createdAt: serverTimestamp() } }))
   ];
   const assignmentWrites = permissionMembers.flatMap((item) => {
@@ -1654,6 +1799,8 @@ $("#attendanceCreateDialog").addEventListener("close", resetAttendanceCreateStat
 
 $("#attendanceSourceEvent").onchange = (event) => {
   const selected = events.find((item) => item.id === event.target.value);
+  attendanceCoManagerUids = inheritedAttendanceCoManagerUids(selected);
+  void attendanceCoManagerSection();
   if (!selected) return;
   $("#attendanceStandaloneTitle").value = selected.title || "";
   $("#attendanceStandaloneDate").value = vietnamDate(selected.date);
@@ -1967,7 +2114,7 @@ document.addEventListener("click", async (event) => {
   }
   if (button.dataset.deleteAttendance) {
     const selected = attendanceSessions.find((item) => item.id === button.dataset.deleteAttendance);
-    if (!selected || (isSubAdmin && selected.createdByUid !== user.uid)) return notice("Bạn không có quyền xóa phiên điểm danh này.", "error");
+    if (!selected || (!highAdminAccess() && selected.createdByUid !== user.uid)) return notice("Bạn không có quyền xóa phiên điểm danh này.", "error");
     if (!(await confirmAction({ title: "Đưa điểm danh vào thùng rác?", message: "Phiên điểm danh sẽ được giữ 30 ngày. Nhập XÓA để tiếp tục.", verification: "XÓA" }))) return;
     await updateDoc(doc(db, "attendanceSessions", selected.id), { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email });
     if (selectedAttendanceSession?.id === selected.id) {
@@ -2069,7 +2216,7 @@ $("#attendanceImageSaveMssv").onclick = async () => {
   finally { button.disabled = false; }
 };
 $("#attendanceEditForm").onsubmit = async (event) => {
-  event.preventDefault(); const item = selectedAttendanceSession; if (!item || (isSubAdmin && item.createdByUid !== user.uid)) return notice("Bạn không có quyền chỉnh sửa phiên điểm danh này.", "error");
+  event.preventDefault(); const item = selectedAttendanceSession; if (!item || (!highAdminAccess() && item.createdByUid !== user.uid && !isResourceCoManager(item, user.uid))) return notice("Bạn không có quyền chỉnh sửa phiên điểm danh này.", "error");
   const id = item.id;
   const date = parseVietnamDate($("#attendanceEditDate").value), endDate = parseVietnamDate($("#attendanceEditEndDate").value); if (!date || !endDate) return notice("Ngày không hợp lệ. Vui lòng nhập theo dạng ngày/tháng/năm.", "error"); if (endDate < date) return notice("Ngày kết thúc không được trước ngày tổ chức.", "error");
   const endTime = $("#attendanceEditEndTime").value;
@@ -2161,8 +2308,9 @@ onAuthStateChanged(auth, async (currentUser) => {
   currentRole = resolvedRole;
   isOwner = currentRole === "owner";
   isSubAdmin = currentRole === "subadmin";
+  isScopedManager = currentRole === "scoped";
   $("#accountEmail").textContent = currentUser.email;
-  $("#roleText").textContent = `Quyền hiện tại: ${isOwner ? "Chủ sở hữu" : isSubAdmin ? "Sub-admin · chỉ quản lý sự kiện tự tạo" : "Admin"}`;
+  $("#roleText").textContent = `Quyền hiện tại: ${isOwner ? "Chủ sở hữu" : isSubAdmin ? "Sub-admin · chỉ quản lý sự kiện tự tạo" : isScopedManager ? "Đồng quản lý · chỉ tài nguyên được giao" : "Admin"}`;
   $("#adminLogin").classList.add("hidden");
   $("#adminApp").classList.remove("hidden");
   $("#logoutBtn").classList.remove("hidden");
@@ -2170,9 +2318,17 @@ onAuthStateChanged(auth, async (currentUser) => {
   $("#settingsNav").classList.toggle("hidden", !isOwner);
   $("#trashNav").classList.toggle("hidden", !highAdminAccess());
   $("#studentsNav").classList.toggle("hidden", !highAdminAccess());
+  if (isScopedManager) {
+    $("#newEventBtn")?.classList.add("hidden");
+    $("#newAttendanceBtn")?.classList.add("hidden");
+    document.querySelectorAll(".nav-btn").forEach((button) => {
+      if (!["events", "attendance"].includes(button.dataset.pane)) button.classList.add("hidden");
+    });
+  }
   $("#auditLogSection").classList.toggle("hidden", !highAdminAccess());
   listen();
-  void loadSystemStatus();
+  if (isScopedManager) showPane("events");
+  else void loadSystemStatus();
 });
 
 $("#systemStatusRefresh").onclick = loadSystemStatus;

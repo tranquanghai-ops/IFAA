@@ -55,7 +55,8 @@ assert.match(adminRegistrations, /doc\(db, "registrationLimits", `\$\{liveRegist
 assert.match(adminRegistrations, /registeredCount: Math\.max\(0, Number\(eventSnapshot\.data\(\)\.registeredCount \|\| 0\) - 1\)/);
 assert.match(adminRegistrations, /transaction\.delete\(registrationRef\)/);
 assert.match(adminEvents, /query\(collection\(db, "events"\), where\("createdByUid", "==", user\.uid\)\)/);
-assert.match(adminEvents, /const canManage = !getIsSubAdmin\(\) \|\| event\.createdByUid === user\.uid/);
+assert.match(adminEvents, /const canManage = getIsScopedManager\(\) \? isCoManager : \(!getIsSubAdmin\(\) \|\| event\.createdByUid === user\?\.uid \|\| isCoManager\)/);
+assert.match(adminEvents, /const canDelete = !getIsScopedManager\(\) && \(!getIsSubAdmin\(\) \|\| event\.createdByUid === user\?\.uid\)/);
 assert.match(adminEvents, /updateDoc\(doc\(db, "events", selected\.id\), \{\s*deletedAt: serverTimestamp\(\), deletedByUid: user\.uid, deletedByEmail: user\.email/);
 assert.match(adminEvents, /if \(!selected \|\| !getIsOwner\(\)\) throw Error\("Chỉ Chủ sở hữu được xóa vĩnh viễn\."\)/);
 assert.match(adminGroups, /getFetchRegistrations\(\)\("groupId", id\)/);

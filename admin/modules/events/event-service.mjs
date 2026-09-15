@@ -2,7 +2,7 @@ import { collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp
 import { REGISTRATION_QUESTION_TYPES, normalizeRegistrationFormItems, normalizeRegistrationProfileFields, validateRegistrationConfig } from "../../../registration-form.mjs";
 import { activeAttendanceSessionForEvent } from "../../../attendance-link.mjs";
 
-export function createAdminEventService({ db, select, safe, toMillis, formatTimestamp, formatVietnamDate, parseVietnamDate, getEvents, setEvents, getGroups, getAttendanceSessions, getUser, getIsOwner, getIsSubAdmin, getTrashSelection, defaultFaculty, externalCategories, trashRetentionMs, shareCode, groupCode, groupPosition, configuredPublicBaseUrl, confirmAction, notice, copyText, refreshGroupOptions, setLimitInputState, renderEventFaculties, fetchRegistrations, removeRegistration, deleteCachedExport, openEventAttachments, cleanupEventAttachments, onRender }) {
+export function createAdminEventService({ db, select, safe, toMillis, formatTimestamp, formatVietnamDate, parseVietnamDate, getEvents, setEvents, getGroups, getAttendanceSessions, getUser, getIsOwner, getIsSubAdmin, getIsScopedManager = () => false, getTrashSelection, defaultFaculty, externalCategories, trashRetentionMs, shareCode, groupCode, groupPosition, configuredPublicBaseUrl, confirmAction, notice, copyText, refreshGroupOptions, setLimitInputState, renderEventFaculties, fetchRegistrations, removeRegistration, deleteCachedExport, openEventAttachments, cleanupEventAttachments, getCoManagerUids = () => [], onEventOpen = () => {}, onRender }) {
   let statusFilter = "all";
   let eventView = localStorage.getItem("ifaa-admin-event-view") === "list" ? "list" : "cards";
   let registrationFormItems = [];
@@ -282,7 +282,10 @@ export function createAdminEventService({ db, select, safe, toMillis, formatTime
       groupedAdminEvents.get(key).push(event);
     });
     const adminEventCard = (event) => {
-      const canManage = !getIsSubAdmin() || event.createdByUid === user.uid;
+      const isCoManager = Array.isArray(event.coManagerUids) && event.coManagerUids.includes(user?.uid);
+      const canManage = getIsScopedManager() ? isCoManager : (!getIsSubAdmin() || event.createdByUid === user?.uid || isCoManager);
+      const canDelete = !getIsScopedManager() && (!getIsSubAdmin() || event.createdByUid === user?.uid);
+      const canCreateGlobal = !getIsScopedManager();
       const [statusClass, statusText] = statusLabel(event);
       const state = eventState(event);
       const orderedSiblings = activeEvents.filter((item) => (item.groupId || "__ungrouped__") === (event.groupId || "__ungrouped__") && isExternalEvent(item) === isExternalEvent(event)).sort((a, b) => eventPosition(a) - eventPosition(b));
@@ -302,10 +305,10 @@ export function createAdminEventService({ db, select, safe, toMillis, formatTime
         registrationProgress = `<div class="admin-registration-progress"><div class="progress"><i style="width:${percent}%"></i></div><div class="capacity"><span>${used}/${capacity} người tham gia</span><b class="${full ? "full-seats" : ""}">${full ? "Đã đủ" : `Còn ${Math.max(0, capacity - used)} chỗ`}</b></div></div>`;
       }
       return `<article class="card event admin-event-card event-${state}">
-        <div class="event-top admin-event-top"><div class="admin-event-heading"><div class="admin-event-badges"><span class="tag event-category">${safe(event.category || "Sự kiện Khoa")}</span><span class="tag ${statusClass}">${statusText}</span>${hotTag}${newTag}</div><h3>${safe(event.title)}</h3></div><div class="admin-card-position"><div class="admin-position-controls"><span>${eventIndex + 1}/${orderedSiblings.length}</span><button class="btn btn-small" title="Đưa sự kiện lên" aria-label="Đưa sự kiện lên" data-move-event="${event.id}" data-direction="-1" ${eventIndex <= 0 ? "disabled" : ""}>↑</button><button class="btn btn-small" title="Đưa sự kiện xuống" aria-label="Đưa sự kiện xuống" data-move-event="${event.id}" data-direction="1" ${eventIndex >= orderedSiblings.length - 1 ? "disabled" : ""}>↓</button></div>${event.shareCode ? `<button class="btn btn-small btn-copy-link admin-event-link" data-copy-event-link="${event.id}">🔗 Copy link</button>` : `<button class="btn btn-small btn-soft admin-event-link" data-create-event-link="${event.id}" ${canManage ? "" : "disabled"}>＋ Tạo link</button>`}</div></div>
+        <div class="event-top admin-event-top"><div class="admin-event-heading"><div class="admin-event-badges"><span class="tag event-category">${safe(event.category || "Sự kiện Khoa")}</span><span class="tag ${statusClass}">${statusText}</span>${hotTag}${newTag}${isCoManager ? '<span class="tag">Đồng quản lý</span>' : ""}</div><h3>${safe(event.title)}</h3></div><div class="admin-card-position"><div class="admin-position-controls"><span>${eventIndex + 1}/${orderedSiblings.length}</span><button class="btn btn-small" title="Đưa sự kiện lên" aria-label="Đưa sự kiện lên" data-move-event="${event.id}" data-direction="-1" ${!canManage || getIsScopedManager() || eventIndex <= 0 ? "disabled" : ""}>↑</button><button class="btn btn-small" title="Đưa sự kiện xuống" aria-label="Đưa sự kiện xuống" data-move-event="${event.id}" data-direction="1" ${!canManage || getIsScopedManager() || eventIndex >= orderedSiblings.length - 1 ? "disabled" : ""}>↓</button></div>${event.shareCode ? `<button class="btn btn-small btn-copy-link admin-event-link" data-copy-event-link="${event.id}">🔗 Copy link</button>` : `<button class="btn btn-small btn-soft admin-event-link" data-create-event-link="${event.id}" ${canManage ? "" : "disabled"}>＋ Tạo link</button>`}</div></div>
         <div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown" data-admin-timing="${event.id}" data-admin-state="${state}">${safe(adminTimingStatus(event))}</span><span><b>Người tạo:</b> ${safe(event.createdByName || event.createdByEmail)}</span></div>
         ${registrationProgress}
-        <div class="event-actions admin-card-actions"><button class="btn" data-edit="${event.id}" ${canManage ? "" : "disabled"}>Sửa</button><button class="btn btn-soft" data-copy-event="${event.id}">Sao chép</button><button class="btn btn-soft" data-quick-registrations="${event.id}" ${hasRegistrations ? "" : "disabled"}>Xem danh sách</button><button class="btn btn-download-list" data-export-event="${event.id}" ${hasRegistrations ? "" : "disabled"}><span class="sheet-icon" aria-hidden="true">▦</span> Tải danh sách</button>${!isExternalEvent(event) ? `<button class="btn btn-calendar" data-attendance-event="${event.id}">${activeAttendance ? "✓ Đã tạo điểm danh" : "＋ Tạo điểm danh"}</button>` : ""}<button class="btn btn-danger" data-delete="${event.id}" ${canManage ? "" : "disabled"}>Xóa</button></div>
+        <div class="event-actions admin-card-actions"><button class="btn" data-edit="${event.id}" ${canManage ? "" : "disabled"}>Sửa</button><button class="btn btn-soft" data-copy-event="${event.id}" ${canCreateGlobal ? "" : "disabled"}>Sao chép</button><button class="btn btn-soft" data-quick-registrations="${event.id}" ${canManage && hasRegistrations ? "" : "disabled"}>Xem danh sách</button><button class="btn btn-download-list" data-export-event="${event.id}" ${canManage && hasRegistrations ? "" : "disabled"}><span class="sheet-icon" aria-hidden="true">▦</span> Tải danh sách</button>${!isExternalEvent(event) ? `<button class="btn btn-calendar" data-attendance-event="${event.id}" ${activeAttendance || canCreateGlobal ? "" : "disabled"}>${activeAttendance ? "✓ Đã tạo điểm danh" : "＋ Tạo điểm danh"}</button>` : ""}<button class="btn btn-danger" data-delete="${event.id}" ${canDelete ? "" : "disabled"}>Xóa</button></div>
       </article>`;
     };
     let adminTone = 0;
@@ -350,11 +353,26 @@ export function createAdminEventService({ db, select, safe, toMillis, formatTime
 
   function subscribeEvents(onLoaded) {
     const user = getUser();
-    const eventsQuery = getIsSubAdmin()
-      ? query(collection(db, "events"), where("createdByUid", "==", user.uid))
+    if (getIsSubAdmin()) {
+      const own = new Map(), assigned = new Map();
+      let initialSnapshots = 0;
+      const apply = (target, snapshot) => {
+        target.clear();
+        snapshot.docs.forEach((item) => target.set(item.id, { id: item.id, ...item.data(), coManagerUids: Array.isArray(item.data().coManagerUids) ? item.data().coManagerUids : [] }));
+        setEvents([...new Map([...own, ...assigned]).values()]);
+        onRender();
+        initialSnapshots += 1;
+        if (initialSnapshots === 2) onLoaded?.();
+      };
+      const unsubscribeOwn = onSnapshot(query(collection(db, "events"), where("createdByUid", "==", user.uid)), (snapshot) => apply(own, snapshot), (error) => notice(error.message, "error"));
+      const unsubscribeAssigned = onSnapshot(query(collection(db, "events"), where("coManagerUids", "array-contains", user.uid)), (snapshot) => apply(assigned, snapshot), (error) => notice(error.message, "error"));
+      return () => { unsubscribeOwn(); unsubscribeAssigned(); };
+    }
+    const eventsQuery = getIsScopedManager()
+      ? query(collection(db, "events"), where("coManagerUids", "array-contains", user.uid))
       : query(collection(db, "events"), orderBy("createdAt", "desc"));
     return onSnapshot(eventsQuery, (snapshot) => {
-      setEvents(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
+      setEvents(snapshot.docs.map((item) => ({ id: item.id, ...item.data(), coManagerUids: Array.isArray(item.data().coManagerUids) ? item.data().coManagerUids : [] })));
       onRender();
       onLoaded?.();
     }, (error) => notice(error.message, "error"));
@@ -374,6 +392,7 @@ export function createAdminEventService({ db, select, safe, toMillis, formatTime
 
   function openEvent(event = null, copy = false) {
     select("#eventForm").reset();
+    onEventOpen(event, copy);
     openEventAttachments(copy ? null : event);
     delete select("#saveEventBtn").dataset.immediateOpenBase;
     select("#saveEventBtn").textContent = "Lưu sự kiện";
@@ -515,6 +534,7 @@ export function createAdminEventService({ db, select, safe, toMillis, formatTime
     data.registrationProfileFields = registrationConfig.profileFields;
     data.registrationFormItems = registrationConfig.items;
     data.updatedAt = serverTimestamp();
+    data.coManagerUids = [...new Set(getCoManagerUids())];
     if (!data.title || !data.category || !data.date || !data.location || !Number.isInteger(data.capacity) || data.capacity < 1) throw Error("Vui lòng nhập đầy đủ các trường bắt buộc.");
     if ((data.startTime && !validTime24(data.startTime)) || (data.endTime && !validTime24(data.endTime))) throw Error("Nếu nhập giờ sự kiện, vui lòng dùng định dạng 24 giờ HH:mm, ví dụ 08:30 hoặc 17:45.");
     if ((openDateText && !openTimeText) || (!openDateText && openTimeText)) throw Error("Thời gian mở đăng ký: hãy nhập đủ ngày và giờ, hoặc để trống cả hai để mở ngay.");

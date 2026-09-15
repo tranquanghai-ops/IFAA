@@ -19,6 +19,7 @@ const leaderEmail = "leader@student.tdtu.edu.vn";
 const studentEmail = "student@student.tdtu.edu.vn";
 const student2Email = "student2@student.tdtu.edu.vn";
 const outsiderEmail = "outside@example.com";
+const coManagerEmail = "co-manager@tdtu.edu.vn";
 let env;
 
 const auth = (uid, email) => env.authenticatedContext(uid, { email, email_verified: true });
@@ -57,6 +58,32 @@ async function seedBase() {
         uid: "student2", email: student2Email, participantType: "student",
         identifier: "52200002", mssv: "52200002", name: "Student 2",
         phone: "", faculty: "IFA", major: ""
+      }),
+      setDoc(doc(db, "profiles", "co-manager"), {
+        uid: "co-manager", email: coManagerEmail, participantType: "staff",
+        identifier: coManagerEmail, name: "Co Manager", phone: "", faculty: "IFA", major: ""
+      }),
+      setDoc(doc(db, "events", "CO_EVENT"), {
+        title: "Assigned event", location: "Room A", status: "open", capacity: 20,
+        allowedFaculties: ["IFA"], registeredCount: 0, groupId: "", groupName: "", groupMaxRegistrations: 0,
+        createdByUid: "sub", createdByEmail: subEmail, createdByName: "Sub Admin", createdAt: new Date(),
+        coManagerUids: ["co-manager"]
+      }),
+      setDoc(doc(db, "events", "UNRELATED_EVENT"), {
+        title: "Unrelated event", location: "Room B", status: "open", capacity: 20,
+        allowedFaculties: ["IFA"], registeredCount: 0, groupId: "", groupName: "", groupMaxRegistrations: 0,
+        createdByUid: "other-sub", createdByEmail: otherSubEmail, createdByName: "Other", createdAt: new Date(),
+        coManagerUids: []
+      }),
+      setDoc(doc(db, "attendanceSessions", "CO_ATT"), {
+        eventId: "CO_EVENT", title: "Assigned attendance", date: "2026-09-15", status: "open",
+        createdByUid: "sub", createdByEmail: subEmail, createdByName: "Sub Admin", createdAt: new Date(),
+        checkinCount: 0, pendingCount: 0, coManagerUids: ["co-manager"]
+      }),
+      setDoc(doc(db, "attendanceSessions", "UNRELATED_ATT"), {
+        eventId: "UNRELATED_EVENT", title: "Unrelated attendance", date: "2026-09-15", status: "open",
+        createdByUid: "other-sub", createdByEmail: otherSubEmail, createdByName: "Other", createdAt: new Date(),
+        checkinCount: 0, pendingCount: 0, coManagerUids: []
       }),
       setDoc(doc(db, "events", "ATTACH_OWN"), {
         title: "Own attachment event", createdByUid: "sub", createdByEmail: subEmail,
@@ -147,6 +174,128 @@ before(async () => {
     projectId,
     firestore: { rules: readFileSync("firestore.rules", "utf8") },
     storage: { rules: readFileSync("storage.rules", "utf8") }
+  });
+});
+
+describe("scoped Event and Attendance co-manager permissions", () => {
+  test("co-manager queries only assigned Event and Attendance", async () => {
+    const db = dbFor("co-manager", coManagerEmail);
+    const [eventRows, attendanceRows] = await Promise.all([
+      assertSucceeds(getDocs(query(collection(db, "events"), where("coManagerUids", "array-contains", "co-manager")))),
+      assertSucceeds(getDocs(query(collection(db, "attendanceSessions"), where("coManagerUids", "array-contains", "co-manager"))))
+    ]);
+    assert.deepEqual(eventRows.docs.map((item) => item.id), ["CO_EVENT"]);
+    assert.deepEqual(attendanceRows.docs.map((item) => item.id), ["CO_ATT"]);
+  });
+
+  test("co-manager updates normal Event fields but not ownership or coManagerUids", async () => {
+    const db = dbFor("co-manager", coManagerEmail);
+    await assertSucceeds(updateDoc(doc(db, "events", "CO_EVENT"), { location: "Room C" }));
+    await assertFails(updateDoc(doc(db, "events", "CO_EVENT"), { createdByUid: "co-manager" }));
+    await assertFails(updateDoc(doc(db, "events", "CO_EVENT"), { createdByName: "Forged" }));
+    await assertFails(updateDoc(doc(db, "events", "CO_EVENT"), { coManagerUids: ["co-manager", "other"] }));
+    await assertFails(updateDoc(doc(db, "events", "CO_EVENT"), { deletedAt: new Date() }));
+    await assertFails(deleteDoc(doc(db, "events", "CO_EVENT")));
+  });
+
+  test("co-manager cannot update unrelated Event; Event read remains public by product design", async () => {
+    const db = dbFor("co-manager", coManagerEmail);
+    await assertSucceeds(getDoc(doc(db, "events", "UNRELATED_EVENT")));
+    await assertFails(updateDoc(doc(db, "events", "UNRELATED_EVENT"), { location: "Forbidden" }));
+  });
+
+  test("co-manager updates assigned Attendance but cannot change permission fields or delete", async () => {
+    const db = dbFor("co-manager", coManagerEmail);
+    await assertSucceeds(updateDoc(doc(db, "attendanceSessions", "CO_ATT"), { location: "Room C" }));
+    await assertFails(updateDoc(doc(db, "attendanceSessions", "CO_ATT"), { createdByUid: "co-manager" }));
+    await assertFails(updateDoc(doc(db, "attendanceSessions", "CO_ATT"), { coManagerUids: [] }));
+    await assertFails(updateDoc(doc(db, "attendanceSessions", "CO_ATT"), { deletedAt: new Date() }));
+    await assertFails(deleteDoc(doc(db, "attendanceSessions", "CO_ATT")));
+  });
+
+  test("co-manager cannot read or update unrelated Attendance", async () => {
+    const db = dbFor("co-manager", coManagerEmail);
+    await assertFails(getDoc(doc(db, "attendanceSessions", "UNRELATED_ATT")));
+    await assertFails(updateDoc(doc(db, "attendanceSessions", "UNRELATED_ATT"), { location: "Forbidden" }));
+  });
+
+  test("creator and high Admin can update coManagerUids; creator cannot add itself", async () => {
+    await assertSucceeds(updateDoc(doc(dbFor("sub", subEmail), "events", "CO_EVENT"), { coManagerUids: [] }));
+    await assertSucceeds(updateDoc(doc(dbFor("admin", adminEmail), "events", "CO_EVENT"), { coManagerUids: ["co-manager"] }));
+    await assertFails(updateDoc(doc(dbFor("sub", subEmail), "events", "CO_EVENT"), { coManagerUids: ["sub"] }));
+    await assertSucceeds(updateDoc(doc(dbFor("sub", subEmail), "attendanceSessions", "CO_ATT"), { coManagerUids: [] }));
+    await assertSucceeds(updateDoc(doc(dbFor("admin", adminEmail), "attendanceSessions", "CO_ATT"), { coManagerUids: ["co-manager"] }));
+    await assertFails(updateDoc(doc(dbFor("sub", subEmail), "attendanceSessions", "CO_ATT"), { coManagerUids: ["sub"] }));
+  });
+
+  test("Attendance co-manager can write Check-in only for assigned Attendance", async () => {
+    const db = dbFor("co-manager", coManagerEmail);
+    await assertSucceeds(runTransaction(db, async (transaction) => {
+      const sessionRef = doc(db, "attendanceSessions", "CO_ATT");
+      const checkinRef = doc(db, "checkins", "CO_ATT_52200001");
+      const session = await transaction.get(sessionRef);
+      transaction.set(checkinRef, {
+        sessionId: "CO_ATT", eventId: "CO_EVENT", mssv: "52200001", name: "Student",
+        email: studentEmail, studentUid: "student", scannerUid: "co-manager", scannerEmail: coManagerEmail,
+        scannerMssv: "CO-MANAGER", scannerName: "Co Manager", checkedAt: new Date(), requestId: crypto.randomUUID(), deletedAt: null
+      });
+      transaction.update(sessionRef, { checkinCount: Number(session.data().checkinCount || 0) + 1, pendingCount: 0, counterMutationId: "CO_ATT_52200001", updatedAt: new Date() });
+    }));
+    await assertFails(setDoc(doc(db, "checkins", "UNRELATED_ATT_52200002"), {
+      sessionId: "UNRELATED_ATT", eventId: "UNRELATED_EVENT", mssv: "52200002", name: "Student 2",
+      email: student2Email, studentUid: "student2", scannerUid: "co-manager", scannerEmail: coManagerEmail,
+      scannerMssv: "CO-MANAGER", scannerName: "Co Manager", checkedAt: new Date(), requestId: crypto.randomUUID(), deletedAt: null
+    }));
+    const photo = new Uint8Array([255, 216, 255, 217]);
+    const metadata = { contentType: "image/jpeg" };
+    await assertSucceeds(uploadBytes(ref(storageFor("co-manager", coManagerEmail), "attendance/CO_ATT/co-manager.jpg"), photo, metadata));
+    await assertFails(uploadBytes(ref(storageFor("co-manager", coManagerEmail), "attendance/UNRELATED_ATT/co-manager.jpg"), photo, metadata));
+  });
+
+  test("ordinary user receives no scoped management permission", async () => {
+    const db = dbFor("student", studentEmail);
+    await assertFails(updateDoc(doc(db, "events", "CO_EVENT"), { location: "Forbidden" }));
+    await assertFails(getDoc(doc(db, "attendanceSessions", "CO_ATT")));
+  });
+
+  test("co-manager can query and remove an assigned Event registration atomically", async () => {
+    await env.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await updateDoc(doc(db, "events", "CO_EVENT"), { registeredCount: 1 });
+      await setDoc(doc(db, "registrations", "student_CO_EVENT"), {
+        uid: "student", email: studentEmail, eventId: "CO_EVENT", groupId: ""
+      });
+    });
+    const db = dbFor("co-manager", coManagerEmail);
+    const rows = await assertSucceeds(getDocs(query(collection(db, "registrations"), where("eventId", "==", "CO_EVENT"))));
+    assert.equal(rows.size, 1);
+    await assertSucceeds(runTransaction(db, async (transaction) => {
+      transaction.update(doc(db, "events", "CO_EVENT"), { registeredCount: 0, registrationMutationId: "student_CO_EVENT", updatedAt: new Date() });
+      transaction.delete(doc(db, "registrations", "student_CO_EVENT"));
+    }));
+  });
+
+  test("co-manager can manage assigned Event attachments but not unrelated Event attachments", async () => {
+    const pdf = new Uint8Array([37, 80, 68, 70]);
+    const metadata = { contentType: "application/pdf" };
+    await assertSucceeds(uploadBytes(ref(storageFor("co-manager", coManagerEmail), "event-attachments/CO_EVENT/comanagerfile0001.pdf"), pdf, metadata));
+    await assertFails(uploadBytes(ref(storageFor("co-manager", coManagerEmail), "event-attachments/UNRELATED_EVENT/comanagerfile002.pdf"), pdf, metadata));
+  });
+
+  test("co-manager can manage Attendance child records only for assigned session", async () => {
+    const db = dbFor("co-manager", coManagerEmail);
+    await assertSucceeds(setDoc(doc(db, "scannerAssignments", "CO_ATT_helper@tdtu.edu.vn"), {
+      sessionId: "CO_ATT", email: "helper@tdtu.edu.vn", role: "scanner", active: true
+    }));
+    await assertFails(setDoc(doc(db, "scannerAssignments", "UNRELATED_ATT_helper@tdtu.edu.vn"), {
+      sessionId: "UNRELATED_ATT", email: "helper@tdtu.edu.vn", role: "scanner", active: true
+    }));
+  });
+
+  test("legacy resources without coManagerUids keep creator/admin behavior", async () => {
+    const sub = dbFor("sub", subEmail);
+    await assertSucceeds(updateDoc(doc(sub, "attendanceSessions", "OWN"), { location: "Legacy room" }));
+    await assertFails(getDoc(doc(dbFor("co-manager", coManagerEmail), "attendanceSessions", "OWN")));
   });
 });
 beforeEach(seedBase);
