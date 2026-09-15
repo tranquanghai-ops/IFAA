@@ -4,6 +4,8 @@ import { readFileSync } from "node:fs";
 import { activeAttendanceSessionById, activeAttendanceSessionForEvent } from "../attendance-link.mjs";
 
 const adminSource = readFileSync("admin/admin.mjs", "utf8");
+const adminHtml = readFileSync("admin/index.html", "utf8");
+const eventServiceSource = readFileSync("admin/modules/events/event-service.mjs", "utf8");
 const studentSource = readFileSync("student.mjs", "utf8");
 
 test("event chưa có điểm danh có thể tạo mới", () => {
@@ -47,8 +49,26 @@ test("luồng click và validation create đều dùng cùng active-session look
 
 test("deleted session không mở Manage và nút Create chung xóa selected state", () => {
   assert.match(adminSource, /selectedAttendanceSession = activeAttendanceSessionById\(attendanceSessions, sessionId\)/);
-  assert.match(adminSource, /if \(button\.id === "newAttendanceBtn"\) \{\s*selectedAttendanceSession = null;/);
+  assert.match(adminSource, /function resetAttendanceCreateState\(\) \{\s*selectedAttendanceSession = null;/);
+  assert.match(adminSource, /function openAttendanceCreate\(eventId = ""\) \{\s*resetAttendanceCreateState\(\)/);
+  assert.match(adminSource, /attendanceCreateDialog"\)\.addEventListener\("close", resetAttendanceCreateState\)/);
+  assert.match(adminSource, /if \(button\.id === "newAttendanceBtn"\) \{\s*openAttendanceCreate\(\);/);
   assert.match(adminSource, /if \(selectedAttendanceSession\?\.id === selected\.id\) \{\s*selectedAttendanceSession = null;/);
+});
+
+test("danh sách Attendance mặc định là Tất cả và chỉ giữ session active", () => {
+  assert.match(adminSource, /let attendanceFilter = "all";/);
+  assert.match(adminHtml, /data-attendance-filter="all">Tất cả<\/button>/);
+  assert.match(adminSource, /attendanceSessions\.filter\(\(item\) => !item\.deletedAt\)/);
+});
+
+test("card Event dùng active-session lookup, luôn clickable và mở Create/Manage đúng trạng thái", () => {
+  assert.match(eventServiceSource, /import \{ activeAttendanceSessionForEvent \} from "\.\.\/\.\.\/\.\.\/attendance-link\.mjs";/);
+  assert.match(eventServiceSource, /const activeAttendance = activeAttendanceSessionForEvent\(attendanceSessions, event\.id\);/);
+  assert.match(eventServiceSource, /data-attendance-event="\$\{event\.id\}">\$\{activeAttendance \? "✓ Đã tạo điểm danh" : "＋ Tạo điểm danh"\}/);
+  assert.doesNotMatch(eventServiceSource, /data-attendance-event="\$\{event\.id\}"[^>]*disabled/);
+  assert.match(adminSource, /if \(existing\) await openAttendanceManage\(existing\.id\);/);
+  assert.match(adminSource, /openAttendanceCreate\(button\.dataset\.attendanceEvent\);/);
 });
 
 test("direct-link event deleted hoặc not-found ẩn khu vực filters", () => {
