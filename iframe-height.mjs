@@ -1,18 +1,13 @@
 const IFRAME_HEIGHT_MESSAGE = "IFAA_IFRAME_HEIGHT";
 const DRUPAL_PARENT_ORIGIN = "https://ifa.tdtu.edu.vn";
 const HEIGHT_BUFFER = 2;
-const LARGE_DECREASE_RATIO = 0.7;
-const DECREASE_CONFIRM_MS = 500;
 const CONTENT_ROOT_SELECTOR = "main, #studentApp, #eventArea, #eventGrid, #adminApp, .pane:not(.hidden), #app, #scannerArea, #rows";
 
 if (window.parent !== window) {
-  let lastHeight = 0;
+  const initialFloor = Math.max(1, Math.ceil(window.innerHeight), Math.ceil(document.documentElement.clientHeight));
+  let maxSentHeight = 0;
   let pending = false;
   let settleTimer = 0;
-  let decreaseTimer = 0;
-  let decreaseCandidate = 0;
-  let decreaseCandidateAt = 0;
-  let decreaseSamples = 0;
 
   const getDocumentHeight = () => {
     const root = document.documentElement;
@@ -42,37 +37,12 @@ if (window.parent !== window) {
 
   const reportHeight = () => {
     pending = false;
-    const height = getDocumentHeight();
-    if (!height) return;
+    const candidateHeight = getDocumentHeight();
+    const nextHeight = Math.max(initialFloor, maxSentHeight, candidateHeight);
+    if (maxSentHeight && nextHeight <= maxSentHeight) return;
 
-    const baseline = lastHeight || Math.ceil(document.documentElement.clientHeight);
-    const largeDecrease = baseline > 0 && height < baseline * LARGE_DECREASE_RATIO;
-    if (largeDecrease) {
-      const now = performance.now();
-      if (Math.abs(height - decreaseCandidate) > HEIGHT_BUFFER) {
-        decreaseCandidate = height;
-        decreaseCandidateAt = now;
-        decreaseSamples = 1;
-      } else {
-        decreaseSamples += 1;
-      }
-
-      const remaining = DECREASE_CONFIRM_MS - (now - decreaseCandidateAt);
-      if (decreaseSamples < 2 || remaining > 0) {
-        window.clearTimeout(decreaseTimer);
-        decreaseTimer = window.setTimeout(scheduleFrame, Math.max(remaining, 0));
-        return;
-      }
-    }
-
-    window.clearTimeout(decreaseTimer);
-    decreaseCandidate = 0;
-    decreaseCandidateAt = 0;
-    decreaseSamples = 0;
-    if (height === lastHeight) return;
-
-    lastHeight = height;
-    window.parent.postMessage({ type: IFRAME_HEIGHT_MESSAGE, height }, DRUPAL_PARENT_ORIGIN);
+    maxSentHeight = nextHeight;
+    window.parent.postMessage({ type: IFRAME_HEIGHT_MESSAGE, height: nextHeight }, DRUPAL_PARENT_ORIGIN);
   };
 
   const scheduleFrame = () => {
