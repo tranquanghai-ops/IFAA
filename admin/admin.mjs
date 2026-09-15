@@ -4,7 +4,7 @@ import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, getCo
 import { getStorage, ref, getBytes, getDownloadURL, getMetadata, uploadBytes, deleteObject } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
 import { firebaseConfig, OWNER_EMAIL } from "../firebase-config.mjs";
 import { loadFacultyDataset, publishFacultyDataset } from "../faculty-dataset.mjs";
-import { createAdminEventService } from "./modules/events/event-service.mjs?v=2";
+import { createAdminEventService } from "./modules/events/event-service.mjs?v=3";
 import { createAdminExportService } from "./modules/exports/export-service.mjs?v=2";
 import { createAdminGroupService } from "./modules/groups/group-service.mjs";
 import { createAdminRegistrationService } from "./modules/registrations/registration-service.mjs?v=2";

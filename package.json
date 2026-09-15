@@ -8,6 +8,7 @@
     "test:syntax": "node --check admin/admin.mjs && node --check student.mjs && node --check check-in/check-in.mjs",
     "test:security-static": "node scripts/validate-security-static.mjs",
     "test:registration-form": "node --test tests/registration-form.test.mjs",
+    "test:registration-ui": "node --test tests/registration-ui.test.mjs",
     "test:rules": "firebase emulators:exec --only firestore,storage --project ifa-activities \"node --test tests/firebase-rules.test.mjs\""
   },
   "dependencies": {

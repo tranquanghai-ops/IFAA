@@ -1,4 +1,14 @@
-# Cập nhật mới nhất — Flexible event registration
+# Cập nhật mới nhất — Registration UI refinement
+
+- Branch triển khai: `fix/event-form-registration-ui`.
+- Form Create/Edit Event dùng chung đã được sắp lại: Tên → Dạng → Nhóm → Mô tả → Thông tin bổ sung → các thiết lập còn lại; không đổi ID, handler, schema hoặc logic group/event.
+- Public registration và Admin Preview dùng question card có border/accent riêng; radio/checkbox nằm sát nhãn, toàn dòng label có thể click và có override kích thước để không bị `.field input { width: 100% }` kéo giãn.
+- Email cá nhân/Số điện thoại dùng cùng question card; giữ nguyên validation, autofill, cập nhật profile và snapshot đã triển khai.
+- Builder Admin được thu gọn spacing; content block dùng màu xanh và question dùng màu nhận diện IFA+A để phân biệt.
+- Upload/download tài liệu sự kiện vẫn chưa được implement. `storage.rules` chưa có phạm vi an toàn cho event documents, nên task UI này không thêm UI giả và không sửa Storage Rules.
+- Targeted checks: `npm run test:registration-ui`, `npm run test:registration-form`, syntax MJS thay đổi và `git diff --check`.
+
+# Cập nhật trước — Flexible event registration
 
 - Branch triển khai: `feature/flexible-event-registration`.
 - Public page có Quick Edit bằng icon cây bút ở góc phải; quyền hiển thị và cập nhật giữ theo Owner/Admin/Sub-admin hiện có, không chuyển sang `/admin/`.
