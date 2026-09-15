@@ -3,7 +3,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRe
 import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, getCountFromServer, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit, startAfter, serverTimestamp, Timestamp, runTransaction, writeBatch, deleteField } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
 import { getStorage, ref, getBytes, getDownloadURL, getMetadata, uploadBytes, deleteObject } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
 import { firebaseConfig, OWNER_EMAIL } from "../firebase-config.mjs";
-import { activeAttendanceSessionById, activeAttendanceSessionForEvent } from "../attendance-link.mjs";
+import { activeAttendanceSessionById, activeAttendanceSessionForEvent, activeAttendanceSessions } from "../attendance-link.mjs";
 import { loadFacultyDataset, publishFacultyDataset } from "../faculty-dataset.mjs";
 import { createAdminEventService } from "./modules/events/event-service.mjs?v=4";
 import { createEventAttachmentService } from "./modules/events/event-attachment-service.mjs?v=1";
@@ -514,6 +514,7 @@ function showPane(name) {
   if (name === "students" && !highAdminAccess()) name = "attendance";
   document.querySelectorAll(".nav-btn").forEach((item) => item.classList.toggle("active", item.dataset.pane === name));
   document.querySelectorAll(".pane").forEach((item) => item.classList.toggle("hidden", item.dataset.paneId !== name));
+  if (name === "attendance") renderAttendance();
   closeMobileMenu();
 }
 
@@ -1159,7 +1160,7 @@ function populatePermissionCopyOptions() {
 function renderAttendance() {
   const target = $("#attendanceRows");
   if (!target) return;
-  const list = attendanceSessions.filter((item) => !item.deletedAt)
+  const list = activeAttendanceSessions(attendanceSessions)
     .filter((item) => attendanceFilter === "all" || attendanceRuntimeState(item) === attendanceFilter)
     .sort((a, b) => (millis(b.createdAt) || 0) - (millis(a.createdAt) || 0));
   target.className = `att-grid attendance-view-${attendanceView}`;
