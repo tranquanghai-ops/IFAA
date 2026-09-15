@@ -2,7 +2,7 @@ import { collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp
 import { REGISTRATION_QUESTION_TYPES, normalizeRegistrationFormItems, normalizeRegistrationProfileFields, validateRegistrationConfig } from "../../../registration-form.mjs";
 import { activeAttendanceSessionForEvent } from "../../../attendance-link.mjs";
 
-export function createAdminEventService({ db, select, safe, toMillis, formatTimestamp, formatVietnamDate, parseVietnamDate, getEvents, setEvents, getGroups, getAttendanceSessions, getUser, getIsOwner, getIsSubAdmin, defaultFaculty, externalCategories, trashRetentionMs, shareCode, groupCode, groupPosition, configuredPublicBaseUrl, confirmAction, notice, copyText, refreshGroupOptions, setLimitInputState, renderEventFaculties, fetchRegistrations, removeRegistration, deleteCachedExport, openEventAttachments, cleanupEventAttachments, onRender }) {
+export function createAdminEventService({ db, select, safe, toMillis, formatTimestamp, formatVietnamDate, parseVietnamDate, getEvents, setEvents, getGroups, getAttendanceSessions, getUser, getIsOwner, getIsSubAdmin, getTrashSelection, defaultFaculty, externalCategories, trashRetentionMs, shareCode, groupCode, groupPosition, configuredPublicBaseUrl, confirmAction, notice, copyText, refreshGroupOptions, setLimitInputState, renderEventFaculties, fetchRegistrations, removeRegistration, deleteCachedExport, openEventAttachments, cleanupEventAttachments, onRender }) {
   let statusFilter = "all";
   let eventView = localStorage.getItem("ifaa-admin-event-view") === "list" ? "list" : "cards";
   let registrationFormItems = [];
@@ -329,9 +329,9 @@ export function createAdminEventService({ db, select, safe, toMillis, formatTime
         ? trashedEvents.slice().sort((a, b) => (toMillis(b.deletedAt) || 0) - (toMillis(a.deletedAt) || 0)).map((item) => {
             const deletedTime = toMillis(item.deletedAt);
             const purgeTime = deletedTime ? deletedTime + trashRetentionMs : 0;
-            return `<tr><td><b>${safe(item.title)}</b><br><small>${safe(item.groupName || "Không thuộc nhóm")}</small></td><td>${safe(formatVietnamDate(item.date) || "—")}</td><td>${deletedTime ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" }).format(new Date(deletedTime)) : "—"}<br><small>${safe(item.deletedByEmail || "")}</small></td><td><b>${purgeTime ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" }).format(new Date(purgeTime)) : "—"}</b></td><td>${Number(item.registeredCount || 0)}</td><td><div class="actions"><button class="btn btn-small btn-restore" data-restore-event="${item.id}">↶ Khôi phục</button><button class="btn btn-small btn-danger" data-purge-event="${item.id}">Xóa vĩnh viễn</button></div></td></tr>`;
+            return `<tr><td><input type="checkbox" data-trash-select="events" value="${item.id}" ${getTrashSelection().events.has(item.id) ? "checked" : ""} aria-label="Chọn ${safe(item.title)}"></td><td><b>${safe(item.title)}</b><br><small>${safe(item.groupName || "Không thuộc nhóm")}</small></td><td>${safe(formatVietnamDate(item.date) || "—")}</td><td>${deletedTime ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" }).format(new Date(deletedTime)) : "—"}<br><small>${safe(item.deletedByEmail || "")}</small></td><td><b>${purgeTime ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" }).format(new Date(purgeTime)) : "—"}</b></td><td>${Number(item.registeredCount || 0)}</td><td><div class="actions"><button class="btn btn-small btn-restore" data-restore-event="${item.id}">↶ Khôi phục</button><button class="btn btn-small btn-danger" data-purge-event="${item.id}">Xóa vĩnh viễn</button></div></td></tr>`;
           }).join("")
-        : '<tr><td colspan="6" class="empty">Thùng rác đang trống.</td></tr>';
+        : '<tr><td colspan="7" class="empty">Thùng rác đang trống.</td></tr>';
     }
     return { activeEvents, orderedGroups };
   }

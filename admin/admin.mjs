@@ -126,6 +126,8 @@ const purgingEventIds = new Set();
 const purgingGroupIds = new Set();
 let admins = [];
 let groups = [];
+const trashSelection = { events: new Set(), attendance: new Set(), groups: new Set() };
+const trashBulkBusy = { events: false, attendance: false, groups: false };
 
 const {
   bindGroupControls,
@@ -148,6 +150,7 @@ const {
   getUser: () => user,
   getIsOwner: () => isOwner,
   getIsSubAdmin: () => isSubAdmin,
+  getTrashSelection: () => trashSelection,
   shareCode,
   configuredPublicBaseUrl,
   copyText,
@@ -217,6 +220,7 @@ const {
   getUser: () => user,
   getIsOwner: () => isOwner,
   getIsSubAdmin: () => isSubAdmin,
+  getTrashSelection: () => trashSelection,
   defaultFaculty: DEFAULT_FACULTY,
   externalCategories: EXTERNAL_CATEGORIES,
   trashRetentionMs: TRASH_RETENTION_MS,
@@ -535,17 +539,93 @@ $("#mobileMenuClose")?.addEventListener("click", closeMobileMenu);
 $("#mobileMenuBackdrop")?.addEventListener("click", closeMobileMenu);
 document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeMobileMenu(); });
 
+function trashItems(kind) {
+  if (kind === "events") return events.filter((item) => item.deletedAt);
+  if (kind === "attendance") return attendanceSessions.filter((item) => item.deletedAt);
+  return groups.filter((item) => item.deletedAt);
+}
+
+function canBulkPurge(kind) {
+  return kind === "attendance" ? highAdminAccess() : isOwner;
+}
+
+function syncTrashBulkUi() {
+  for (const kind of ["events", "attendance", "groups"]) {
+    const ids = new Set(trashItems(kind).map((item) => item.id));
+    for (const id of trashSelection[kind]) if (!ids.has(id)) trashSelection[kind].delete(id);
+    const selected = trashSelection[kind].size;
+    const button = $(kind === "events" ? "#purgeEventsSelected" : kind === "attendance" ? "#purgeAttendanceSelected" : "#purgeGroupsSelected");
+    if (button) {
+      button.textContent = `Xóa vĩnh viễn đã chọn (${selected})`;
+      button.disabled = !canBulkPurge(kind) || !selected || trashBulkBusy[kind];
+      button.classList.toggle("hidden", !canBulkPurge(kind));
+    }
+    const all = document.querySelector(`[data-trash-select-all="${kind}"]`);
+    if (all) {
+      all.checked = ids.size > 0 && selected === ids.size;
+      all.indeterminate = selected > 0 && selected < ids.size;
+      all.disabled = !canBulkPurge(kind) || !ids.size;
+    }
+  }
+}
+
+async function purgeSelectedTrash(kind) {
+  if (!canBulkPurge(kind) || trashBulkBusy[kind]) return;
+  const selected = trashItems(kind).filter((item) => trashSelection[kind].has(item.id));
+  if (!selected.length) return;
+  const labels = { events: "sự kiện", attendance: "phiên điểm danh", groups: "nhóm sự kiện" };
+  const approved = await confirmAction({ title: `Xóa vĩnh viễn ${selected.length} ${labels[kind]}?`, message: `Dữ liệu sau khi xóa không thể khôi phục. Nhập XÓA một lần để xóa ${selected.length} mục.`, verification: "XÓA" });
+  if (!approved) return;
+  trashBulkBusy[kind] = true;
+  syncTrashBulkUi();
+  let succeeded = 0;
+  const failed = [];
+  for (const item of selected) {
+    try {
+      if (kind === "events") await permanentlyDeleteEvent(item);
+      else if (kind === "attendance") await permanentlyDeleteAttendance(item);
+      else await permanentlyDeleteGroup(item);
+      trashSelection[kind].delete(item.id);
+      succeeded += 1;
+    } catch (error) { failed.push({ item, error }); }
+  }
+  trashBulkBusy[kind] = false;
+  render();
+  notice(failed.length ? `Đã xóa ${succeeded}/${selected.length} mục. ${failed.length} mục không thể xóa.` : `Đã xóa vĩnh viễn ${succeeded} mục.`, failed.length ? "error" : "success");
+}
+
+document.addEventListener("change", (event) => {
+  const item = event.target.closest("[data-trash-select]");
+  if (item) {
+    const kind = item.dataset.trashSelect;
+    if (!canBulkPurge(kind)) { item.checked = false; return; }
+    item.checked ? trashSelection[kind].add(item.value) : trashSelection[kind].delete(item.value);
+    syncTrashBulkUi();
+    return;
+  }
+  const all = event.target.closest("[data-trash-select-all]");
+  if (!all || !canBulkPurge(all.dataset.trashSelectAll)) return;
+  const kind = all.dataset.trashSelectAll;
+  trashSelection[kind] = all.checked ? new Set(trashItems(kind).map((item) => item.id)) : new Set();
+  render();
+});
+
+$("#purgeEventsSelected").onclick = () => purgeSelectedTrash("events");
+$("#purgeAttendanceSelected").onclick = () => purgeSelectedTrash("attendance");
+$("#purgeGroupsSelected").onclick = () => purgeSelectedTrash("groups");
+
 function render() {
   const { activeEvents, orderedGroups } = renderEvents();
   renderGroups({ activeEvents, orderedGroups });
 
   if ($("#trashAttendanceRows")) {
     const trashedAttendance = attendanceSessions.filter((item) => item.deletedAt);
-    $("#trashAttendanceRows").innerHTML = highAdminAccess() && trashedAttendance.length ? trashedAttendance.map((item) => { const deletedTime = millis(item.deletedAt), purgeTime = deletedTime ? deletedTime + TRASH_RETENTION_MS : 0; return `<tr><td><b>${safe(item.title)}</b></td><td>${safe(vietnamDate(item.date))}</td><td>${deletedTime ? ts(item.deletedAt) : "—"}</td><td>${purgeTime ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "short" }).format(new Date(purgeTime)) : "—"}</td><td><button class="btn btn-small btn-restore" data-restore-attendance="${item.id}">↶ Khôi phục</button> <button class="btn btn-small btn-danger" data-purge-attendance="${item.id}">Xóa vĩnh viễn</button></td></tr>`; }).join("") : '<tr><td colspan="5" class="empty">Không có phiên điểm danh trong thùng rác.</td></tr>';
+    $("#trashAttendanceRows").innerHTML = highAdminAccess() && trashedAttendance.length ? trashedAttendance.map((item) => { const deletedTime = millis(item.deletedAt), purgeTime = deletedTime ? deletedTime + TRASH_RETENTION_MS : 0; return `<tr><td><input type="checkbox" data-trash-select="attendance" value="${item.id}" ${trashSelection.attendance.has(item.id) ? "checked" : ""} aria-label="Chọn ${safe(item.title)}"></td><td><b>${safe(item.title)}</b></td><td>${safe(vietnamDate(item.date))}</td><td>${deletedTime ? ts(item.deletedAt) : "—"}</td><td>${purgeTime ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "short" }).format(new Date(purgeTime)) : "—"}</td><td><button class="btn btn-small btn-restore" data-restore-attendance="${item.id}">↶ Khôi phục</button> <button class="btn btn-small btn-danger" data-purge-attendance="${item.id}">Xóa vĩnh viễn</button></td></tr>`; }).join("") : '<tr><td colspan="6" class="empty">Không có phiên điểm danh trong thùng rác.</td></tr>';
   }
   refreshRegistrationFilters();
   renderRegs();
   if (isOwner) $("#adminRows").innerHTML = admins.map((admin) => `<tr><td>${safe(admin.name || "")}</td><td>${safe(admin.email)}</td><td><select class="admin-role-select" data-admin-role="${safe(admin.email)}"><option value="admin" ${(admin.role || "admin") === "admin" ? "selected" : ""}>Admin</option><option value="subadmin" ${admin.role === "subadmin" ? "selected" : ""}>Sub-admin</option></select></td><td>${ts(admin.addedAt)}</td><td><button class="btn btn-small btn-danger" data-remove-admin="${safe(admin.email)}">Xóa</button></td></tr>`).join("");
+  syncTrashBulkUi();
 }
 
 function updateAdminCountdowns() {
