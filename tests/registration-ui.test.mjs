@@ -12,13 +12,28 @@ test("form Admin có đúng thứ tự category, group, description và registra
   const group = adminHtml.indexOf('id="groupId"');
   const description = adminHtml.indexOf('id="descriptionEditor"');
   const builder = adminHtml.indexOf('class="span-2 registration-builder-section"');
+  const attachments = adminHtml.indexOf('class="span-2 event-attachment-section"');
   const eventDate = adminHtml.indexOf('id="date"');
   assert.ok(category >= 0 && category < group);
   assert.ok(group < description);
   assert.ok(description < builder);
-  assert.ok(builder < eventDate);
+  assert.ok(builder < attachments);
+  assert.ok(attachments < eventDate);
   assert.equal(adminHtml.match(/id="groupId"/g)?.length, 1);
   assert.equal(adminHtml.match(/class="span-2 registration-builder-section"/g)?.length, 1);
+});
+
+test("modal registration dùng đúng chiều rộng dialog và chỉ cuộn trong nội dung", () => {
+  assert.match(styles, /#registrationFormDialog,#registrationPreviewDialog\{[^}]*width:min\(760px,calc\(100vw - 24px\)\)[^}]*overflow:hidden/);
+  assert.match(styles, /#registrationFormDialog \.registration-form-modal,#registrationPreviewDialog \.registration-preview-modal\{[^}]*width:100%[^}]*max-width:none[^}]*box-sizing:border-box/);
+  assert.doesNotMatch(styles, /\.registration-form-modal,\.registration-preview-modal\{width:min\(760px,100%\)/);
+});
+
+test("trạng thái Form Builder rỗng gọn và khu vực tài liệu không tràn mobile", () => {
+  assert.match(styles, /\.registration-builder-empty\{[^}]*margin:0[^}]*padding:10px 4px[^}]*text-align:left/);
+  assert.match(adminHtml, /id="eventAttachmentInput"[^>]*accept="\.pdf,\.doc,\.docx,\.xls,\.xlsx,\.ppt,\.pptx,\.zip"[^>]*multiple/);
+  assert.match(styles, /\.attachment-row>div:first-child\{[^}]*min-width:0/);
+  assert.match(styles, /\.public-attachment-row\{[^}]*grid-template-columns:auto minmax\(0,1fr\) auto/);
 });
 
 test("radio và checkbox phía sinh viên giữ đúng semantics và label bao quanh control", () => {
@@ -33,7 +48,7 @@ test("question card responsive không kéo control ra xa label", () => {
   assert.match(styles, /\.registration-options label[^}]*display:flex[^}]*justify-content:flex-start[^}]*gap:10px/);
   assert.match(styles, /\.registration-options input\[type="radio"\][^}]*width:19px!important[^}]*height:19px!important/);
   assert.match(styles, /\.registration-options input\[type="checkbox"\][^}]*width:19px!important[^}]*height:19px!important/);
-  assert.match(styles, /@media\(max-width:760px\)[^{]*\{[^}]*\.registration-builder-section\{padding:13px\}/);
+  assert.match(styles, /\.registration-builder-section,\.event-attachment-section\{padding:13px\}/);
 });
 
 test("Preview dùng cùng card và option layout, không có thao tác ghi dữ liệu", () => {

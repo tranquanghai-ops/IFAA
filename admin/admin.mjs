@@ -4,7 +4,8 @@ import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, getCo
 import { getStorage, ref, getBytes, getDownloadURL, getMetadata, uploadBytes, deleteObject } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
 import { firebaseConfig, OWNER_EMAIL } from "../firebase-config.mjs";
 import { loadFacultyDataset, publishFacultyDataset } from "../faculty-dataset.mjs";
-import { createAdminEventService } from "./modules/events/event-service.mjs?v=3";
+import { createAdminEventService } from "./modules/events/event-service.mjs?v=4";
+import { createEventAttachmentService } from "./modules/events/event-attachment-service.mjs?v=1";
 import { createAdminExportService } from "./modules/exports/export-service.mjs?v=2";
 import { createAdminGroupService } from "./modules/groups/group-service.mjs";
 import { createAdminRegistrationService } from "./modules/registrations/registration-service.mjs?v=2";
@@ -164,6 +165,15 @@ const {
 });
 
 const {
+  bindControls: bindEventAttachmentControls,
+  cleanupEventAttachments,
+  finalizeSave: finalizeAttachmentSave,
+  openEvent: openEventAttachments,
+  prepareSave: prepareAttachmentSave,
+  rollbackSave: rollbackAttachmentSave
+} = createEventAttachmentService({ storage, select: $, safe, notice });
+
+const {
   bindRegistrationFormControls,
   calendarRange,
   calendarStamp,
@@ -222,6 +232,8 @@ const {
   fetchRegistrations: (...args) => fetchRegistrations(...args),
   removeRegistration: (...args) => removeRegistration(...args),
   deleteCachedExport: (...args) => deleteCachedExport(...args),
+  openEventAttachments,
+  cleanupEventAttachments,
   onRender: () => render()
 });
 
@@ -304,6 +316,7 @@ const {
 bindStudentControls();
 bindGroupControls();
 bindRegistrationFormControls();
+bindEventAttachmentControls();
 
 async function audit(action, targetType, targetId, details = {}) {
   try {
@@ -752,7 +765,11 @@ $("#eventForm").onsubmit = async (event) => {
       if (siblingEvents.length && !(await confirmAction({ title: "Áp dụng cho cả nhóm?", message: `Áp dụng ${syncFields.map((field) => syncLabels[field]).join(", ")} cho ${siblingEvents.length} sự kiện khác trong nhóm “${data.groupName}”?` }))) {
         throw Error("Đã hủy thao tác áp dụng cho nhóm. Sự kiện chưa được lưu.");
       }
-      await updateDoc(doc(db, "events", id), data);
+      const attachmentSave = await prepareAttachmentSave(id);
+      data.attachments = attachmentSave.attachments;
+      try { await updateDoc(doc(db, "events", id), data); }
+      catch (error) { await rollbackAttachmentSave(attachmentSave).catch(() => {}); throw error; }
+      await finalizeAttachmentSave(attachmentSave, id);
       await audit("event.update", "event", id, { title: data.title });
       if (siblingEvents.length) {
         const sharedData = { updatedAt: serverTimestamp() };
@@ -768,7 +785,17 @@ $("#eventForm").onsubmit = async (event) => {
     } else {
       const siblingPositions = events.filter((item) => (item.groupId || "") === data.groupId).map(eventPosition).filter(Number.isFinite);
       const sortOrder = siblingPositions.length ? Math.min(...siblingPositions) - 1 : 0;
-      const eventRef = await addDoc(collection(db, "events"), { ...data, sortOrder, registeredCount: 0, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdByName: user.displayName || "", createdAt: serverTimestamp() });
+      const eventRef = await addDoc(collection(db, "events"), { ...data, attachments: [], sortOrder, registeredCount: 0, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdByName: user.displayName || "", createdAt: serverTimestamp() });
+      let attachmentSave = null;
+      try {
+        attachmentSave = await prepareAttachmentSave(eventRef.id);
+        await updateDoc(eventRef, { attachments: attachmentSave.attachments, updatedAt: serverTimestamp() });
+      } catch (error) {
+        if (attachmentSave) await rollbackAttachmentSave(attachmentSave).catch(() => {});
+        await deleteDoc(eventRef).catch(() => {});
+        throw error;
+      }
+      await finalizeAttachmentSave(attachmentSave, eventRef.id);
       await audit("event.create", "event", eventRef.id, { title: data.title });
       $("#eventDialog").close();
       notice("Đã lưu sự kiện.", "success");

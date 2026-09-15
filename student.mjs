@@ -1,8 +1,10 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
 import { getFirestore, collection, doc, getDoc, setDoc, updateDoc, onSnapshot, query, where, runTransaction, serverTimestamp, increment } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
+import { getBlob, getStorage, ref } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
 import { firebaseConfig, STUDENT_DOMAIN, OWNER_EMAIL } from "./firebase-config.mjs";
 import { canQuickEditEvent, eventNeedsRegistrationForm, registrationConfig, registrationFormSnapshot, validPersonalEmail, validPhone, validateRegistrationSubmission } from "./registration-form.mjs";
+import { EVENT_ATTACHMENT_MAX_BYTES, formatAttachmentSize, normalizeEventAttachments } from "./event-attachments.mjs";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
 const DEFAULT_CATEGORY = "Sự kiện Khoa";
@@ -13,6 +15,7 @@ const STUDENT_CALENDAR_ENABLED = false;
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const storage = getStorage(app);
 const provider = new GoogleAuthProvider();
 provider.setCustomParameters({ prompt: "select_account" });
 const $ = (selector) => document.querySelector(selector);
@@ -84,6 +87,33 @@ function openGoogleCalendar(event) {
   const url = eventCalendarUrl(event);
   if (!url) return show("Ngày hoặc giờ sự kiện chưa hợp lệ.", "error");
   window.open(url, "_blank", "noopener,noreferrer");
+}
+
+function eventAttachmentsHtml(event) {
+  const attachments = normalizeEventAttachments(event);
+  if (!attachments.length) return "";
+  return `<section class="public-attachments"><h3>Tài liệu đính kèm</h3><div>${attachments.map((item) => `<article class="public-attachment-row"><span aria-hidden="true">📄</span><div><b>${safe(item.name)}</b><small>${formatAttachmentSize(item.size)}</small></div><button type="button" class="btn btn-small" data-download-event-attachment="${safe(event.id)}" data-attachment-id="${safe(item.id)}">Tải xuống</button></article>`).join("")}</div></section>`;
+}
+
+async function downloadEventAttachment(eventId, attachmentId, button) {
+  const event = events.find((item) => item.id === eventId && !item.deletedAt);
+  const attachment = normalizeEventAttachments(event || {}).find((item) => item.id === attachmentId);
+  if (!attachment) return show("Không tìm thấy tài liệu.", "error");
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = "Đang tải…";
+  try {
+    const blob = await getBlob(ref(storage, attachment.storagePath), EVENT_ATTACHMENT_MAX_BYTES + 1);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = attachment.name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (error) { show(error.message || "Không thể tải tài liệu.", "error"); }
+  finally { button.disabled = false; button.textContent = originalText; }
 }
 
 function sanitizeRichHtml(value) {
@@ -372,7 +402,7 @@ function linkedEventPage(event) {
   return `<article class="linked-event-form">
     ${canEdit ? `<button class="btn-quick-edit" data-quick-edit="${event.id}" title="Chỉnh sửa sự kiện" aria-label="Chỉnh sửa sự kiện">✎</button>` : ""}<header class="linked-event-header"><div class="linked-event-tags"><span class="tag ${safe(state)}">${safe(statusLabel)}</span>${event.isHot ? '<span class="tag hot">🔥 HOT</span>' : ""}${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}</div><h2>${safe(event.title)}</h2></header>
     <section class="linked-event-info"><p><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</p><p><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</p><p class="countdown">${safe(timingStatus(event, state))}</p>${group.text && !external ? `<p><b>${safe(group.text)}</b></p>` : ""}</section>
-    <section class="linked-event-description rich-content">${description}</section>
+    <section class="linked-event-description rich-content">${description}</section>${eventAttachmentsHtml(event)}
     ${availability}
     <div class="linked-event-actions">${action}</div>
   </article>`;
@@ -816,7 +846,7 @@ function openDetail(id) {
   else if (chosen.unlimitedCapacity && !chosen.hideRegistrationCount) availability = '<div class="notice">Không giới hạn số người tham gia.</div>';
   else if (chosen.hideRegistrationCount) availability = detailFullSeats ? '<div class="notice full-seats-notice">Hết chỗ.</div>' : detailLowSeats ? '<div class="notice low-seats-notice">Sắp hết chỗ.</div>' : "";
   else availability = `<div class="notice ${detailFullSeats ? "full-seats-notice" : detailLowSeats ? "low-seats-notice" : ""}">${detailFullSeats ? "Hết chỗ." : detailLowSeats ? "Sắp hết chỗ." : `Còn ${detailLeft} chỗ.`}</div>`;
-  $("#detailBody").innerHTML = `<div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(chosen))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(chosen.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(chosen, state))}</span>${groupLine}</div><div class="rich-content">${description}</div>${availability}`;
+  $("#detailBody").innerHTML = `<div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(chosen))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(chosen.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(chosen, state))}</span>${groupLine}</div><div class="rich-content">${description}</div>${eventAttachmentsHtml(chosen)}${availability}`;
   const confirmButton = $("#confirmBtn");
   const registrationExpired = ["closed", "ended"].includes(state);
   confirmButton.classList.remove("btn-full", "btn-expired", "btn-register", "btn-external");
@@ -1014,6 +1044,7 @@ document.addEventListener("click", async (event) => {
   if (button.dataset.view) openDetail(button.dataset.view);
   if (button.dataset.register) openDetail(button.dataset.register);
   if (button.dataset.directRegister) startRegistration(button.dataset.directRegister);
+  if (button.dataset.downloadEventAttachment) await downloadEventAttachment(button.dataset.downloadEventAttachment, button.dataset.attachmentId, button);
   if (button.dataset.externalUrl) {
     const url = button.dataset.externalUrl;
     if (/^https:\/\//i.test(url)) window.open(url, "_blank", "noopener,noreferrer");
