@@ -5,10 +5,11 @@
   "scripts": {
     "migrate:check": "node scripts/migrate-firestore.mjs --dry-run",
     "migrate:firestore": "node scripts/migrate-firestore.mjs",
-    "test:syntax": "node --check admin/admin.mjs && node --check student.mjs && node --check check-in/check-in.mjs",
+    "test:syntax": "node --check admin/admin.mjs && node --check admin/modules/events/event-service.mjs && node --check admin/modules/events/event-attachment-service.mjs && node --check student.mjs && node --check event-attachments.mjs && node --check check-in/check-in.mjs",
     "test:security-static": "node scripts/validate-security-static.mjs",
     "test:registration-form": "node --test tests/registration-form.test.mjs",
     "test:registration-ui": "node --test tests/registration-ui.test.mjs",
+    "test:event-attachments": "node --test tests/event-attachments.test.mjs",
     "test:rules": "firebase emulators:exec --only firestore,storage --project ifa-activities \"node --test tests/firebase-rules.test.mjs\""
   },
   "dependencies": {

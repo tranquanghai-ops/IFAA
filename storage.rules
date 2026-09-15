@@ -38,6 +38,29 @@ service firebase.storage {
         && firestore.exists(/databases/(default)/documents/scannerAssignments/$(sessionId + '_' + email()))
         && firestore.get(/databases/(default)/documents/scannerAssignments/$(sessionId + '_' + email())).data.active == true;
     }
+    function eventPath(eventId) {
+      return /databases/(default)/documents/events/$(eventId);
+    }
+    function managesEvent(eventId) {
+      return firestore.exists(eventPath(eventId))
+        && (highAdmin() || (admin()
+        && firestore.get(/databases/(default)/documents/admins/$(email())).data.get('role', 'admin') == 'subadmin'
+        && firestore.get(eventPath(eventId)).data.createdByUid == request.auth.uid));
+    }
+    function downloadableEvent(eventId) {
+      return firestore.exists(eventPath(eventId))
+        && firestore.get(eventPath(eventId)).data.get('deletedAt', null) == null;
+    }
+    function validEventAttachmentType(attachmentFile) {
+      return (attachmentFile.matches('^[A-Za-z0-9_-]{16,100}\\.pdf$') && request.resource.contentType == 'application/pdf')
+        || (attachmentFile.matches('^[A-Za-z0-9_-]{16,100}\\.doc$') && request.resource.contentType == 'application/msword')
+        || (attachmentFile.matches('^[A-Za-z0-9_-]{16,100}\\.docx$') && request.resource.contentType == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+        || (attachmentFile.matches('^[A-Za-z0-9_-]{16,100}\\.xls$') && request.resource.contentType == 'application/vnd.ms-excel')
+        || (attachmentFile.matches('^[A-Za-z0-9_-]{16,100}\\.xlsx$') && request.resource.contentType == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        || (attachmentFile.matches('^[A-Za-z0-9_-]{16,100}\\.ppt$') && request.resource.contentType == 'application/vnd.ms-powerpoint')
+        || (attachmentFile.matches('^[A-Za-z0-9_-]{16,100}\\.pptx$') && request.resource.contentType == 'application/vnd.openxmlformats-officedocument.presentationml.presentation')
+        || (attachmentFile.matches('^[A-Za-z0-9_-]{16,100}\\.zip$') && (request.resource.contentType == 'application/zip' || request.resource.contentType == 'application/x-zip-compressed'));
+    }
 
     match /datasets/{datasetFile} {
       allow read: if participant();
@@ -65,6 +88,16 @@ service firebase.storage {
         && request.resource.size < 20 * 1024 * 1024
         && request.resource.contentType == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
       allow delete: if exportCacheAdmin();
+    }
+
+    match /event-attachments/{eventId}/{attachmentFile} {
+      allow read: if highAdmin() || downloadableEvent(eventId);
+      allow create: if managesEvent(eventId)
+        && resource == null
+        && request.resource.size <= 20 * 1024 * 1024
+        && validEventAttachmentType(attachmentFile);
+      allow update: if false;
+      allow delete: if managesEvent(eventId);
     }
 
     match /{allPaths=**} {

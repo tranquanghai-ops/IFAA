@@ -1,4 +1,16 @@
-# Cập nhật mới nhất — Registration UI refinement
+# Cập nhật mới nhất — Event attachments và Registration UI fixes
+
+- Branch triển khai: `feature/event-attachments` từ `main` sau PR #14.
+- Registration modal đặt chiều rộng trên chính `<dialog>`, inner form dùng `width: 100%` và dialog giữ `overflow: hidden`; vùng `.modal` tiếp tục là vùng cuộn nên không còn dải trắng/scrollbar/footer lệch. Mobile dùng chiều rộng viewport an toàn, không tạo horizontal scrollbar.
+- Empty state của Form Builder bỏ padding `.empty` toàn cục 42px, dùng spacing nhỏ và chiều cao tự nhiên.
+- Admin Create/Edit Event hỗ trợ nhiều tài liệu PDF, DOC/DOCX, XLS/XLSX, PPT/PPTX, ZIP, tối đa 20 MB/file; có kéo thả, tiến trình, tải xuống, staged delete và rollback upload mới nếu Firestore save thất bại.
+- Binary lưu ở Storage path `event-attachments/{eventId}/{randomId}.{ext}`; event chỉ lưu metadata `id`, `name`, `storagePath`, `size`, `contentType`, `uploadedAt`. Event cũ thiếu/null `attachments` không cần migration.
+- `storage.rules` chỉ cho Owner/Admin hoặc Sub-admin sở hữu event upload/delete, cấm overwrite, kiểm tra event tồn tại + size + extension + MIME. Student/unauthenticated chỉ read attachment khi event tồn tại và chưa bị soft-delete; default deny toàn bucket giữ nguyên.
+- Public detail/share page hiển thị tài liệu trước hành động đăng ký, tải qua Storage SDK và giữ filename gốc; không có upload/delete UI phía Student.
+- Cleanup: staged file cũ chỉ bị xóa sau khi metadata event lưu thành công; upload mới được rollback khi save lỗi; xóa vĩnh viễn event dọn toàn namespace trước khi xóa document. Không có backend nên nếu client mất kết nối đúng lúc cleanup sau-save thì vẫn có thể còn orphan hiếm gặp.
+- Targeted JS/UI/static security tests PASS. Firebase Rules emulator PASS 25/25, gồm 5 case riêng cho event attachments; emulator chạy bằng JRE portable tạm và artifact đã được dọn khỏi repo.
+
+# Cập nhật trước — Registration UI refinement
 
 - Branch triển khai: `fix/event-form-registration-ui`.
 - Form Create/Edit Event dùng chung đã được sắp lại: Tên → Dạng → Nhóm → Mô tả → Thông tin bổ sung → các thiết lập còn lại; không đổi ID, handler, schema hoặc logic group/event.

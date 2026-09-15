@@ -6,7 +6,7 @@ import {
   collection, deleteDoc, deleteField, doc, getDoc, getDocs, increment, query, runTransaction,
   serverTimestamp, setDoc, updateDoc, where, writeBatch
 } from "firebase/firestore";
-import { getBytes, ref, uploadBytes } from "firebase/storage";
+import { deleteObject, getBytes, ref, uploadBytes } from "firebase/storage";
 
 const projectId = "ifa-activities";
 const ownerEmail = "tranquanghai@tdtu.edu.vn";
@@ -57,6 +57,18 @@ async function seedBase() {
         uid: "student2", email: student2Email, participantType: "student",
         identifier: "52200002", mssv: "52200002", name: "Student 2",
         phone: "", faculty: "IFA", major: ""
+      }),
+      setDoc(doc(db, "events", "ATTACH_OWN"), {
+        title: "Own attachment event", createdByUid: "sub", createdByEmail: subEmail,
+        registeredCount: 0, deletedAt: null
+      }),
+      setDoc(doc(db, "events", "ATTACH_OTHER"), {
+        title: "Other attachment event", createdByUid: "other-sub", createdByEmail: otherSubEmail,
+        registeredCount: 0, deletedAt: null
+      }),
+      setDoc(doc(db, "events", "ATTACH_DELETED"), {
+        title: "Deleted attachment event", createdByUid: "sub", createdByEmail: subEmail,
+        registeredCount: 0, deletedAt: new Date()
       })
     ]);
   });
@@ -219,6 +231,55 @@ describe("role matrix and session ownership", () => {
     await assertSucceeds(getDocs(query(collection(dbFor("leader", leaderEmail), "checkins"), where("sessionId", "==", "OWN"))));
     await assertSucceeds(getDocs(query(collection(dbFor("student", studentEmail), "checkins"), where("email", "==", studentEmail))));
     await assertFails(getDoc(doc(dbFor("outside", outsiderEmail), "checkins", "OWN_52200001")));
+  });
+});
+
+describe("event attachment Storage isolation", () => {
+  const pdf = new Uint8Array([37, 80, 68, 70]);
+  const pdfMetadata = { contentType: "application/pdf" };
+  const uploadMatrixPath = "event-attachments/ATTACH_OWN/aaaaaaaaaaaaaaaa.pdf";
+  const publicReadPath = "event-attachments/ATTACH_OWN/bbbbbbbbbbbbbbbb.pdf";
+  const deletedEventPath = "event-attachments/ATTACH_DELETED/cccccccccccccccc.pdf";
+  const immutablePath = "event-attachments/ATTACH_OWN/dddddddddddddddd.pdf";
+  const deletePath = "event-attachments/ATTACH_OWN/eeeeeeeeeeeeeeee.pdf";
+
+  test("Owner/Admin upload được; Sub-admin chỉ upload vào event của mình", async () => {
+    await assertSucceeds(uploadBytes(ref(storageFor("sub", subEmail), uploadMatrixPath), pdf, pdfMetadata));
+    await assertFails(uploadBytes(ref(storageFor("sub", subEmail), "event-attachments/ATTACH_OTHER/bcdefghijklmnopq.pdf"), pdf, pdfMetadata));
+    await assertSucceeds(uploadBytes(ref(storageFor("admin", adminEmail), "event-attachments/ATTACH_OTHER/cdefghijklmnopqr.pdf"), pdf, pdfMetadata));
+    await assertSucceeds(uploadBytes(ref(storageFor("owner", ownerEmail), "event-attachments/ATTACH_OTHER/defghijklmnopqrs.pdf"), pdf, pdfMetadata));
+    await assertFails(uploadBytes(ref(storageFor("owner", ownerEmail), "event-attachments/MISSING/efghijklmnopqrst.pdf"), pdf, pdfMetadata));
+  });
+
+  test("Student và người chưa đăng nhập đọc được file của event đang hoạt động nhưng không được upload", async () => {
+    await assertSucceeds(uploadBytes(ref(storageFor("sub", subEmail), publicReadPath), pdf, pdfMetadata));
+    await assertSucceeds(getBytes(ref(storageFor("student", studentEmail), publicReadPath)));
+    await assertSucceeds(getBytes(ref(unauthenticatedStorage(), publicReadPath)));
+    await assertFails(uploadBytes(ref(storageFor("student", studentEmail), "event-attachments/ATTACH_OWN/fghijklmnopqrstu.pdf"), pdf, pdfMetadata));
+    await assertFails(uploadBytes(ref(unauthenticatedStorage(), "event-attachments/ATTACH_OWN/ghijklmnopqrstuv.pdf"), pdf, pdfMetadata));
+  });
+
+  test("file của event đã xóa chỉ high Admin đọc được", async () => {
+    await assertSucceeds(uploadBytes(ref(storageFor("admin", adminEmail), deletedEventPath), pdf, pdfMetadata));
+    await assertFails(getBytes(ref(storageFor("student", studentEmail), deletedEventPath)));
+    await assertFails(getBytes(ref(unauthenticatedStorage(), deletedEventPath)));
+    await assertSucceeds(getBytes(ref(storageFor("admin", adminEmail), deletedEventPath)));
+  });
+
+  test("Rules kiểm tra extension, MIME, kích thước và cấm ghi đè", async () => {
+    const storage = storageFor("sub", subEmail);
+    await assertFails(uploadBytes(ref(storage, "event-attachments/ATTACH_OWN/ijklmnopqrstuvwx.exe"), pdf, pdfMetadata));
+    await assertFails(uploadBytes(ref(storage, "event-attachments/ATTACH_OWN/jklmnopqrstuvwxy.pdf"), pdf, { contentType: "text/html" }));
+    await assertFails(uploadBytes(ref(storage, "event-attachments/ATTACH_OWN/short.pdf"), pdf, pdfMetadata));
+    await assertFails(uploadBytes(ref(storage, "event-attachments/ATTACH_OWN/klmnopqrstuvwxyz.pdf"), new Uint8Array(20 * 1024 * 1024 + 1), pdfMetadata));
+    await assertSucceeds(uploadBytes(ref(storage, immutablePath), pdf, pdfMetadata));
+    await assertFails(uploadBytes(ref(storage, immutablePath), new Uint8Array([37, 80, 68, 71]), pdfMetadata));
+  });
+
+  test("xóa file theo cùng quyền quản lý event", async () => {
+    await assertSucceeds(uploadBytes(ref(storageFor("admin", adminEmail), deletePath), pdf, pdfMetadata));
+    await assertFails(deleteObject(ref(storageFor("other-sub", otherSubEmail), deletePath)));
+    await assertSucceeds(deleteObject(ref(storageFor("sub", subEmail), deletePath)));
   });
 });
 

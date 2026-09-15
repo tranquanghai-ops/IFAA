@@ -1,7 +1,7 @@
 import { collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, Timestamp, updateDoc, where } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
 import { REGISTRATION_QUESTION_TYPES, normalizeRegistrationFormItems, normalizeRegistrationProfileFields, validateRegistrationConfig } from "../../../registration-form.mjs";
 
-export function createAdminEventService({ db, select, safe, toMillis, formatTimestamp, formatVietnamDate, parseVietnamDate, getEvents, setEvents, getGroups, getAttendanceSessions, getUser, getIsOwner, getIsSubAdmin, defaultFaculty, externalCategories, trashRetentionMs, shareCode, groupCode, groupPosition, configuredPublicBaseUrl, confirmAction, notice, copyText, refreshGroupOptions, setLimitInputState, renderEventFaculties, fetchRegistrations, removeRegistration, deleteCachedExport, onRender }) {
+export function createAdminEventService({ db, select, safe, toMillis, formatTimestamp, formatVietnamDate, parseVietnamDate, getEvents, setEvents, getGroups, getAttendanceSessions, getUser, getIsOwner, getIsSubAdmin, defaultFaculty, externalCategories, trashRetentionMs, shareCode, groupCode, groupPosition, configuredPublicBaseUrl, confirmAction, notice, copyText, refreshGroupOptions, setLimitInputState, renderEventFaculties, fetchRegistrations, removeRegistration, deleteCachedExport, openEventAttachments, cleanupEventAttachments, onRender }) {
   let statusFilter = "all";
   let eventView = localStorage.getItem("ifaa-admin-event-view") === "list" ? "list" : "cards";
   let registrationFormItems = [];
@@ -372,6 +372,7 @@ export function createAdminEventService({ db, select, safe, toMillis, formatTime
 
   function openEvent(event = null, copy = false) {
     select("#eventForm").reset();
+    openEventAttachments(copy ? null : event);
     delete select("#saveEventBtn").dataset.immediateOpenBase;
     select("#saveEventBtn").textContent = "Lưu sự kiện";
     select("#descriptionEditor").innerHTML = event?.descriptionHtml || (event?.description ? `<p>${safe(event.description).replace(/\n/g, "<br>")}</p>` : "");
@@ -629,6 +630,7 @@ export function createAdminEventService({ db, select, safe, toMillis, formatTime
 
   async function permanentlyDeleteEvent(selected) {
     if (!selected || !getIsOwner()) throw Error("Chỉ Chủ sở hữu được xóa vĩnh viễn.");
+    await cleanupEventAttachments(selected.id);
     const registrations = await fetchRegistrations("eventId", selected.id);
     for (const registration of registrations) await removeRegistration(registration);
     await deleteCachedExport(`exports/registrations/event-${selected.id}.xlsx`);
