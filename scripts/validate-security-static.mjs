@@ -10,6 +10,8 @@ const adminExports = read("admin/modules/exports/export-service.mjs");
 const adminGroups = read("admin/modules/groups/group-service.mjs");
 const adminRegistrations = read("admin/modules/registrations/registration-service.mjs");
 const adminStudents = read("admin/modules/students/student-service.mjs");
+const registrationForm = read("registration-form.mjs");
+const student = read("student.mjs");
 const checkin = read("check-in/check-in.mjs");
 const pages = read(".github/workflows/pages.yml");
 const firebaseDeploy = read(".github/workflows/firebase-hosting-merge.yml");
@@ -51,6 +53,9 @@ assert.match(adminStudents, /if \(!hasHighAdminAccess\(\)\) throw Error\("Chỉ 
 assert.match(adminStudents, /batch\.set\(doc\(db, "facultyStudents", item\.mssv\)/);
 assert.match(adminStudents, /setDoc\(doc\(db, "facultyStudentMeta", "current"\)/);
 assert.doesNotMatch(adminStudents, /from ["'][^"']*admin\.mjs["']/);
+assert.match(adminStudents, /const publicRows = rows\.map\(\(\{ personalEmail, phone, \.\.\.item \}\) => item\)/);
+assert.match(registrationForm, /role === "subadmin" && !!uid && event\.createdByUid === uid/);
+assert.match(student, /transaction\.set\(registrationRef, \{ \.\.\.participant,[\s\S]*answers: currentSubmission\?\.answers \|\| \{\}, profileSnapshot: participant, registrationFormSnapshot: registrationFormSnapshot\(event\)/);
 assert.match(admin, /const liveCheckin = checkinSnapshot\.data\(\)/);
 assert.match(admin, /failed\.push\(\{ id: item\.id/);
 assert.match(admin, /transaction\.set\(canonicalRef/);

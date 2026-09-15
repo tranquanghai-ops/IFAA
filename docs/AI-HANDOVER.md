@@ -1,3 +1,17 @@
+# Cập nhật mới nhất — Flexible event registration
+
+- Branch triển khai: `feature/flexible-event-registration`.
+- Public page có Quick Edit bằng icon cây bút ở góc phải; quyền hiển thị và cập nhật giữ theo Owner/Admin/Sub-admin hiện có, không chuyển sang `/admin/`.
+- Event có thêm `registrationProfileFields` và `registrationFormItems`; event cũ không có các field này vẫn dùng luồng đăng ký nhanh.
+- Form builder hỗ trợ câu hỏi `short_text`, `long_text`, `single_choice`, `multiple_choice`, `dropdown`, `number`, `date`, `boolean`; hỗ trợ content block xen kẽ, nhân bản, xóa, lên/xuống và preview không ghi dữ liệu.
+- Registration mới lưu `answers`, `profileSnapshot` và `registrationFormSnapshot`. Việc thay đổi hồ sơ sau này không cập nhật ngược snapshot cũ.
+- Hồ sơ và danh sách SV khoa hỗ trợ thêm `personalEmail` và `phone`. Hai trường liên hệ bị loại khỏi faculty dataset nén mà participant có thể đọc; Admin xem/chỉnh qua document Firestore theo quyền hiện tại.
+- Admin có modal xem chi tiết registration; Excel registration thêm cột profile/câu hỏi động từ snapshot và nối multiple choice bằng `; `.
+- Không sửa Firestore Rules, Storage Rules, Auth, Attendance, Check-in, Drupal hoặc iframe.
+- Upload tài liệu sự kiện được hoãn: `storage.rules` hiện chưa có đường dẫn/quyền riêng cho event documents; không tự ý mở quyền trong task này.
+- Kiểm tra mục tiêu: `npm run test:registration-form`, `npm run test:security-static`, syntax các file MJS thay đổi và `git diff --check`.
+- Task tiếp theo không thay đổi thành Attendance trong phạm vi triển khai này; không bắt đầu Attendance tự động.
+
 # Dự án
 
 - Repository: `tranquanghai-ops/IFAA`

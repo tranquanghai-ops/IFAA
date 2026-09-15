@@ -1,8 +1,98 @@
 import { collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, Timestamp, updateDoc, where } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
+import { REGISTRATION_QUESTION_TYPES, normalizeRegistrationFormItems, normalizeRegistrationProfileFields, validateRegistrationConfig } from "../../../registration-form.mjs";
 
 export function createAdminEventService({ db, select, safe, toMillis, formatTimestamp, formatVietnamDate, parseVietnamDate, getEvents, setEvents, getGroups, getAttendanceSessions, getUser, getIsOwner, getIsSubAdmin, defaultFaculty, externalCategories, trashRetentionMs, shareCode, groupCode, groupPosition, configuredPublicBaseUrl, confirmAction, notice, copyText, refreshGroupOptions, setLimitInputState, renderEventFaculties, fetchRegistrations, removeRegistration, deleteCachedExport, onRender }) {
   let statusFilter = "all";
   let eventView = localStorage.getItem("ifaa-admin-event-view") === "list" ? "list" : "cards";
+  let registrationFormItems = [];
+
+  const registrationItemId = (kind) => `${kind}_${Date.now().toString(36)}_${crypto.getRandomValues(new Uint32Array(1))[0].toString(36)}`;
+
+  function readRegistrationBuilder() {
+    document.querySelectorAll("[data-registration-item]").forEach((card) => {
+      const item = registrationFormItems.find((entry) => entry.id === card.dataset.registrationItem);
+      if (!item) return;
+      if (item.kind === "content") {
+        item.title = card.querySelector('[data-item-field="title"]').value;
+        item.content = card.querySelector('[data-item-field="content"]').value;
+        item.linkUrl = card.querySelector('[data-item-field="linkUrl"]').value;
+        item.linkLabel = card.querySelector('[data-item-field="linkLabel"]').value;
+      } else {
+        item.label = card.querySelector('[data-item-field="label"]').value;
+        item.type = card.querySelector('[data-item-field="type"]').value;
+        item.required = card.querySelector('[data-item-field="required"]').checked;
+        item.options = card.querySelector('[data-item-field="options"]').value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+      }
+    });
+    return registrationFormItems;
+  }
+
+  function renderRegistrationBuilder() {
+    const target = select("#registrationFormItems");
+    target.innerHTML = registrationFormItems.map((item, index) => {
+      const tools = `<div class="registration-item-tools"><button type="button" class="btn btn-small" data-registration-action="up" ${index ? "" : "disabled"}>↑</button><button type="button" class="btn btn-small" data-registration-action="down" ${index < registrationFormItems.length - 1 ? "" : "disabled"}>↓</button>${item.kind === "question" ? '<button type="button" class="btn btn-small" data-registration-action="duplicate">Nhân bản</button>' : ""}<button type="button" class="btn btn-small btn-danger" data-registration-action="delete">Xóa</button></div>`;
+      if (item.kind === "content") return `<article class="registration-builder-item content-builder-item" data-registration-item="${safe(item.id)}"><div class="registration-item-head"><b>Khối nội dung</b>${tools}</div><div class="form-grid"><div class="field span-2"><label>Tiêu đề</label><input data-item-field="title" maxlength="200" value="${safe(item.title)}"></div><div class="field span-2"><label>Nội dung</label><textarea data-item-field="content" maxlength="10000">${safe(item.content)}</textarea></div><div class="field"><label>Liên kết HTTPS</label><input data-item-field="linkUrl" type="url" value="${safe(item.linkUrl)}"></div><div class="field"><label>Nhãn liên kết</label><input data-item-field="linkLabel" maxlength="160" value="${safe(item.linkLabel)}"></div></div></article>`;
+      const typeOptions = Object.entries(REGISTRATION_QUESTION_TYPES).map(([value, label]) => `<option value="${value}" ${item.type === value ? "selected" : ""}>${label}</option>`).join("");
+      const optionClass = ["single_choice", "multiple_choice", "dropdown"].includes(item.type) ? "" : "hidden";
+      return `<article class="registration-builder-item" data-registration-item="${safe(item.id)}"><div class="registration-item-head"><b>Câu hỏi ${index + 1}</b>${tools}</div><div class="form-grid"><div class="field span-2"><label>Nội dung câu hỏi</label><input data-item-field="label" maxlength="500" value="${safe(item.label)}" required></div><div class="field"><label>Loại câu hỏi</label><select data-item-field="type">${typeOptions}</select></div><label class="check event-option"><input data-item-field="required" type="checkbox" ${item.required ? "checked" : ""}> Bắt buộc</label><div class="field span-2 ${optionClass}" data-options-field><label>Các lựa chọn — mỗi dòng một mục</label><textarea data-item-field="options">${safe((item.options || []).join("\n"))}</textarea></div></div></article>`;
+    }).join("") || '<p class="empty registration-builder-empty">Chưa có câu hỏi hoặc nội dung bổ sung.</p>';
+  }
+
+  function registrationPreviewHtml(profileFields, items) {
+    const fields = [];
+    if (profileFields.personalEmail.enabled) fields.push(`<div class="field"><label>Email cá nhân${profileFields.personalEmail.required ? " *" : ""}</label><input type="email" placeholder="name@example.com" disabled></div>`);
+    if (profileFields.phone.enabled) fields.push(`<div class="field"><label>Số điện thoại${profileFields.phone.required ? " *" : ""}</label><input type="tel" placeholder="Số điện thoại" disabled></div>`);
+    for (const item of items) {
+      if (item.kind === "content") {
+        fields.push(`<section class="registration-content-block"><h3>${safe(item.title)}</h3><p>${safe(item.content).replace(/\n/g, "<br>")}</p>${item.linkUrl ? `<a href="${safe(item.linkUrl)}" target="_blank" rel="noopener noreferrer">${safe(item.linkLabel || "Xem liên kết")}</a>` : ""}</section>`);
+        continue;
+      }
+      const label = `${safe(item.label)}${item.required ? " *" : ""}`;
+      if (item.type === "long_text") fields.push(`<div class="field"><label>${label}</label><textarea disabled></textarea></div>`);
+      else if (["single_choice", "multiple_choice", "boolean"].includes(item.type)) {
+        const values = item.type === "boolean" ? ["Có", "Không"] : item.options;
+        fields.push(`<fieldset class="registration-choice"><legend>${label}</legend>${values.map((value) => `<label class="check"><input type="${item.type === "multiple_choice" ? "checkbox" : "radio"}" disabled> ${safe(value)}</label>`).join("")}</fieldset>`);
+      } else if (item.type === "dropdown") fields.push(`<div class="field"><label>${label}</label><select disabled><option>— Chọn —</option>${item.options.map((value) => `<option>${safe(value)}</option>`).join("")}</select></div>`);
+      else fields.push(`<div class="field"><label>${label}</label><input type="${item.type === "number" ? "number" : item.type === "date" ? "date" : "text"}" disabled></div>`);
+    }
+    return `<div class="registration-preview-profile"><b>Thông tin hệ thống</b><p>Họ tên · MSSV · Email trường · Ngành/Lớp được tự động điền.</p></div><div class="registration-form-fields">${fields.join("") || '<p class="empty">Sự kiện này giữ cơ chế đăng ký nhanh.</p>'}</div>`;
+  }
+
+  function bindRegistrationFormControls() {
+    const syncProfileToggle = (enabledSelector, requiredSelector) => {
+      const enabled = select(enabledSelector), required = select(requiredSelector);
+      required.disabled = !enabled.checked;
+      if (!enabled.checked) required.checked = false;
+    };
+    select("#requirePersonalEmail").onchange = () => syncProfileToggle("#requirePersonalEmail", "#personalEmailRequired");
+    select("#requirePhone").onchange = () => syncProfileToggle("#requirePhone", "#phoneRequired");
+    select("#addRegistrationQuestion").onclick = () => { readRegistrationBuilder(); registrationFormItems.push({ id: registrationItemId("question"), kind: "question", type: "short_text", label: "", required: false, options: [], order: registrationFormItems.length + 1 }); renderRegistrationBuilder(); };
+    select("#addRegistrationContent").onclick = () => { readRegistrationBuilder(); registrationFormItems.push({ id: registrationItemId("content"), kind: "content", title: "", content: "", linkUrl: "", linkLabel: "", order: registrationFormItems.length + 1 }); renderRegistrationBuilder(); };
+    select("#registrationFormItems").onchange = (event) => {
+      if (event.target.dataset.itemField === "type") { readRegistrationBuilder(); renderRegistrationBuilder(); }
+    };
+    select("#registrationFormItems").onclick = (event) => {
+      const button = event.target.closest("[data-registration-action]");
+      if (!button) return;
+      readRegistrationBuilder();
+      const card = button.closest("[data-registration-item]");
+      const index = registrationFormItems.findIndex((item) => item.id === card.dataset.registrationItem);
+      if (index < 0) return;
+      if (button.dataset.registrationAction === "delete") registrationFormItems.splice(index, 1);
+      if (button.dataset.registrationAction === "up" && index > 0) [registrationFormItems[index - 1], registrationFormItems[index]] = [registrationFormItems[index], registrationFormItems[index - 1]];
+      if (button.dataset.registrationAction === "down" && index < registrationFormItems.length - 1) [registrationFormItems[index + 1], registrationFormItems[index]] = [registrationFormItems[index], registrationFormItems[index + 1]];
+      if (button.dataset.registrationAction === "duplicate") registrationFormItems.splice(index + 1, 0, { ...registrationFormItems[index], id: registrationItemId("question"), options: [...registrationFormItems[index].options] });
+      renderRegistrationBuilder();
+    };
+    select("#previewRegistrationForm").onclick = () => {
+      try {
+        const config = validateRegistrationConfig({ personalEmail: { enabled: select("#requirePersonalEmail").checked, required: select("#personalEmailRequired").checked }, phone: { enabled: select("#requirePhone").checked, required: select("#phoneRequired").checked } }, readRegistrationBuilder());
+        select("#registrationPreviewBody").innerHTML = registrationPreviewHtml(config.profileFields, config.items);
+        select("#registrationPreviewDialog").showModal();
+      } catch (error) { notice(error.message, "error"); }
+    };
+    document.querySelectorAll("[data-close-registration-preview]").forEach((button) => button.onclick = () => select("#registrationPreviewDialog").close());
+  }
 
   function eventEnd(event) {
     const date = new Date(`${event.date}T${event.endTime || event.startTime || "23:59"}:00`);
@@ -329,6 +419,16 @@ export function createAdminEventService({ db, select, safe, toMillis, formatTime
     select("#newGroupUnlimited").checked = false;
     setLimitInputState(select("#newGroupUnlimited"), select("#newGroupMax"));
     renderEventFaculties(event?.allowedFaculties?.length ? event.allowedFaculties : [defaultFaculty]);
+    const profileFields = normalizeRegistrationProfileFields(event?.registrationProfileFields);
+    select("#requirePersonalEmail").checked = profileFields.personalEmail.enabled;
+    select("#personalEmailRequired").checked = profileFields.personalEmail.required;
+    select("#personalEmailRequired").disabled = !profileFields.personalEmail.enabled;
+    select("#requirePhone").checked = profileFields.phone.enabled;
+    select("#phoneRequired").checked = profileFields.phone.required;
+    select("#phoneRequired").disabled = !profileFields.phone.enabled;
+    registrationFormItems = normalizeRegistrationFormItems(event?.registrationFormItems || event?.registrationQuestions || []);
+    if (copy) registrationFormItems = registrationFormItems.map((item) => ({ ...item, id: registrationItemId(item.kind), options: [...(item.options || [])] }));
+    renderRegistrationBuilder();
     const canApplyToGroup = !copy && !!event?.id && !!event?.groupId;
     select("#applyGroupFieldsOption").classList.toggle("hidden", !canApplyToGroup);
     document.querySelectorAll(".group-sync-field").forEach((input) => { input.checked = false; });
@@ -405,6 +505,12 @@ export function createAdminEventService({ db, select, safe, toMillis, formatTime
     data.allowCancellation = select("#eventAllowCancellation").checked;
     data.isHot = select("#eventHot").checked;
     data.showAsNew = select("#eventShowAsNew").checked;
+    const registrationConfig = validateRegistrationConfig({
+      personalEmail: { enabled: select("#requirePersonalEmail").checked, required: select("#personalEmailRequired").checked },
+      phone: { enabled: select("#requirePhone").checked, required: select("#phoneRequired").checked }
+    }, readRegistrationBuilder());
+    data.registrationProfileFields = registrationConfig.profileFields;
+    data.registrationFormItems = registrationConfig.items;
     data.updatedAt = serverTimestamp();
     if (!data.title || !data.category || !data.date || !data.location || !Number.isInteger(data.capacity) || data.capacity < 1) throw Error("Vui lòng nhập đầy đủ các trường bắt buộc.");
     if ((data.startTime && !validTime24(data.startTime)) || (data.endTime && !validTime24(data.endTime))) throw Error("Nếu nhập giờ sự kiện, vui lòng dùng định dạng 24 giờ HH:mm, ví dụ 08:30 hoặc 17:45.");
@@ -556,6 +662,7 @@ export function createAdminEventService({ db, select, safe, toMillis, formatTime
   }
 
   return {
+    bindRegistrationFormControls,
     calendarRange,
     calendarStamp,
     createEventLink,

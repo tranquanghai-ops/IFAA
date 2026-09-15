@@ -20,7 +20,7 @@ export function createAdminStudentService({ db, storage, select, safe, getUser, 
     const studentClass = String(value.studentClass || value.class || "").trim();
     const classCode = /^\d{6,}$/.test(studentClass) ? studentClass.slice(3, 6) : "";
     const yy = /^1\d{7,}$/.test(mssv) ? Number(mssv.slice(1, 3)) : null;
-    return { mssv, name: String(value.name || "").trim().replace(/\s+/g, " "), email: String(value.email || (mssv ? mssv.toLowerCase() + "@student.tdtu.edu.vn" : "")).trim().toLowerCase(), gender: String(value.gender || "").trim(), major: String(value.major || "").trim() || MAJOR_BY_CLASS_CODE[classCode] || "", studentClass, admissionYear: value.admissionYear || (yy !== null ? 2000 + yy : ""), course: value.course || (yy !== null ? yy + 4 : "") };
+    return { mssv, name: String(value.name || "").trim().replace(/\s+/g, " "), email: String(value.email || (mssv ? mssv.toLowerCase() + "@student.tdtu.edu.vn" : "")).trim().toLowerCase(), personalEmail: String(value.personalEmail || "").trim().toLowerCase(), phone: String(value.phone || "").trim(), gender: String(value.gender || "").trim(), major: String(value.major || "").trim() || MAJOR_BY_CLASS_CODE[classCode] || "", studentClass, admissionYear: value.admissionYear || (yy !== null ? 2000 + yy : ""), course: value.course || (yy !== null ? yy + 4 : "") };
   }
   function facultyDatasetSummary(rows) {
     const classesByMajor = {};
@@ -52,13 +52,14 @@ export function createAdminStudentService({ db, storage, select, safe, getUser, 
   async function publishFacultyRows(records, message = "Đang cập nhật dữ liệu nén…") {
     showFacultyDatasetStatus(message, "loading");
     const rows = [...new Map(records.map(studentRecord).filter((item) => validStudentId(item.mssv) && item.name).map((item) => [item.mssv, item])).values()];
-    const result = await publishFacultyDataset(storage, rows);
+    const publicRows = rows.map(({ personalEmail, phone, ...item }) => item);
+    const result = await publishFacultyDataset(storage, publicRows);
     const summary = facultyDatasetSummary(rows);
     const metadata = { ...summary, datasetVersion: result.version, datasetPath: result.path, datasetUrl: result.url, datasetEncoding: "gzip", datasetBytes: result.bytes, datasetUpdatedAt: serverTimestamp(), updatedAt: serverTimestamp() };
     await setDoc(doc(db, "facultyStudentMeta", "current"), metadata, { merge: true });
     facultyStudentDatasetMeta = { ...facultyStudentDatasetMeta, ...metadata };
     facultyStudentTotal = rows.length;
-    facultyNameSearchCache = rows;
+    facultyNameSearchCache = publicRows;
     showFacultyDatasetStatus(`Dữ liệu nén: ${rows.length} SV · ${(result.bytes / 1024).toFixed(1)} KB`, "success");
     return rows;
   }
@@ -88,7 +89,8 @@ export function createAdminStudentService({ db, storage, select, safe, getUser, 
     select("#facultyStudentCount").textContent = searching ? `${rows.length} sinh viên` : `${rows.length} đang hiển thị`;
     select("#facultyStudentTotalTop").textContent = `Tổng: ${facultyStudentTotal || rows.length} sinh viên`;
     const edit = (item, field, value, type = "text") => value ? safe(value) : type === "select" ? `<select class="student-inline" data-student-field="${field}" data-student-id="${safe(item.mssv)}"><option value="">— Chọn —</option>${field === "major" ? FACULTY_MAJORS.map((v) => `<option>${safe(v)}</option>`).join("") : '<option>Nam</option><option>Nữ</option>'}</select>` : `<input class="student-inline" data-student-field="${field}" data-student-id="${safe(item.mssv)}" placeholder="Bổ sung..." value="">`;
-    select("#facultyStudentRows").innerHTML = rows.map((item) => `<tr><td><b>${safe(item.mssv)}</b></td><td>${edit(item, "name", item.name)}</td><td>${edit(item, "gender", item.gender, "select")}</td><td>${edit(item, "major", item.major, "select")}</td><td>${edit(item, "studentClass", item.studentClass)}</td><td><button class="btn btn-small btn-danger" data-remove-faculty-student="${safe(item.mssv)}">Xóa</button></td></tr>`).join("") || '<tr><td colspan="6" class="empty">Không có sinh viên phù hợp.</td></tr>';
+    const contactInput = (item, field, value, type) => `<input class="student-inline" data-student-field="${field}" data-student-id="${safe(item.mssv)}" type="${type}" maxlength="${type === "email" ? 254 : 40}" placeholder="Bổ sung..." value="${safe(value)}">`;
+    select("#facultyStudentRows").innerHTML = rows.map((item) => `<tr><td><b>${safe(item.mssv)}</b></td><td>${edit(item, "name", item.name)}</td><td>${edit(item, "gender", item.gender, "select")}</td><td>${edit(item, "major", item.major, "select")}</td><td>${edit(item, "studentClass", item.studentClass)}</td><td>${contactInput(item, "personalEmail", item.personalEmail, "email")}</td><td>${contactInput(item, "phone", item.phone, "tel")}</td><td><button class="btn btn-small btn-danger" data-remove-faculty-student="${safe(item.mssv)}">Xóa</button></td></tr>`).join("") || '<tr><td colspan="8" class="empty">Không có sinh viên phù hợp.</td></tr>';
     select("#attendanceStudentOptions").innerHTML = rows.map((item) => `<option value="${safe(item.mssv)}">${safe(item.name)}</option><option value="${safe(item.name)}">${safe(item.mssv)}</option>`).join("");
     select("#facultyStudentPageInfo").textContent = `Trang ${facultyStudentPage}`;
     select("#facultyStudentPrev").disabled = facultyStudentPage <= 1;
@@ -142,7 +144,11 @@ export function createAdminStudentService({ db, storage, select, safe, getUser, 
             facultyNameSearchCache = all.docs.map((item) => studentRecord({ ...item.data(), mssv: item.id }));
           }
         }
-        facultyStudents = facultyNameSearchCache.filter((item) => normalizeSearch(item.name).includes(search) && (!major || item.major === major) && (!studentClass || item.studentClass === studentClass));
+        const matches = facultyNameSearchCache.filter((item) => normalizeSearch(item.name).includes(search) && (!major || item.major === major) && (!studentClass || item.studentClass === studentClass)).slice(0, size);
+        facultyStudents = (await Promise.all(matches.map(async (item) => {
+          const snapshot = await getDoc(doc(db, "facultyStudents", item.mssv));
+          return snapshot.exists() ? studentRecord({ ...snapshot.data(), mssv: snapshot.id }) : item;
+        })));
         facultyStudentHasNext = false;
         select("#facultyStudentPrompt").classList.add("hidden"); select("#facultyStudentTableWrap").classList.remove("hidden"); renderFacultyStudents(facultyStudents.slice(0, size)); return;
       }
@@ -164,9 +170,9 @@ export function createAdminStudentService({ db, storage, select, safe, getUser, 
     const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "" });
     if (!rows.length) return [];
     const keys = Object.keys(rows[0]), find = (...names) => keys.find((key) => names.includes(normalizeAttendanceHeader(key)));
-    const mssvKey = find("mssv", "masv", "masinhvien", "studentid"), nameKey = find("hoten", "hovaten", "name", "fullname"), familyKey = find("holot", "hodem", "ho"), givenKey = find("ten", "firstname"), genderKey = find("gioitinh", "gender"), majorKey = find("nganh", "nganhhoc", "major"), classKey = find("lop", "lopquanly", "class");
+    const mssvKey = find("mssv", "masv", "masinhvien", "studentid"), nameKey = find("hoten", "hovaten", "name", "fullname"), familyKey = find("holot", "hodem", "ho"), givenKey = find("ten", "firstname"), genderKey = find("gioitinh", "gender"), majorKey = find("nganh", "nganhhoc", "major"), classKey = find("lop", "lopquanly", "class"), personalEmailKey = find("emailcanhan", "personalemail"), phoneKey = find("sodienthoai", "dienthoai", "phone");
     if (!mssvKey || (!nameKey && !(familyKey && givenKey))) throw Error("File danh sách SV khoa cần có cột MSSV và Họ và tên (hoặc Họ lót + Tên).");
-    return rows.map((row) => studentRecord({ mssv: row[mssvKey], name: nameKey ? row[nameKey] : `${row[familyKey] || ""} ${row[givenKey] || ""}`, gender: row[genderKey], major: row[majorKey], studentClass: row[classKey] })).filter((item) => validStudentId(item.mssv) && item.name);
+    return rows.map((row) => studentRecord({ mssv: row[mssvKey], name: nameKey ? row[nameKey] : `${row[familyKey] || ""} ${row[givenKey] || ""}`, gender: row[genderKey], major: row[majorKey], studentClass: row[classKey], personalEmail: row[personalEmailKey], phone: row[phoneKey] })).filter((item) => validStudentId(item.mssv) && item.name);
   }
   async function saveFacultyStudents(records) {
     if (!hasHighAdminAccess()) throw Error("Chỉ Chủ sở hữu hoặc Admin cấp cao được cập nhật danh sách SV khoa.");
@@ -194,7 +200,7 @@ export function createAdminStudentService({ db, storage, select, safe, getUser, 
     select("#facultyStudentForm").onsubmit = async (event) => {
       event.preventDefault();
       try {
-        const count = await saveFacultyStudents([{ mssv: select("#facultyStudentMssv").value, name: select("#facultyStudentName").value, gender: select("#facultyStudentGender").value, major: select("#facultyStudentMajor").value, studentClass: select("#facultyStudentClass").value }]);
+        const count = await saveFacultyStudents([{ mssv: select("#facultyStudentMssv").value, name: select("#facultyStudentName").value, gender: select("#facultyStudentGender").value, major: select("#facultyStudentMajor").value, studentClass: select("#facultyStudentClass").value, personalEmail: select("#facultyStudentPersonalEmail").value, phone: select("#facultyStudentPhone").value }]);
         event.target.reset(); notice(`Đã lưu ${count} sinh viên.`, "success");
       } catch (error) { notice(error.message, "error"); }
     };
@@ -214,11 +220,12 @@ export function createAdminStudentService({ db, storage, select, safe, getUser, 
       } catch (error) { showFacultyDatasetStatus("Không thể tạo dữ liệu nén.", "error"); notice(error.message, "error"); }
       finally { button.disabled = false; }
     };
-    select("#facultyStudentTemplate").onclick = () => downloadWorkbook("MAU_DANH_SACH_SV_KHOA.xlsx", "Danh sach SV khoa", [{ MSSV: "12300325", "Họ và tên": "Nguyễn Văn A", "Giới tính": "Nam", "Ngành": "Thiết kế nội thất", "Lớp": "230H0101" }]);
+    select("#facultyStudentTemplate").onclick = () => downloadWorkbook("MAU_DANH_SACH_SV_KHOA.xlsx", "Danh sach SV khoa", [{ MSSV: "12300325", "Họ và tên": "Nguyễn Văn A", "Giới tính": "Nam", "Ngành": "Thiết kế nội thất", "Lớp": "230H0101", "Email cá nhân": "", "Số điện thoại": "" }]);
     select("#facultyStudentExport").onclick = async () => {
       try {
-        const rows = await facultyDatasetBaseRows();
-        downloadWorkbook("DANH_SACH_SV_KHOA.xlsx", "Danh sach SV khoa", rows.map((item, index) => ({ STT: index + 1, MSSV: item.mssv, "Họ và tên": item.name, "Giới tính": item.gender, "Ngành": item.major, "Lớp": item.studentClass })));
+        const snapshot = await getDocs(collection(db, "facultyStudents"));
+        const rows = snapshot.docs.map((item) => studentRecord({ ...item.data(), mssv: item.id }));
+        downloadWorkbook("DANH_SACH_SV_KHOA.xlsx", "Danh sach SV khoa", rows.map((item, index) => ({ STT: index + 1, MSSV: item.mssv, "Họ và tên": item.name, "Giới tính": item.gender, "Ngành": item.major, "Lớp": item.studentClass, "Email cá nhân": item.personalEmail, "Số điện thoại": item.phone })));
       } catch (error) { notice(error.message, "error"); }
     };
     select("#facultyStudentRows").onchange = async (event) => {

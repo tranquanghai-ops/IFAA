@@ -4,11 +4,11 @@ import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, getCo
 import { getStorage, ref, getBytes, getDownloadURL, getMetadata, uploadBytes, deleteObject } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
 import { firebaseConfig, OWNER_EMAIL } from "../firebase-config.mjs";
 import { loadFacultyDataset, publishFacultyDataset } from "../faculty-dataset.mjs";
-import { createAdminEventService } from "./modules/events/event-service.mjs";
-import { createAdminExportService } from "./modules/exports/export-service.mjs";
+import { createAdminEventService } from "./modules/events/event-service.mjs?v=2";
+import { createAdminExportService } from "./modules/exports/export-service.mjs?v=2";
 import { createAdminGroupService } from "./modules/groups/group-service.mjs";
-import { createAdminRegistrationService } from "./modules/registrations/registration-service.mjs";
-import { createAdminStudentService } from "./modules/students/student-service.mjs";
+import { createAdminRegistrationService } from "./modules/registrations/registration-service.mjs?v=2";
+import { createAdminStudentService } from "./modules/students/student-service.mjs?v=2";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
 const DEFAULT_PUBLIC_BASE_URL = "https://ifa.tdtu.edu.vn/dang-ky-su-kien";
@@ -164,6 +164,7 @@ const {
 });
 
 const {
+  bindRegistrationFormControls,
   calendarRange,
   calendarStamp,
   createEventLink,
@@ -229,6 +230,7 @@ const {
   findLoadedRegistration,
   loadQuickRegistrationPage,
   loadRegistrationPage,
+  openRegistrationDetailById,
   openQuickRegistrations,
   refreshRegistrationFilters,
   removeRegistration,
@@ -301,6 +303,7 @@ const {
 
 bindStudentControls();
 bindGroupControls();
+bindRegistrationFormControls();
 
 async function audit(action, targetType, targetId, details = {}) {
   try {
@@ -860,6 +863,7 @@ document.addEventListener("click", async (event) => {
     render();
   }
   if (button.dataset.registrationFilter !== undefined) showPane("registrations");
+  if (button.dataset.registrationDetail) openRegistrationDetailById(button.dataset.registrationDetail);
   if (button.dataset.adminFilter) {
     setEventStatusFilter(button.dataset.adminFilter);
     document.querySelectorAll(".admin-filter").forEach((item) => item.classList.toggle("active", item === button));
@@ -889,6 +893,7 @@ document.addEventListener("click", async (event) => {
   if (button.dataset.quickRegistrations) await openQuickRegistrations(button.dataset.quickRegistrations);
   if (button.dataset.exportEvent) await downloadRegistrationExcel(button.dataset.exportEvent, "", button);
   if (button.dataset.closeQuick !== undefined) $("#quickRegistrationDialog").close();
+  if (button.dataset.closeRegistrationDetail !== undefined) $("#registrationDetailDialog").close();
   if (button.dataset.delete) {
     const selected = events.find((item) => item.id === button.dataset.delete);
     await trashEvent(selected, button);
