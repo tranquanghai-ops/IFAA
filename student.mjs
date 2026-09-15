@@ -604,10 +604,14 @@ function loadData() {
       myRegs = new Map(snapshot.docs.map((item) => [item.data().eventId, { id: item.id, ...item.data() }]));
       render();
     }, (error) => show(`Không thể tải đăng ký: ${error.message}`, "error")));
-    unsubscribers.push(onSnapshot(query(collection(db, "checkins"), where("email", "==", user.email)), (snapshot) => {
-      attendanceByEvent = new Map(snapshot.docs.filter((item) => !item.data().deletedAt).map((item) => [item.data().eventId, { id: item.id, ...item.data() }]));
-      render();
-    }, (error) => show(`Không thể tải lịch sử điểm danh: ${error.message}`, "error")));
+    if (studentIdentifier(user.email) || ["owner", "admin"].includes(adminRole)) {
+      unsubscribers.push(onSnapshot(query(collection(db, "checkins"), where("email", "==", user.email)), (snapshot) => {
+        attendanceByEvent = new Map(snapshot.docs.filter((item) => !item.data().deletedAt).map((item) => [item.data().eventId, { id: item.id, ...item.data() }]));
+        render();
+      }, (error) => show(`Không thể tải lịch sử điểm danh: ${error.message}`, "error")));
+    } else {
+      attendanceByEvent = new Map();
+    }
     unsubscribers.push(onSnapshot(query(collection(db, "registrationLimits"), where("uid", "==", user.uid)), (snapshot) => {
       groupLimits = new Map(snapshot.docs.map((item) => [item.data().groupId, item.data()]));
       render();
