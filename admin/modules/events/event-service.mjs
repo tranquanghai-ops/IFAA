@@ -40,20 +40,20 @@ export function createAdminEventService({ db, select, safe, toMillis, formatTime
 
   function registrationPreviewHtml(profileFields, items) {
     const fields = [];
-    if (profileFields.personalEmail.enabled) fields.push(`<div class="field"><label>Email cá nhân${profileFields.personalEmail.required ? " *" : ""}</label><input type="email" placeholder="name@example.com" disabled></div>`);
-    if (profileFields.phone.enabled) fields.push(`<div class="field"><label>Số điện thoại${profileFields.phone.required ? " *" : ""}</label><input type="tel" placeholder="Số điện thoại" disabled></div>`);
+    if (profileFields.personalEmail.enabled) fields.push(`<div class="field registration-question"><label>Email cá nhân${profileFields.personalEmail.required ? ' <span class="required-mark">*</span>' : ""}</label><input type="email" placeholder="name@example.com" disabled></div>`);
+    if (profileFields.phone.enabled) fields.push(`<div class="field registration-question"><label>Số điện thoại${profileFields.phone.required ? ' <span class="required-mark">*</span>' : ""}</label><input type="tel" placeholder="Số điện thoại" disabled></div>`);
     for (const item of items) {
       if (item.kind === "content") {
         fields.push(`<section class="registration-content-block"><h3>${safe(item.title)}</h3><p>${safe(item.content).replace(/\n/g, "<br>")}</p>${item.linkUrl ? `<a href="${safe(item.linkUrl)}" target="_blank" rel="noopener noreferrer">${safe(item.linkLabel || "Xem liên kết")}</a>` : ""}</section>`);
         continue;
       }
       const label = `${safe(item.label)}${item.required ? " *" : ""}`;
-      if (item.type === "long_text") fields.push(`<div class="field"><label>${label}</label><textarea disabled></textarea></div>`);
+      if (item.type === "long_text") fields.push(`<div class="field registration-question"><label>${label}</label><textarea disabled></textarea></div>`);
       else if (["single_choice", "multiple_choice", "boolean"].includes(item.type)) {
         const values = item.type === "boolean" ? ["Có", "Không"] : item.options;
-        fields.push(`<fieldset class="registration-choice"><legend>${label}</legend>${values.map((value) => `<label class="check"><input type="${item.type === "multiple_choice" ? "checkbox" : "radio"}" disabled> ${safe(value)}</label>`).join("")}</fieldset>`);
-      } else if (item.type === "dropdown") fields.push(`<div class="field"><label>${label}</label><select disabled><option>— Chọn —</option>${item.options.map((value) => `<option>${safe(value)}</option>`).join("")}</select></div>`);
-      else fields.push(`<div class="field"><label>${label}</label><input type="${item.type === "number" ? "number" : item.type === "date" ? "date" : "text"}" disabled></div>`);
+        fields.push(`<fieldset class="registration-question registration-choice"><legend>${label}</legend><div class="registration-options">${values.map((value) => `<label><input type="${item.type === "multiple_choice" ? "checkbox" : "radio"}" disabled> ${safe(value)}</label>`).join("")}</div></fieldset>`);
+      } else if (item.type === "dropdown") fields.push(`<div class="field registration-question"><label>${label}</label><select disabled><option>— Chọn —</option>${item.options.map((value) => `<option>${safe(value)}</option>`).join("")}</select></div>`);
+      else fields.push(`<div class="field registration-question"><label>${label}</label><input type="${item.type === "number" ? "number" : item.type === "date" ? "date" : "text"}" disabled></div>`);
     }
     return `<div class="registration-preview-profile"><b>Thông tin hệ thống</b><p>Họ tên · MSSV · Email trường · Ngành/Lớp được tự động điền.</p></div><div class="registration-form-fields">${fields.join("") || '<p class="empty">Sự kiện này giữ cơ chế đăng ký nhanh.</p>'}</div>`;
   }
