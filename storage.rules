@@ -31,7 +31,9 @@ service firebase.storage {
     function managesSession(sessionId) {
       return highAdmin() || (admin()
         && firestore.get(/databases/(default)/documents/admins/$(email())).data.get('role', 'admin') == 'subadmin'
-        && firestore.get(/databases/(default)/documents/attendanceSessions/$(sessionId)).data.createdByUid == request.auth.uid);
+        && firestore.get(/databases/(default)/documents/attendanceSessions/$(sessionId)).data.createdByUid == request.auth.uid)
+        || (signedIn()
+          && firestore.get(/databases/(default)/documents/attendanceSessions/$(sessionId)).data.get('coManagerUids', []).hasAny([request.auth.uid]));
     }
     function assigned(sessionId) {
       return signedIn()
@@ -45,7 +47,8 @@ service firebase.storage {
       return firestore.exists(eventPath(eventId))
         && (highAdmin() || (admin()
         && firestore.get(/databases/(default)/documents/admins/$(email())).data.get('role', 'admin') == 'subadmin'
-        && firestore.get(eventPath(eventId)).data.createdByUid == request.auth.uid));
+        && firestore.get(eventPath(eventId)).data.createdByUid == request.auth.uid)
+        || (signedIn() && firestore.get(eventPath(eventId)).data.get('coManagerUids', []).hasAny([request.auth.uid])));
     }
     function downloadableEvent(eventId) {
       return firestore.exists(eventPath(eventId))

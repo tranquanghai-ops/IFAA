@@ -16,10 +16,22 @@ service cloud.firestore {
     function attendanceSessionPath(sessionId){ return /databases/$(database)/documents/attendanceSessions/$(sessionId); }
     function attendanceSession(sessionId){ return get(attendanceSessionPath(sessionId)).data; }
     function attendanceSessionAfter(sessionId){ return getAfter(attendanceSessionPath(sessionId)).data; }
-    function managesSession(sessionId){ return highAdmin() || (subAdmin() && attendanceSession(sessionId).createdByUid == request.auth.uid); }
+    function validCoManagers(data){ return data.get('coManagerUids', []) is list
+      && data.get('coManagerUids', []).size() <= 20
+      && !data.get('coManagerUids', []).hasAny([data.createdByUid]); }
+    function ownershipFieldsUnchanged(){ return !request.resource.data.diff(resource.data).affectedKeys()
+      .hasAny(['owner','ownerId','ownerUid','creator','creatorId','creatorUid','createdByUid','createdByEmail','createdByName','createdAt']); }
+    function eventCoManager(eventId){ return signedIn() && get(eventPath(eventId)).data.get('coManagerUids', []).hasAny([request.auth.uid]); }
+    function attendanceCoManagerData(data){ return signedIn() && data.get('coManagerUids', []).hasAny([request.auth.uid]); }
+    function attendanceCoManager(sessionId){ return signedIn() && attendanceSession(sessionId).get('coManagerUids', []).hasAny([request.auth.uid]); }
+    function managesEvent(eventId){ return highAdmin() || (subAdmin() && get(eventPath(eventId)).data.createdByUid == request.auth.uid) || eventCoManager(eventId); }
+    function managesSession(sessionId){ return highAdmin() || (subAdmin() && attendanceSession(sessionId).createdByUid == request.auth.uid) || attendanceCoManager(sessionId); }
     function managesSessionAfter(sessionId){ return highAdmin() || (subAdmin()
       && existsAfter(attendanceSessionPath(sessionId))
-      && attendanceSessionAfter(sessionId).createdByUid == request.auth.uid); }
+      && attendanceSessionAfter(sessionId).createdByUid == request.auth.uid)
+      || (signedIn()
+        && existsAfter(attendanceSessionPath(sessionId))
+        && attendanceSessionAfter(sessionId).get('coManagerUids', []).hasAny([request.auth.uid])); }
     function checkinPath(checkinId){ return /databases/$(database)/documents/checkins/$(checkinId); }
     function counter(data, field){ return data.get(field, 0); }
     function decrementedCounter(data, field){ return counter(data, field) > 0 ? counter(data, field) - 1 : 0; }
@@ -293,6 +305,7 @@ service cloud.firestore {
       allow create: if admin()
         && request.resource.data.createdByUid == request.auth.uid
         && request.resource.data.registeredCount == 0
+        && validCoManagers(request.resource.data)
         && request.resource.data.allowedFaculties is list
         && request.resource.data.allowedFaculties.size() >= 1
         && validEventGroup(request.resource.data);
@@ -312,7 +325,7 @@ service cloud.firestore {
             && request.resource.data.registeredCount == eventCount(resource.data) - 1
             && request.resource.data.registeredCount >= 0
             && registrationDeletedMutation(eventId)
-            && (admin() || (resource.data.keys().hasAll(['allowCancellation'])
+            && (managesEvent(eventId) || (resource.data.keys().hasAll(['allowCancellation'])
               && resource.data.allowCancellation == true
               && exists(regPath(request.auth.uid, eventId))
               && !existsAfter(regPath(request.auth.uid, eventId)))))
@@ -329,28 +342,31 @@ service cloud.firestore {
                 && existsAfter(regPath(request.auth.uid, eventId)))
               || (eventCount(resource.data) > 0
                 && request.resource.data.registeredCount == eventCount(resource.data) - 1
-                && (admin() || (resource.data.keys().hasAll(['allowCancellation'])
+                && (managesEvent(eventId) || (resource.data.keys().hasAll(['allowCancellation'])
                   && resource.data.allowCancellation == true
                   && exists(regPath(request.auth.uid, eventId))
                   && !existsAfter(regPath(request.auth.uid, eventId)))))))
         ))
-        || ((highAdmin() || (subAdmin() && resource.data.createdByUid == request.auth.uid))
+        || (managesEvent(eventId)
           && request.resource.data.createdByUid == resource.data.createdByUid
           && request.resource.data.createdByEmail == resource.data.createdByEmail
           && request.resource.data.createdAt == resource.data.createdAt
+          && ownershipFieldsUnchanged()
           && eventCount(request.resource.data) == eventCount(resource.data)
           && request.resource.data.capacity >= eventCount(resource.data)
           && request.resource.data.allowedFaculties is list
           && request.resource.data.allowedFaculties.size() >= 1
+          && validCoManagers(request.resource.data)
           && (eventCount(resource.data) == 0 || request.resource.data.groupId == resource.data.groupId)
+          && (highAdmin() || resource.data.createdByUid == request.auth.uid || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['coManagerUids','deletedAt','deletedByUid','deletedByEmail','deletedWithGroupId']))
           && validEventGroup(request.resource.data));
       allow delete: if eventCount(resource.data) == 0
         && (owner() || (admin() && resource.data.createdByUid == request.auth.uid));
     }
 
     match /registrations/{regId} {
-      allow list: if admin() || (participant() && resource.data.uid == request.auth.uid);
-      allow get: if admin() || (participant() && (regId.matches('^' + request.auth.uid + '_.*$') || resource.data.uid == request.auth.uid));
+      allow list: if admin() || managesEvent(resource.data.eventId) || (participant() && resource.data.uid == request.auth.uid);
+      allow get: if admin() || managesEvent(resource.data.eventId) || (participant() && (regId.matches('^' + request.auth.uid + '_.*$') || resource.data.uid == request.auth.uid));
       allow create: if participant()
         && regId == request.auth.uid + '_' + request.resource.data.eventId
         && request.resource.data.uid == request.auth.uid
@@ -363,13 +379,13 @@ service cloud.firestore {
             && limitAfter(request.auth.uid,request.resource.data.groupId).count == (exists(limitPath(request.auth.uid,request.resource.data.groupId))
               ? get(limitPath(request.auth.uid,request.resource.data.groupId)).data.count + 1 : 1)));
       allow delete: if (admin() && !exists(eventPath(resource.data.eventId)))
-        || ((admin() || (participant() && resource.data.uid == request.auth.uid))
+        || ((managesEvent(resource.data.eventId) || (participant() && resource.data.uid == request.auth.uid))
         && registrationEventWriteLinked(regId, resource.data.eventId)
         && (!groupedEvent(resource.data.eventId)
           || (existsAfter(limitPath(resource.data.uid,resource.data.groupId))
             && !limitAfter(resource.data.uid,resource.data.groupId).eventIds.hasAny([resource.data.eventId])
             && limitAfter(resource.data.uid,resource.data.groupId).count == get(limitPath(resource.data.uid,resource.data.groupId)).data.count - 1)
-          || (admin()
+          || (managesEvent(resource.data.eventId)
             && !exists(limitPath(resource.data.uid,resource.data.groupId))
             && !existsAfter(limitPath(resource.data.uid,resource.data.groupId)))));
       allow update: if false;
@@ -413,10 +429,11 @@ service cloud.firestore {
     }
 
     match /attendanceSessions/{sessionId} {
-      allow read: if signedIn();
+      allow read: if admin() || attendanceCoManagerData(resource.data) || assigned(sessionId);
       allow create: if admin()
         && request.resource.data.createdByUid == request.auth.uid
-        && request.resource.data.status == 'open';
+        && request.resource.data.status == 'open'
+        && validCoManagers(request.resource.data);
       allow update: if (
           (highAdmin()
             || (subAdmin()
@@ -427,9 +444,16 @@ service cloud.firestore {
               && (resource.data.status != 'ended'
                 || request.resource.data.status != 'open'
                 || (resource.data.endedAt is timestamp
-                  && request.time <= resource.data.endedAt + duration.value(5, 'd')))))
+                  && request.time <= resource.data.endedAt + duration.value(5, 'd'))))
+            || (attendanceCoManager(sessionId)
+              && request.resource.data.createdByUid == resource.data.createdByUid
+              && request.resource.data.createdByEmail == resource.data.createdByEmail
+              && request.resource.data.createdAt == resource.data.createdAt
+              && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['coManagerUids','deletedAt','deletedByUid','deletedByEmail'])))
+          && ownershipFieldsUnchanged()
           && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount')
           && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount')
+          && validCoManagers(request.resource.data)
         )
         || (((assigned(sessionId) && attendanceAccepting(sessionId))
             || managesSession(sessionId))
@@ -468,8 +492,8 @@ service cloud.firestore {
       allow create: if managesSessionAfter(request.resource.data.sessionId);
       allow update: if managesSession(resource.data.sessionId)
         && request.resource.data.sessionId == resource.data.sessionId;
-      allow delete: if highAdmin()
-        || (subAdmin() && attendanceSession(resource.data.sessionId).createdByUid == request.auth.uid);
+      allow delete: if managesSession(resource.data.sessionId)
+        && attendanceSession(resource.data.sessionId).status != 'finalized';
     }
 
     match /scannerAssignments/{assignmentId} {
@@ -481,23 +505,24 @@ service cloud.firestore {
       allow update: if managesSession(resource.data.sessionId)
         && request.resource.data.sessionId == resource.data.sessionId
         && attendanceSession(resource.data.sessionId).status != 'finalized';
-      allow delete: if highAdmin()
-        || (subAdmin()
-          && attendanceSession(resource.data.sessionId).createdByUid == request.auth.uid
-          && attendanceSession(resource.data.sessionId).status != 'finalized');
+      allow delete: if managesSession(resource.data.sessionId)
+        && attendanceSession(resource.data.sessionId).status != 'finalized';
     }
 
     match /attendanceGrants/{grantId} {
-      allow read: if highAdmin();
+      allow read: if managesSession(resource.data.sessionId);
       allow create: if managesSessionAfter(request.resource.data.sessionId);
       allow update: if managesSession(resource.data.sessionId)
         && request.resource.data.sessionId == resource.data.sessionId;
-      allow delete: if highAdmin();
+      allow delete: if managesSession(resource.data.sessionId)
+        && attendanceSession(resource.data.sessionId).status != 'finalized';
     }
 
     match /auditLogs/{logId} {
       allow read: if highAdmin();
-      allow create: if admin()
+      allow create: if (admin()
+          || (request.resource.data.targetType == 'event' && managesEvent(request.resource.data.targetId))
+          || (request.resource.data.targetType == 'attendanceSession' && managesSession(request.resource.data.targetId)))
         && request.resource.data.actorUid == request.auth.uid
         && request.resource.data.actorEmail == email();
       allow update, delete: if false;

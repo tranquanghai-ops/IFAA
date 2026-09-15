@@ -26,7 +26,7 @@ test("countdown dùng chung không còn ReferenceError trong Attendance", () => 
 test("legacy snapshot dùng document ID canonical và default field an toàn", () => {
   assert.match(adminSource, /function normalizeAttendanceSession\(snapshotDoc\)/);
   assert.match(adminSource, /return \{ \.\.\.data, id: snapshotDoc\.id, status: data\.status \|\| "open"/);
-  assert.match(adminSource, /attendanceSessions = snapshot\.docs\.map\(normalizeAttendanceSession\)/);
+  assert.match(adminSource, /applyAttendanceSessions\(snapshot\.docs\.map\(normalizeAttendanceSession\)\)/);
 });
 
 test("closed Attendance xuất hiện trong All và Owner/Admin có thể mở lại", () => {
@@ -85,11 +85,11 @@ test("danh sách Attendance mặc định là Tất cả và chỉ giữ session
   assert.match(adminSource, /attendanceSessions\.filter\(\(item\) => !item\.deletedAt\)/);
 });
 
-test("card Event dùng active-session lookup, luôn clickable và mở Create/Manage đúng trạng thái", () => {
+test("card Event dùng active-session lookup và scoped user chỉ mở Attendance được giao", () => {
   assert.match(eventServiceSource, /import \{ activeAttendanceSessionForEvent \} from "\.\.\/\.\.\/\.\.\/attendance-link\.mjs";/);
   assert.match(eventServiceSource, /const activeAttendance = activeAttendanceSessionForEvent\(attendanceSessions, event\.id\);/);
-  assert.match(eventServiceSource, /data-attendance-event="\$\{event\.id\}">\$\{activeAttendance \? "✓ Đã tạo điểm danh" : "＋ Tạo điểm danh"\}/);
-  assert.doesNotMatch(eventServiceSource, /data-attendance-event="\$\{event\.id\}"[^>]*disabled/);
+  assert.match(eventServiceSource, /data-attendance-event="\$\{event\.id\}" \$\{activeAttendance \|\| canCreateGlobal \? "" : "disabled"\}/);
+  assert.match(eventServiceSource, /\$\{activeAttendance \? "✓ Đã tạo điểm danh" : "＋ Tạo điểm danh"\}/);
   assert.match(adminSource, /if \(existing\) await openAttendanceManage\(existing\.id\);/);
   assert.match(adminSource, /openAttendanceCreate\(button\.dataset\.attendanceEvent\);/);
 });
