@@ -285,7 +285,7 @@ service cloud.firestore {
         && request.resource.data.maxRegistrations is int
         && request.resource.data.maxRegistrations >= 1
         && request.resource.data.maxRegistrations <= 20;
-      allow delete: if false;
+      allow delete: if highAdmin();
     }
 
     match /events/{eventId} {

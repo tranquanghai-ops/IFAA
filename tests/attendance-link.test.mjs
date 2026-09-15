@@ -1,15 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { activeAttendanceSessionById, activeAttendanceSessionForEvent } from "../attendance-link.mjs";
+import { activeAttendanceSessionById, activeAttendanceSessionForEvent, activeAttendanceSessions } from "../attendance-link.mjs";
 
 const adminSource = readFileSync("admin/admin.mjs", "utf8");
 const adminHtml = readFileSync("admin/index.html", "utf8");
 const eventServiceSource = readFileSync("admin/modules/events/event-service.mjs", "utf8");
+const rulesSource = readFileSync("firestore.rules", "utf8");
 const studentSource = readFileSync("student.mjs", "utf8");
 
 test("event chưa có điểm danh có thể tạo mới", () => {
   assert.equal(activeAttendanceSessionForEvent([], "EVENT_A"), null);
+});
+
+test("active list pipeline giữ mọi session chưa xóa và loại Trash", () => {
+  const sessions = [{ id: "A", status: "open" }, { id: "B", status: "ended", deletedAt: new Date() }];
+  assert.deepEqual(activeAttendanceSessions(sessions).map((item) => item.id), ["A"]);
 });
 
 test("event có điểm danh đang tồn tại không được tạo trùng", () => {
@@ -69,6 +75,11 @@ test("card Event dùng active-session lookup, luôn clickable và mở Create/Ma
   assert.doesNotMatch(eventServiceSource, /data-attendance-event="\$\{event\.id\}"[^>]*disabled/);
   assert.match(adminSource, /if \(existing\) await openAttendanceManage\(existing\.id\);/);
   assert.match(adminSource, /openAttendanceCreate\(button\.dataset\.attendanceEvent\);/);
+});
+
+test("Owner/Admin cấp cao được hard-delete nhóm trong Trash", () => {
+  const groupBlock = rulesSource.slice(rulesSource.indexOf("match /eventGroups/{groupId}"), rulesSource.indexOf("match /events/{eventId}"));
+  assert.match(groupBlock, /allow delete: if highAdmin\(\);/);
 });
 
 test("direct-link event deleted hoặc not-found ẩn khu vực filters", () => {
