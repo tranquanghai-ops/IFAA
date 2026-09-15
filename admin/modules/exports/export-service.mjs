@@ -1,5 +1,6 @@
 import { collection, getDocs, query, where } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
 import { ref, getBytes, getMetadata, uploadBytes, deleteObject } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
+import { formatRegistrationAnswer, registrationConfig } from "../../../registration-form.mjs";
 
 const XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const MAX_EXPORT_BYTES = 20 * 1024 * 1024;
@@ -71,10 +72,36 @@ export function createAdminExportService({ db, storage, canUseStorageCache, getE
     const groups = getGroups();
     const selectedEvent = events.find((event) => event.id === eventId);
     const selectedGroup = groups.find((group) => group.id === groupId);
+    const baseColumns = new Set(["STT", "MSSV/Mã số", "Họ tên", "Khoa/Đơn vị", "Đối tượng", "Email", "Sự kiện", "Ngày sự kiện", "Giờ bắt đầu", "Giờ kết thúc", "Buổi", "Thời gian đăng ký", "Nhóm sự kiện"]);
+    const configuredEvents = selectedEvent ? [selectedEvent] : events.filter((event) => event.groupId === groupId);
+    const includePersonalEmail = configuredEvents.some((event) => registrationConfig(event).profileFields.personalEmail.enabled) || list.some((registration) => registration.profileSnapshot?.personalEmail || registration.personalEmail);
+    const includePhone = configuredEvents.some((event) => registrationConfig(event).profileFields.phone.enabled) || list.some((registration) => registration.profileSnapshot?.phone || registration.phone);
+    const questionColumns = [];
+    const questionColumnByKey = new Map();
+    list.forEach((registration) => (registration.registrationFormSnapshot?.items || []).forEach((question) => {
+      const key = `${registration.eventId || ""}:${question.id}:${question.label}`;
+      if (questionColumnByKey.has(key)) return;
+      let label = String(question.label || "Câu hỏi bổ sung").trim() || "Câu hỏi bổ sung";
+      const used = new Set([...baseColumns, ...questionColumns.map((item) => item.column)]);
+      if (used.has(label)) {
+        let suffix = 2;
+        while (used.has(`${label} (${suffix})`)) suffix += 1;
+        label = `${label} (${suffix})`;
+      }
+      questionColumns.push({ key, eventId: registration.eventId || "", id: question.id, label: question.label, column: label });
+      questionColumnByKey.set(key, label);
+    }));
     const rows = list.map((registration, index) => {
       const registrationEvent = events.find((event) => event.id === registration.eventId);
       const row = { STT: index + 1, "MSSV/Mã số": registration.identifier || registration.mssv, "Họ tên": registration.name, "Khoa/Đơn vị": registration.faculty, "Đối tượng": registration.participantType || "Sinh viên", Email: registration.email, "Sự kiện": registrationEvent?.title || registration.eventTitle, "Ngày sự kiện": formatVietnamDate(registrationEvent?.date || registration.eventDate), "Giờ bắt đầu": registrationEvent?.startTime || "", "Giờ kết thúc": registrationEvent?.endTime || "", "Buổi": dayPeriod(registrationEvent?.startTime), "Thời gian đăng ký": formatTimestamp(registration.createdAt) };
       if (!groupId) row["Nhóm sự kiện"] = registration.groupName || "Không nhóm";
+      if (includePersonalEmail) row["Email cá nhân"] = registration.profileSnapshot?.personalEmail || registration.personalEmail || "";
+      if (includePhone) row["Số điện thoại"] = registration.profileSnapshot?.phone || registration.phone || "";
+      (registration.registrationFormSnapshot?.items || []).forEach((question) => {
+        const key = `${registration.eventId || ""}:${question.id}:${question.label}`;
+        const column = questionColumnByKey.get(key);
+        if (column) row[column] = formatRegistrationAnswer(registration.answers?.[question.id]);
+      });
       return row;
     });
     const exportName = selectedEvent?.title || (selectedGroup ? `Nhom_${selectedGroup.name}` : "Danh_sach_dang_ky");
@@ -106,13 +133,13 @@ export function createAdminExportService({ db, storage, canUseStorageCache, getE
     const groups = getGroups();
     if (eventId) {
       const item = events.find((event) => event.id === eventId) || {};
-      const version = shortCacheHash(["registration-v1", eventId, item.registeredCount || 0, timestampCachePart(item.updatedAt), item.title || "", item.date || ""].join("|"));
+      const version = shortCacheHash(["registration-v2", eventId, item.registeredCount || 0, timestampCachePart(item.updatedAt), item.title || "", item.date || ""].join("|"));
       return { path: `exports/registrations/event-${eventId}.xlsx`, version };
     }
     const related = events.filter((event) => event.groupId === groupId).sort((a, b) => a.id.localeCompare(b.id));
     const selectedGroup = groups.find((group) => group.id === groupId) || {};
     const signature = related.map((event) => [event.id, event.registeredCount || 0, timestampCachePart(event.updatedAt), event.title || "", event.date || ""].join(":"));
-    return { path: `exports/registrations/group-${groupId}.xlsx`, version: shortCacheHash(["registration-group-v1", groupId, timestampCachePart(selectedGroup.updatedAt), ...signature].join("|")) };
+    return { path: `exports/registrations/group-${groupId}.xlsx`, version: shortCacheHash(["registration-group-v2", groupId, timestampCachePart(selectedGroup.updatedAt), ...signature].join("|")) };
   }
 
   async function downloadRegistrationExcel(eventId = "", groupId = "", button = null) {

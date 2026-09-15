@@ -1,4 +1,5 @@
 import { collection, doc, getDocs, limit, query, runTransaction, serverTimestamp, startAfter, where } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
+import { formatRegistrationAnswer } from "../../../registration-form.mjs";
 
 export function createAdminRegistrationService({ db, select, safe, formatTimestamp, toMillis, formatVietnamDate, getEvents, getGroups, eventState, eventPosition, groupPosition, isExternalEvent, notice, confirmAction }) {
   let registrations = [];
@@ -120,7 +121,27 @@ export function createAdminRegistrationService({ db, select, safe, formatTimesta
       return;
     }
     select("#registrationLoadHint").textContent = list.length ? `Đang hiển thị ${list.length} người ở trang ${pageIndex + 1}.` : "Sự kiện này chưa có người đăng ký.";
-    select("#regRows").innerHTML = list.map((registration, index) => `<tr><td class="col-stt">${pageIndex * pageSize + index + 1}</td><td class="col-identifier"><b>${safe(registration.identifier || registration.mssv)}</b></td><td>${safe(registration.name)}</td><td>${safe(registration.faculty)}</td><td>${safe(registration.participantType || "Sinh viên")}</td><td>${safe(registration.eventTitle)}</td><td>${formatTimestamp(registration.createdAt)}</td><td><button class="btn btn-small btn-danger" data-delete-registration="${registration.id}">Xóa</button></td></tr>`).join("") || '<tr><td colspan="8" class="empty">Sự kiện này chưa có người đăng ký.</td></tr>';
+    select("#regRows").innerHTML = list.map((registration, index) => `<tr><td class="col-stt">${pageIndex * pageSize + index + 1}</td><td class="col-identifier"><b>${safe(registration.identifier || registration.mssv)}</b></td><td>${safe(registration.name)}</td><td>${safe(registration.faculty)}</td><td>${safe(registration.participantType || "Sinh viên")}</td><td>${safe(registration.eventTitle)}</td><td>${formatTimestamp(registration.createdAt)}</td><td><div class="actions"><button class="btn btn-small" data-registration-detail="${registration.id}">Chi tiết</button><button class="btn btn-small btn-danger" data-delete-registration="${registration.id}">Xóa</button></div></td></tr>`).join("") || '<tr><td colspan="8" class="empty">Sự kiện này chưa có người đăng ký.</td></tr>';
+  }
+
+  function openRegistrationDetail(registration) {
+    if (!registration) return;
+    const snapshot = registration.profileSnapshot || {};
+    const formSnapshot = registration.registrationFormSnapshot || {};
+    const questions = Array.isArray(formSnapshot.items) ? formSnapshot.items : [];
+    const answers = registration.answers || {};
+    const answerRows = questions.map((question) => {
+      const raw = answers[question.id];
+      const value = formatRegistrationAnswer(raw);
+      return `<div class="registration-detail-row"><b>${safe(question.label)}</b><p>${safe(value) || "—"}</p></div>`;
+    }).join("");
+    select("#registrationDetailSummary").textContent = `${registration.name || ""} · ${registration.identifier || registration.mssv || ""}`;
+    select("#registrationDetailBody").innerHTML = `<div class="registration-detail-grid"><div><b>Email trường</b><span>${safe(snapshot.email || registration.email || "—")}</span></div><div><b>Email cá nhân</b><span>${safe(snapshot.personalEmail || registration.personalEmail || "—")}</span></div><div><b>Số điện thoại</b><span>${safe(snapshot.phone || registration.phone || "—")}</span></div><div><b>Ngành/Lớp</b><span>${safe([snapshot.major || registration.major, snapshot.studentClass].filter(Boolean).join(" · ") || "—")}</span></div></div>${answerRows ? `<section class="registration-answer-list"><h3>Câu trả lời bổ sung</h3>${answerRows}</section>` : '<p class="empty">Đăng ký này không có câu trả lời bổ sung.</p>'}`;
+    select("#registrationDetailDialog").showModal();
+  }
+
+  function openRegistrationDetailById(id) {
+    openRegistrationDetail(registrations.find((item) => item.id === id) || quickRows.find((item) => item.id === id));
   }
 
   function renderQuickRegistrations() {
@@ -134,7 +155,7 @@ export function createAdminRegistrationService({ db, select, safe, formatTimesta
       select("#quickRegistrationRows").innerHTML = '<tr><td colspan="6" class="empty">Đang tải danh sách đăng ký…</td></tr>';
       return;
     }
-    select("#quickRegistrationRows").innerHTML = quickRows.map((registration, index) => `<tr><td class="col-stt">${quickPageIndex * pageSize + index + 1}</td><td class="col-identifier"><b>${safe(registration.identifier || registration.mssv)}</b></td><td>${safe(registration.name)}</td><td>${safe(registration.faculty)}</td><td>${safe(registration.participantType || "Sinh viên")}</td><td>${formatTimestamp(registration.createdAt)}</td></tr>`).join("") || '<tr><td colspan="6" class="empty">Sự kiện này chưa có người đăng ký.</td></tr>';
+    select("#quickRegistrationRows").innerHTML = quickRows.map((registration, index) => `<tr><td class="col-stt">${quickPageIndex * pageSize + index + 1}</td><td class="col-identifier"><b>${safe(registration.identifier || registration.mssv)}</b></td><td>${safe(registration.name)}</td><td>${safe(registration.faculty)}</td><td>${safe(registration.participantType || "Sinh viên")}</td><td>${formatTimestamp(registration.createdAt)}<br><button class="btn btn-small" data-registration-detail="${registration.id}">Chi tiết</button></td></tr>`).join("") || '<tr><td colspan="6" class="empty">Sự kiện này chưa có người đăng ký.</td></tr>';
   }
 
   async function loadQuickRegistrationPage(direction = 0) {
@@ -257,6 +278,7 @@ export function createAdminRegistrationService({ db, select, safe, formatTimesta
     loadQuickRegistrationPage,
     loadRegistrationPage,
     openQuickRegistrations,
+    openRegistrationDetailById,
     refreshRegistrationFilters,
     removeRegistration,
     renderRegistrations,
