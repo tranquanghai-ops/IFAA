@@ -3,7 +3,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRe
 import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, getCountFromServer, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit, startAfter, serverTimestamp, Timestamp, runTransaction, writeBatch, deleteField } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
 import { getStorage, ref, getBytes, getDownloadURL, getMetadata, uploadBytes, deleteObject } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
 import { firebaseConfig, OWNER_EMAIL } from "../firebase-config.mjs";
-import { activeAttendanceSessionById, activeAttendanceSessionForEvent, activeAttendanceSessions } from "../attendance-link.mjs";
+import { activeAttendanceSessionById, activeAttendanceSessionForEvent, activeAttendanceSessions, countdown } from "../attendance-link.mjs";
 import { loadFacultyDataset, publishFacultyDataset } from "../faculty-dataset.mjs";
 import { createAdminEventService } from "./modules/events/event-service.mjs?v=4";
 import { createEventAttachmentService } from "./modules/events/event-attachment-service.mjs?v=1";
@@ -518,6 +518,11 @@ function showPane(name) {
   closeMobileMenu();
 }
 
+function normalizeAttendanceSession(snapshotDoc) {
+  const data = snapshotDoc.data() || {};
+  return { ...data, id: snapshotDoc.id, status: data.status || "open", title: data.title || "Điểm danh sự kiện", eventId: data.eventId || "", date: data.date || "" };
+}
+
 function setMobileMenu(open) {
   document.body.classList.toggle("admin-menu-open", Boolean(open));
   $("#mobileMenuBtn")?.setAttribute("aria-expanded", open ? "true" : "false");
@@ -633,7 +638,7 @@ function listen() {
     ? query(collection(db, "attendanceSessions"), where("createdByUid", "==", user.uid))
     : collection(db, "attendanceSessions");
   onSnapshot(attendanceSessionsQuery, (snapshot) => {
-    attendanceSessions = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    attendanceSessions = snapshot.docs.map(normalizeAttendanceSession);
     if (selectedAttendanceSession && !activeAttendanceSessionById(attendanceSessions, selectedAttendanceSession.id)) {
       selectedAttendanceSession = null;
       attendanceRosterUnsubscribe?.(); attendanceRosterUnsubscribe = null;
@@ -1059,7 +1064,7 @@ function attendanceHasRegistrationRoster(item) {
 
 function highAdminAccess() { return isOwner || currentRole === "admin"; }
 function canReopenAttendance(item) {
-  if (!item || item.status !== "ended") return false;
+  if (!item || !["ended", "finalized"].includes(item.status)) return false;
   if (highAdminAccess()) return true;
   const endedAt = millis(item.endedAt);
   return isSubAdmin && item.createdByUid === user?.uid && endedAt && Date.now() <= endedAt + 5 * 86400000;
@@ -2012,7 +2017,7 @@ $("#attendanceFinalize").onclick = async () => {
 };
 $("#attendanceReopen").onclick = async () => {
   if (!canReopenAttendance(selectedAttendanceSession)) return notice("Bạn không còn quyền mở lại sự kiện này.", "error");
-  const update = { status: "open", endedAt: null, endedByUid: "", endedByEmail: "", reopenedAt: serverTimestamp(), reopenedBy: user.email };
+  const update = { status: "open", endedAt: null, endedByUid: "", endedByEmail: "", finalizedAt: null, finalizedBy: "", reopenedAt: serverTimestamp(), reopenedBy: user.email };
   if ((millis(selectedAttendanceSession.endAt) || 0) <= Date.now()) {
     const now = new Date(), local = new Date(now.getTime() - now.getTimezoneOffset() * 60000), endDate = local.toISOString().slice(0, 10);
     update.endDate = endDate;
