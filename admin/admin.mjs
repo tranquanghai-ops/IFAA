@@ -3,7 +3,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRe
 import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, getCountFromServer, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit, startAfter, serverTimestamp, Timestamp, runTransaction, writeBatch, deleteField } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
 import { getStorage, ref, getBytes, getDownloadURL, getMetadata, uploadBytes, deleteObject } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
 import { firebaseConfig, OWNER_EMAIL } from "../firebase-config.mjs";
-import { activeAttendanceSessionForEvent } from "../attendance-link.mjs";
+import { activeAttendanceSessionById, activeAttendanceSessionForEvent } from "../attendance-link.mjs";
 import { loadFacultyDataset, publishFacultyDataset } from "../faculty-dataset.mjs";
 import { createAdminEventService } from "./modules/events/event-service.mjs?v=4";
 import { createEventAttachmentService } from "./modules/events/event-attachment-service.mjs?v=1";
@@ -633,6 +633,11 @@ function listen() {
     : collection(db, "attendanceSessions");
   onSnapshot(attendanceSessionsQuery, (snapshot) => {
     attendanceSessions = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    if (selectedAttendanceSession && !activeAttendanceSessionById(attendanceSessions, selectedAttendanceSession.id)) {
+      selectedAttendanceSession = null;
+      attendanceRosterUnsubscribe?.(); attendanceRosterUnsubscribe = null;
+      if ($("#attendanceManageDialog")?.open) $("#attendanceManageDialog").close();
+    }
     renderAttendance();
     render();
     void refreshAttendanceCardCounts();
@@ -1372,7 +1377,7 @@ function setAttendanceManageTab(tab = "info") {
 
 async function openAttendanceManage(sessionId) {
   attendanceRosterUnsubscribe?.(); attendanceRosterUnsubscribe = null;
-  selectedAttendanceSession = attendanceSessions.find((item) => item.id === sessionId);
+  selectedAttendanceSession = activeAttendanceSessionById(attendanceSessions, sessionId);
   if (!selectedAttendanceSession) return;
   attendancePage = 1; attendancePageCursors = [null]; attendanceReportPage = 1; attendanceReportFilter = "present"; attendanceReportLoaded = false; attendanceReportRowsSource = []; attendanceTrashLoaded = false; attendanceRoster = [];
   $("#attendanceManageTitle").textContent = selectedAttendanceSession.title;
@@ -1771,6 +1776,9 @@ document.addEventListener("click", async (event) => {
   const button = event.target.closest("button");
   if (!button) return;
   if (button.id === "newAttendanceBtn") {
+    selectedAttendanceSession = null;
+    attendanceRosterUnsubscribe?.(); attendanceRosterUnsubscribe = null;
+    if ($("#attendanceManageDialog")?.open) $("#attendanceManageDialog").close();
     $("#attendanceCreateForm").reset();
     fillAttendanceForm();
     $("#attendanceCreateDialog").showModal();
@@ -1864,6 +1872,11 @@ document.addEventListener("click", async (event) => {
     if (!selected || (isSubAdmin && selected.createdByUid !== user.uid)) return notice("Bạn không có quyền xóa phiên điểm danh này.", "error");
     if (!(await confirmAction({ title: "Đưa điểm danh vào thùng rác?", message: "Phiên điểm danh sẽ được giữ 30 ngày. Nhập XÓA để tiếp tục.", verification: "XÓA" }))) return;
     await updateDoc(doc(db, "attendanceSessions", selected.id), { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email });
+    if (selectedAttendanceSession?.id === selected.id) {
+      selectedAttendanceSession = null;
+      attendanceRosterUnsubscribe?.(); attendanceRosterUnsubscribe = null;
+      if ($("#attendanceManageDialog")?.open) $("#attendanceManageDialog").close();
+    }
     await audit("attendance.trash", "attendanceSession", selected.id, { title: selected.title || "" });
     notice("Đã đưa phiên điểm danh vào thùng rác.", "success");
   }

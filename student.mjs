@@ -447,6 +447,7 @@ function render() {
   if (linkedEventCode && eventsLoaded && !focusedEvent) {
     $("#studentHero").classList.add("hidden");
     $("#eventSectionHead").classList.add("hidden");
+    $("#studentAdvancedFilters").classList.add("hidden");
     $("#eventGrid").classList.add("hidden");
     $("#linkedEventPanel").innerHTML = '<article class="linked-event-form linked-event-error"><h2>Không tìm thấy sự kiện</h2><p>Liên kết có thể không đúng hoặc sự kiện đã ngừng hiển thị.</p></article>';
     return;
