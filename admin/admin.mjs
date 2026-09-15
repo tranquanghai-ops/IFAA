@@ -103,7 +103,7 @@ let currentRole = "admin";
 let isSubAdmin = false;
 let events = [];
 let attendanceSessions = [];
-let attendanceFilter = "open";
+let attendanceFilter = "all";
 let attendanceView = localStorage.getItem("ifaa-attendance-view") === "list" ? "list" : "cards";
 let attendanceCheckinCounts = new Map();
 let attendanceScannerCounts = new Map();
@@ -1484,6 +1484,22 @@ function fillAttendanceForm(eventId = "") {
   $("#attendanceRosterFileName").textContent = "Chưa chọn tệp (không bắt buộc)";
 }
 
+function resetAttendanceCreateState() {
+  selectedAttendanceSession = null;
+  attendanceRosterUnsubscribe?.();
+  attendanceRosterUnsubscribe = null;
+  attendancePermissionMembers = [];
+  attendanceRosterImport = [];
+}
+
+function openAttendanceCreate(eventId = "") {
+  resetAttendanceCreateState();
+  if ($("#attendanceManageDialog")?.open) $("#attendanceManageDialog").close();
+  $("#attendanceCreateForm").reset();
+  fillAttendanceForm(eventId);
+  $("#attendanceCreateDialog").showModal();
+}
+
 async function createStandaloneAttendance() {
   const eventId = $("#attendanceSourceEvent").value;
   const title = $("#attendanceStandaloneTitle").value.trim();
@@ -1547,6 +1563,8 @@ $("#attendanceCreateForm").onsubmit = async (event) => {
     if (submit) submit.disabled = false;
   }
 };
+
+$("#attendanceCreateDialog").addEventListener("close", resetAttendanceCreateState);
 
 $("#attendanceSourceEvent").onchange = (event) => {
   const selected = events.find((item) => item.id === event.target.value);
@@ -1776,12 +1794,7 @@ document.addEventListener("click", async (event) => {
   const button = event.target.closest("button");
   if (!button) return;
   if (button.id === "newAttendanceBtn") {
-    selectedAttendanceSession = null;
-    attendanceRosterUnsubscribe?.(); attendanceRosterUnsubscribe = null;
-    if ($("#attendanceManageDialog")?.open) $("#attendanceManageDialog").close();
-    $("#attendanceCreateForm").reset();
-    fillAttendanceForm();
-    $("#attendanceCreateDialog").showModal();
+    openAttendanceCreate();
   }
   if (button.dataset.closeAttendanceCreate !== undefined) $("#attendanceCreateDialog").close();
   if (button.dataset.closeAttendanceManage !== undefined) { attendanceRosterUnsubscribe?.(); attendanceRosterUnsubscribe = null; $("#attendanceManageDialog").close(); }
@@ -1802,8 +1815,7 @@ document.addEventListener("click", async (event) => {
     else {
       const sourceEvent = events.find((item) => item.id === button.dataset.attendanceEvent);
       if (!attendanceSourceEligible(sourceEvent)) return notice("Chỉ tạo điểm danh từ sự kiện của khoa đang hiển thị.", "error");
-      fillAttendanceForm(button.dataset.attendanceEvent);
-      $("#attendanceCreateDialog").showModal();
+      openAttendanceCreate(button.dataset.attendanceEvent);
     }
   }
   if (button.dataset.attendanceManage) await openAttendanceManage(button.dataset.attendanceManage);
