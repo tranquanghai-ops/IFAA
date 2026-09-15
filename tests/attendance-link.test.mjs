@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { activeAttendanceSessionById, activeAttendanceSessionForEvent, activeAttendanceSessions } from "../attendance-link.mjs";
+import { activeAttendanceSessionById, activeAttendanceSessionForEvent, activeAttendanceSessions, countdown } from "../attendance-link.mjs";
 
 const adminSource = readFileSync("admin/admin.mjs", "utf8");
 const adminHtml = readFileSync("admin/index.html", "utf8");
@@ -16,6 +16,23 @@ test("event chưa có điểm danh có thể tạo mới", () => {
 test("active list pipeline giữ mọi session chưa xóa và loại Trash", () => {
   const sessions = [{ id: "A", status: "open" }, { id: "B", status: "ended", deletedAt: new Date() }];
   assert.deepEqual(activeAttendanceSessions(sessions).map((item) => item.id), ["A"]);
+});
+
+test("countdown dùng chung không còn ReferenceError trong Attendance", () => {
+  assert.match(countdown(Date.now() + 1000), /00:00:/);
+  assert.match(adminSource, /import \{[^}]*countdown[^}]*\} from "\.\.\/attendance-link\.mjs";/);
+});
+
+test("legacy snapshot dùng document ID canonical và default field an toàn", () => {
+  assert.match(adminSource, /function normalizeAttendanceSession\(snapshotDoc\)/);
+  assert.match(adminSource, /return \{ \.\.\.data, id: snapshotDoc\.id, status: data\.status \|\| "open"/);
+  assert.match(adminSource, /attendanceSessions = snapshot\.docs\.map\(normalizeAttendanceSession\)/);
+});
+
+test("closed Attendance xuất hiện trong All và Owner/Admin có thể mở lại", () => {
+  assert.match(adminSource, /attendanceFilter === "all" \|\| attendanceRuntimeState\(item\) === attendanceFilter/);
+  assert.match(adminSource, /if \(!item \|\| !\["ended", "finalized"\]\.includes\(item\.status\)\) return false;/);
+  assert.match(adminSource, /finalizedAt: null, finalizedBy: ""/);
 });
 
 test("event có điểm danh đang tồn tại không được tạo trùng", () => {
