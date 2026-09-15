@@ -1,6 +1,8 @@
 import { addDoc, collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc, where } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
+import { creatorLabel, groupsForVisibility, isGroupHidden } from "../resource-ui.mjs?v=1";
 
 export function createAdminGroupService({ db, select, safe, toMillis, getGroups, setGroups, getEvents, getUser, getIsOwner, getIsSubAdmin, getTrashSelection, shareCode, configuredPublicBaseUrl, copyText, notice, confirmAction, trashRetentionMs, getEventState, getCalendarRange, getCalendarStamp, getPermanentlyDeleteEvent, deleteCachedExport, getFetchRegistrations, getDownloadRegistrationExcel, onRender, onGroupsUpdated }) {
+  let groupVisibilityFilter = "active";
   function groupCode(group) {
     return shareCode(group?.shareCode || group?.name) || group?.id || "NHOM";
   }
@@ -46,7 +48,9 @@ export function createAdminGroupService({ db, select, safe, toMillis, getGroups,
   function renderGroups({ activeEvents, orderedGroups }) {
     const groups = getGroups();
     const trashedGroups = groups.filter((item) => item.deletedAt);
-    select("#groupRows").innerHTML = orderedGroups.map((group, groupIndex) => {
+    const visibleGroups = groupsForVisibility(orderedGroups, groupVisibilityFilter);
+    document.querySelectorAll("[data-group-visibility]").forEach((button) => button.classList.toggle("active", button.dataset.groupVisibility === groupVisibilityFilter));
+    select("#groupRows").innerHTML = visibleGroups.map((group, groupIndex) => {
       const groupedItems = activeEvents.filter((item) => item.groupId === group.id);
       const eventCount = groupedItems.length;
       const groupRegisteredCount = groupedItems.reduce((total, item) => total + Number(item.registeredCount || 0), 0);
@@ -55,8 +59,10 @@ export function createAdminGroupService({ db, select, safe, toMillis, getGroups,
       const hiddenCount = groupedItems.filter((item) => getEventState()(item) === "hidden").length;
       const endedCount = groupedItems.filter((item) => getEventState()(item) === "ended").length;
       const groupState = hiddenCount === eventCount && eventCount ? "Đã ẩn toàn bộ" : endedCount === eventCount && eventCount ? "Đã kết thúc" : "Theo từng sự kiện";
-      return `<tr><td><b>${safe(group.name)}</b><br><small>Mã: ${safe(groupCode(group))}</small></td><td>${limit}</td><td>${eventCount}<br><small>${groupState}</small></td><td>${visibility}</td><td><div class="actions"><button class="btn btn-small btn-soft" data-copy-group-link="${group.id}">Sao chép liên kết</button><button class="btn btn-small btn-calendar" data-calendar-group="${group.id}">＋ Lịch cả nhóm</button><button class="btn btn-small btn-download-list" data-export-group="${group.id}" ${groupRegisteredCount ? "" : "disabled"}><span class="sheet-icon" aria-hidden="true">▦</span> Tải danh sách nhóm</button></div></td><td><div class="actions"><button class="btn btn-small" data-move-group="${group.id}" data-direction="-1" ${groupIndex <= 0 ? "disabled" : ""}>↑</button><button class="btn btn-small" data-move-group="${group.id}" data-direction="1" ${groupIndex >= orderedGroups.length - 1 ? "disabled" : ""}>↓</button><button class="btn btn-small" data-edit-group="${group.id}">Sửa nhóm</button><button class="btn btn-small btn-danger" data-delete-group="${group.id}">Xóa nhóm</button></div></td></tr>`;
-    }).join("") || '<tr><td colspan="6" class="empty">Chưa có nhóm sự kiện.</td></tr>';
+      const positionActions = groupVisibilityFilter === "active" ? `<button class="btn btn-small" data-move-group="${group.id}" data-direction="-1" ${groupIndex <= 0 ? "disabled" : ""}>↑</button><button class="btn btn-small" data-move-group="${group.id}" data-direction="1" ${groupIndex >= visibleGroups.length - 1 ? "disabled" : ""}>↓</button>` : "";
+      const visibilityAction = isGroupHidden(group) ? `<button class="btn btn-small btn-restore" data-show-group="${group.id}">Hiện lại</button>` : `<button class="btn btn-small" data-hide-group="${group.id}">Ẩn nhóm</button>`;
+      return `<tr><td><b>${safe(group.name)}</b><br><small>Mã: ${safe(groupCode(group))}</small><br><small>Người tạo: ${safe(creatorLabel(group))}</small></td><td>${limit}</td><td>${eventCount}<br><small>${groupState}</small></td><td>${visibility}</td><td><div class="actions group-action-buttons"><button class="btn btn-small btn-soft" data-copy-group-link="${group.id}">Sao chép liên kết</button><button class="btn btn-small btn-calendar" data-calendar-group="${group.id}">＋ Lịch cả nhóm</button><button class="btn btn-small btn-download-list" data-export-group="${group.id}" ${groupRegisteredCount ? "" : "disabled"}><span class="sheet-icon" aria-hidden="true">▦</span> Tải danh sách nhóm</button></div></td><td><div class="actions">${positionActions}<button class="btn btn-small" data-edit-group="${group.id}">Sửa nhóm</button>${visibilityAction}<button class="btn btn-small btn-danger" data-delete-group="${group.id}">Xóa nhóm</button></div></td></tr>`;
+    }).join("") || `<tr><td colspan="6" class="empty">${groupVisibilityFilter === "hidden" ? "Chưa có nhóm đã ẩn." : "Chưa có nhóm sự kiện đang hoạt động."}</td></tr>`;
     if (select("#trashGroupRows")) {
       select("#trashGroupRows").innerHTML = getIsOwner() && trashedGroups.length
         ? trashedGroups.slice().sort((a, b) => (toMillis(b.deletedAt) || 0) - (toMillis(a.deletedAt) || 0)).map((item) => {
@@ -90,7 +96,7 @@ export function createAdminGroupService({ db, select, safe, toMillis, getGroups,
   }
 
   async function moveGroup(groupId, direction) {
-    const ordered = getGroups().filter((item) => !item.deletedAt).slice().sort((a, b) => groupPosition(a) - groupPosition(b));
+    const ordered = groupsForVisibility(getGroups().filter((item) => !item.deletedAt), "active").slice().sort((a, b) => groupPosition(a) - groupPosition(b));
     const from = ordered.findIndex((item) => item.id === groupId), to = from + direction;
     if (from < 0 || to < 0 || to >= ordered.length) return;
     const selected = ordered[from], target = ordered[to];
@@ -132,7 +138,7 @@ export function createAdminGroupService({ db, select, safe, toMillis, getGroups,
       } else {
         const groupPositions = groups.map(groupPosition).filter(Number.isFinite), sortOrder = groupPositions.length ? Math.min(...groupPositions) - 1 : 0;
         const user = getUser();
-        await addDoc(collection(db, "eventGroups"), { ...data, sortOrder, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdAt: serverTimestamp() });
+        await addDoc(collection(db, "eventGroups"), { ...data, sortOrder, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdByName: user.displayName || "", createdAt: serverTimestamp() });
       }
       select("#groupDialog").close();
       notice(bulkStatus && groupedEvents.length ? `Đã cập nhật nhóm và ${statusNames[bulkStatus]} ${groupedEvents.length} sự kiện.` : id ? "Đã cập nhật nhóm sự kiện." : "Đã tạo nhóm sự kiện.", "success");
@@ -155,6 +161,7 @@ export function createAdminGroupService({ db, select, safe, toMillis, getGroups,
   }
 
   async function handleGroupClick(button) {
+    if (button.dataset.groupVisibility) { groupVisibilityFilter = button.dataset.groupVisibility === "hidden" ? "hidden" : "active"; onRender(); return true; }
     if (button.dataset.moveGroup) { await moveGroup(button.dataset.moveGroup, Number(button.dataset.direction)); return true; }
     if (button.id === "newGroupBtn") { openGroup(); return true; }
     if (button.dataset.closeGroup !== undefined) { select("#groupDialog").close(); return true; }
@@ -162,6 +169,21 @@ export function createAdminGroupService({ db, select, safe, toMillis, getGroups,
     if (button.dataset.exportGroup) { await getDownloadRegistrationExcel()("", button.dataset.exportGroup, button); return true; }
     if (button.dataset.calendarGroup) { downloadGroupCalendar(button.dataset.calendarGroup); return true; }
     if (button.dataset.copyGroupLink) { const selected = getGroups().find((item) => item.id === button.dataset.copyGroupLink); await copyText(groupShareUrl(selected || { id: button.dataset.copyGroupLink }), "Đã sao chép liên kết riêng của nhóm."); return true; }
+    if (button.dataset.hideGroup) {
+      const selected = getGroups().find((item) => item.id === button.dataset.hideGroup && !item.deletedAt && !isGroupHidden(item)); if (!selected) return true;
+      if (!(await confirmAction({ title: "Ẩn nhóm sự kiện?", message: "Ẩn nhóm này khỏi danh sách đang hoạt động?" }))) return true;
+      button.disabled = true;
+      try { const user = getUser(); await updateDoc(doc(db, "eventGroups", selected.id), { hidden: true, hiddenAt: serverTimestamp(), hiddenByUid: user.uid, hiddenByEmail: user.email, updatedAt: serverTimestamp() }); notice("Đã ẩn nhóm khỏi danh sách đang hoạt động.", "success"); }
+      catch (error) { button.disabled = false; notice(error.message || "Không thể ẩn nhóm.", "error"); }
+      return true;
+    }
+    if (button.dataset.showGroup) {
+      const selected = getGroups().find((item) => item.id === button.dataset.showGroup && !item.deletedAt && isGroupHidden(item)); if (!selected) return true;
+      button.disabled = true;
+      try { await updateDoc(doc(db, "eventGroups", selected.id), { hidden: false, hiddenAt: null, hiddenByUid: "", hiddenByEmail: "", updatedAt: serverTimestamp() }); notice("Đã hiện lại nhóm sự kiện.", "success"); }
+      catch (error) { button.disabled = false; notice(error.message || "Không thể hiện lại nhóm.", "error"); }
+      return true;
+    }
     if (button.dataset.deleteGroup) {
       const selected = getGroups().find((item) => item.id === button.dataset.deleteGroup && !item.deletedAt); if (!selected) return true;
       const groupedEvents = getEvents().filter((item) => item.groupId === selected.id && !item.deletedAt);

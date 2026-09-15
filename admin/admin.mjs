@@ -8,7 +8,8 @@ import { loadFacultyDataset, publishFacultyDataset } from "../faculty-dataset.mj
 import { createAdminEventService } from "./modules/events/event-service.mjs?v=5";
 import { createEventAttachmentService } from "./modules/events/event-attachment-service.mjs?v=1";
 import { createAdminExportService } from "./modules/exports/export-service.mjs?v=2";
-import { createAdminGroupService } from "./modules/groups/group-service.mjs";
+import { createAdminGroupService } from "./modules/groups/group-service.mjs?v=1";
+import { creatorLabel } from "./modules/resource-ui.mjs?v=1";
 import { createAdminRegistrationService } from "./modules/registrations/registration-service.mjs?v=2";
 import { createAdminStudentService } from "./modules/students/student-service.mjs?v=2";
 import { addCoManagerUid, canEditResourceCoManagers, inheritedAttendanceCoManagerUids, isResourceCoManager, normalizeCoManagerUids } from "./modules/co-managers.mjs?v=1";
@@ -918,7 +919,7 @@ $("#eventForm").onsubmit = async (event) => {
       if (groups.some((item) => groupCode(item) === code)) throw Error(`Mã liên kết ${code} đã được một nhóm khác sử dụng.`);
       const groupPositions = groups.map(groupPosition).filter(Number.isFinite);
       const groupSortOrder = groupPositions.length ? Math.min(...groupPositions) - 1 : 0;
-      const groupRef = await addDoc(collection(db, "eventGroups"), { name, shareCode: code, sortOrder: groupSortOrder, maxRegistrations: unlimited ? 2 : maxRegistrations, unlimited, linkOnly: false, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      const groupRef = await addDoc(collection(db, "eventGroups"), { name, shareCode: code, sortOrder: groupSortOrder, maxRegistrations: unlimited ? 2 : maxRegistrations, unlimited, linkOnly: false, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdByName: user.displayName || "", createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
       selectedGroup = groupRef.id;
       group = { id: groupRef.id, name, maxRegistrations: unlimited ? 2 : maxRegistrations, unlimited };
     } else if (selectedGroup) {
@@ -1401,10 +1402,10 @@ function renderAttendance() {
     const canDeleteAttendance = highAdminAccess() || item.createdByUid === user?.uid;
     return `<article class="att-row">
     <div><span class="att-badge ${safe(runtimeState)}" data-attendance-state="${item.id}" data-runtime-state="${safe(runtimeState)}">${safe(attendanceStatusLabel(runtimeState))}</span>
-    <h3>${safe(item.title)}</h3><div class="att-meta">${safe(vietnamDate(item.date))}${item.location ? ` · ${safe(item.location)}` : ""}${rosterMeta}</div><div class="att-meta attendance-timing" data-attendance-timing="${item.id}">${safe(attendanceTimingStatus(item))}</div><div class="attendance-card-stats"><span><b>${checkinCount}</b> SV đã điểm danh</span><span><b>${scannerCount}</b> SV được cấp quyền quét</span>${pendingCount ? `<button type="button" class="attendance-pending-stat" data-attendance-open-pending="${item.id}"><b>${pendingCount}</b> hình cần nhập MSSV</button>` : ""}</div></div>
+    <h3>${safe(item.title)}</h3><div class="att-meta">${safe(vietnamDate(item.date))}${item.location ? ` · ${safe(item.location)}` : ""}${rosterMeta}</div><div class="att-meta"><b>Người tạo:</b> ${safe(creatorLabel(item))}</div><div class="att-meta attendance-timing" data-attendance-timing="${item.id}">${safe(attendanceTimingStatus(item))}</div><div class="attendance-card-stats"><span><b>${checkinCount}</b> SV đã điểm danh</span><span><b>${scannerCount}</b> SV được cấp quyền quét</span>${pendingCount ? `<button type="button" class="attendance-pending-stat" data-attendance-open-pending="${item.id}"><b>${pendingCount}</b> hình cần nhập MSSV</button>` : ""}</div></div>
     <div class="att-actions attendance-card-actions"><button class="btn" data-attendance-manage="${item.id}">Quản lý</button><button class="btn" data-attendance-copy="${item.id}">Copy link</button><button class="btn btn-success" data-attendance-quick-export="${item.id}">↓ Danh sách</button>${canDeleteAttendance ? `<button class="btn btn-danger" data-delete-attendance="${item.id}">Xóa</button>` : ""}</div>
   </article>`;
-  }).join("") : '<div class="card empty">Không có sự kiện điểm danh trong bộ lọc này.</div>';
+  }).join("") : '<div class="card empty attendance-empty-card">Không có sự kiện điểm danh trong bộ lọc này.</div>';
 }
 
 function updateAttendanceCountdowns() {

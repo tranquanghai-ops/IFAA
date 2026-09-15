@@ -50,3 +50,4 @@
   .attendance-image-mssv .btn{width:100%}
 }
 .att-badge.scheduled{background:#fff5cc;color:#805600}.attendance-status-detail{display:inline-block;margin-left:8px;color:#687086;font-size:13px;font-weight:700}.attendance-timing{margin-top:7px;font-weight:700}
+.attendance-empty-card{grid-column:1/-1;width:100%}
