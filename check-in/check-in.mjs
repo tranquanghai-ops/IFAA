@@ -116,6 +116,11 @@ function showToast(type, title, detail = "") {
   box.className = "scan-toast " + (type || "success");
   box.querySelector("b").textContent = title;
   box.querySelector("span").textContent = detail;
+  if (window.parent !== window) {
+    const status = ["success", "warn", "error"].includes(type) ? type : "success";
+    const message = status === "success" ? "Điểm danh thành công" : status === "warn" ? "Mã chưa được ghi nhận" : "Không thể điểm danh";
+    window.parent.postMessage({ type: "IFAA_CHECKIN_TOAST", status, message }, "https://ifa.tdtu.edu.vn");
+  }
   requestAnimationFrame(() => box.classList.add("show"));
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => box.classList.remove("show"), 3000);
