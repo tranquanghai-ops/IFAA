@@ -3,6 +3,7 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRe
 import { getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, getCountFromServer, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit, startAfter, serverTimestamp, Timestamp, runTransaction, writeBatch, deleteField } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
 import { getStorage, ref, getBytes, getDownloadURL, getMetadata, uploadBytes, deleteObject } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
 import { firebaseConfig, OWNER_EMAIL } from "../firebase-config.mjs";
+import { activeAttendanceSessionForEvent } from "../attendance-link.mjs";
 import { loadFacultyDataset, publishFacultyDataset } from "../faculty-dataset.mjs";
 import { createAdminEventService } from "./modules/events/event-service.mjs?v=4";
 import { createEventAttachmentService } from "./modules/events/event-attachment-service.mjs?v=1";
@@ -1491,7 +1492,7 @@ async function createStandaloneAttendance() {
   if (finishDay < startDay) throw Error("Ngày kết thúc không được trước ngày tổ chức.");
   if ((finishDay - startDay) / 86400000 > 5) throw Error("Ngày kết thúc điểm danh tối đa 5 ngày sau ngày tổ chức.");
   if (startTime && endTime && endTime <= startTime && date === endDate) throw Error("Giờ kết thúc phải sau giờ bắt đầu.");
-  if (eventId && attendanceSessions.some((item) => item.eventId === eventId)) throw Error("Sự kiện này đã có phiên điểm danh.");
+  if (activeAttendanceSessionForEvent(attendanceSessions, eventId)) throw Error("Sự kiện này đã có phiên điểm danh.");
   if (eventId && !attendanceSourceEligible(events.find((item) => item.id === eventId))) throw Error("Sự kiện nguồn phải thuộc khoa và đang hiển thị.");
   const sessionId = attendanceCode();
   const rosterMap = new Map();
@@ -1788,7 +1789,7 @@ document.addEventListener("click", async (event) => {
     renderAttendance();
   }
   if (button.dataset.attendanceEvent) {
-    const existing = attendanceSessions.find((item) => item.eventId === button.dataset.attendanceEvent);
+    const existing = activeAttendanceSessionForEvent(attendanceSessions, button.dataset.attendanceEvent);
     if (existing) await openAttendanceManage(existing.id);
     else {
       const sourceEvent = events.find((item) => item.id === button.dataset.attendanceEvent);
