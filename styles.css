@@ -357,6 +357,7 @@
 .registration-page-size-field{max-width:240px}
 .btn-copy-link{border-color:#6b78d6;background:#f1f3ff;color:#263ba5;font-weight:800}
 .trash-section-title{margin:20px 0 8px;color:#344054}
+.trash-section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:20px}.trash-section-head .trash-section-title{margin:0}.trash-table input[type="checkbox"]{width:18px;height:18px;accent-color:var(--accent);cursor:pointer}
 .tag.hot{position:static;width:auto;height:auto;padding:5px 9px;border:1px solid #fd8b3d;border-radius:999px;clip-path:none;background:linear-gradient(135deg,#fff0d8,#ffd8b5);color:#b93815;font-size:inherit;font-weight:900;letter-spacing:normal;text-shadow:none;animation:hotBlink 1.15s ease-in-out infinite}
 @keyframes hotBlink{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(239,90,35,.08)}50%{opacity:.48;box-shadow:0 0 0 5px rgba(239,90,35,.14)}}
 .admin-event-card:has(.tag.hot) .admin-card-position{margin-right:0}
@@ -498,6 +499,7 @@
   #attendanceManageDialog .table-wrap{overflow:visible}
   #attendanceManageDialog table{width:100%;min-width:0!important;table-layout:auto}
   .trash-table{min-width:0!important}
+  .trash-section-head{align-items:flex-start;flex-direction:column}.trash-section-head .btn{width:100%}
 }
 @media(max-width:420px){.sidebar .card,.admin-filters{grid-template-columns:minmax(0,1fr)}td .actions,td.actions{grid-template-columns:minmax(0,1fr)}}
 

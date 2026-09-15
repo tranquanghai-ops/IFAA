@@ -1,6 +1,6 @@
 import { addDoc, collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc, where } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
 
-export function createAdminGroupService({ db, select, safe, toMillis, getGroups, setGroups, getEvents, getUser, getIsOwner, getIsSubAdmin, shareCode, configuredPublicBaseUrl, copyText, notice, confirmAction, trashRetentionMs, getEventState, getCalendarRange, getCalendarStamp, getPermanentlyDeleteEvent, deleteCachedExport, getFetchRegistrations, getDownloadRegistrationExcel, onRender, onGroupsUpdated }) {
+export function createAdminGroupService({ db, select, safe, toMillis, getGroups, setGroups, getEvents, getUser, getIsOwner, getIsSubAdmin, getTrashSelection, shareCode, configuredPublicBaseUrl, copyText, notice, confirmAction, trashRetentionMs, getEventState, getCalendarRange, getCalendarStamp, getPermanentlyDeleteEvent, deleteCachedExport, getFetchRegistrations, getDownloadRegistrationExcel, onRender, onGroupsUpdated }) {
   function groupCode(group) {
     return shareCode(group?.shareCode || group?.name) || group?.id || "NHOM";
   }
@@ -62,9 +62,9 @@ export function createAdminGroupService({ db, select, safe, toMillis, getGroups,
         ? trashedGroups.slice().sort((a, b) => (toMillis(b.deletedAt) || 0) - (toMillis(a.deletedAt) || 0)).map((item) => {
             const deletedTime = toMillis(item.deletedAt), purgeTime = deletedTime ? deletedTime + trashRetentionMs : 0;
             const itemCount = getEvents().filter((event) => event.deletedWithGroupId === item.id).length;
-            return `<tr><td><b>${safe(item.name)}</b><br><small>Mã: ${safe(groupCode(item))}</small></td><td>${itemCount}</td><td>${deletedTime ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" }).format(new Date(deletedTime)) : "—"}<br><small>${safe(item.deletedByEmail || "")}</small></td><td><b>${purgeTime ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" }).format(new Date(purgeTime)) : "—"}</b></td><td><div class="actions"><button class="btn btn-small btn-restore" data-restore-group="${item.id}">↶ Khôi phục nhóm</button><button class="btn btn-small btn-danger" data-purge-group="${item.id}">Xóa vĩnh viễn</button></div></td></tr>`;
+            return `<tr><td><input type="checkbox" data-trash-select="groups" value="${item.id}" ${getTrashSelection().groups.has(item.id) ? "checked" : ""} aria-label="Chọn ${safe(item.name)}"></td><td><b>${safe(item.name)}</b><br><small>Mã: ${safe(groupCode(item))}</small></td><td>${itemCount}</td><td>${deletedTime ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" }).format(new Date(deletedTime)) : "—"}<br><small>${safe(item.deletedByEmail || "")}</small></td><td><b>${purgeTime ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" }).format(new Date(purgeTime)) : "—"}</b></td><td><div class="actions"><button class="btn btn-small btn-restore" data-restore-group="${item.id}">↶ Khôi phục nhóm</button><button class="btn btn-small btn-danger" data-purge-group="${item.id}">Xóa vĩnh viễn</button></div></td></tr>`;
           }).join("")
-        : '<tr><td colspan="5" class="empty">Không có nhóm trong thùng rác.</td></tr>';
+        : '<tr><td colspan="6" class="empty">Không có nhóm trong thùng rác.</td></tr>';
     }
   }
 
