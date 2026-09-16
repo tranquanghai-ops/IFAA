@@ -49,7 +49,7 @@ test("Attendance kế thừa snapshot co-manager và sau đó độc lập Event
 test("scoped login và subscriptions chỉ truy vấn resource được giao", () => {
   const eventConfigStart = adminSource.indexOf("} = createAdminEventService({");
   const eventServiceConfig = adminSource.slice(eventConfigStart, adminSource.indexOf("const {", eventConfigStart + 10));
-  assert.match(adminSource, /return eventAssignments\.empty && attendanceAssignments\.empty \? "" : "scoped"/);
+  assert.match(adminSource, /return eventAssignments\.empty && attendanceAssignments\.empty \? null : \{ role: "scoped_manager"/);
   assert.match(eventServiceConfig, /getIsScopedManager: \(\) => isScopedManager/);
   assert.match(eventServiceSource, /where\("coManagerUids", "array-contains", user\.uid\)/);
   assert.match(adminSource, /where\("coManagerUids", "array-contains", user\.uid\)/);
@@ -58,9 +58,9 @@ test("scoped login và subscriptions chỉ truy vấn resource được giao", (
 
 test("scoped-only user không có nút tạo global hoặc xóa resource", () => {
   assert.match(adminSource, /if \(isScopedManager\) \{[\s\S]*#newEventBtn[\s\S]*#newAttendanceBtn/);
-  assert.match(eventServiceSource, /const canDelete = !getIsScopedManager\(\) && \(!getIsSubAdmin\(\) \|\| event\.createdByUid === user\?\.uid\)/);
+  assert.match(eventServiceSource, /const canDelete = !getIsScopedManager\(\) && canManageResource\(event\)/);
   assert.match(eventServiceSource, /data-delete="\$\{event\.id\}" \$\{canDelete \? "" : "disabled"\}/);
-  assert.match(adminSource, /const canDeleteAttendance = highAdminAccess\(\) \|\| item\.createdByUid === user\?\.uid/);
+  assert.match(adminSource, /const canDeleteAttendance = managesResource\(item\)/);
   assert.match(adminSource, /\$\{canDeleteAttendance \? `<button class="btn btn-danger" data-delete-attendance/);
 });
 

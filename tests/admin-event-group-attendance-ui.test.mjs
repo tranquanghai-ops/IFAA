@@ -94,7 +94,7 @@ test("Hide/restore Group chỉ cập nhật document eventGroups, không cascade
 
 test("quyền hide Group giữ nguyên theo quyền sửa Group, không cấp cho co-manager", () => {
   const groupRules = rulesSource.slice(rulesSource.indexOf("match /eventGroups/{groupId}"), rulesSource.indexOf("match /events/{eventId}"));
-  assert.match(groupRules, /allow update: if \(highAdmin\(\) \|\| \(admin\(\) && resource\.data\.createdByUid == request\.auth\.uid\)\)/);
+  assert.match(groupRules, /allow update: if canManageResourceData\(resource\.data\)/);
   assert.doesNotMatch(groupRules, /eventCoManager|attendanceCoManager|managesEvent|managesSession/);
 });
 

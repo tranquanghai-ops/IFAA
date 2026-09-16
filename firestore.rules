@@ -6,10 +6,80 @@ service cloud.firestore {
     function student(){ return signedIn() && email().matches('^[^@]+@student\\.tdtu\\.edu\\.vn$'); }
     function staff(){ return signedIn() && email().matches('^[^@]+@tdtu\\.edu\\.vn$'); }
     function owner(){ return staff() && email() == 'tranquanghai@tdtu.edu.vn'; }
-    function admin(){ return owner() || (signedIn() && exists(/databases/$(database)/documents/admins/$(email()))); }
+    function adminPath(value){ return /databases/$(database)/documents/admins/$(value); }
+    function admin(){ return owner() || (signedIn() && exists(adminPath(email()))); }
+    function adminRole(){ return owner() ? 'system_admin' : get(adminPath(email())).data.get('role', 'admin'); }
+    function systemAdmin(){ return owner(); }
+    function highAdmin(){ return owner() || (admin() && (adminRole() == 'admin' || adminRole() == 'high_admin')); }
+    function facultyAdmin(){ return admin() && !owner() && adminRole() == 'faculty_admin'
+      && get(adminPath(email())).data.get('scopeType', '') == 'faculty'
+      && get(adminPath(email())).data.get('scopeId', '') == 'mtcn'; }
+    function departmentAdmin(){ return admin() && !owner() && adminRole() == 'department_admin'
+      && get(adminPath(email())).data.get('scopeType', '') == 'department'; }
+    function departmentId(){ return get(adminPath(email())).data.get('scopeId', ''); }
+    function subAdmin(){ return admin() && !owner() && (adminRole() == 'subadmin' || adminRole() == 'sub_admin'); }
+    function legacySubAdmin(){ return subAdmin() && adminRole() == 'subadmin'; }
+    function facultySubAdmin(){ return subAdmin() && adminRole() == 'sub_admin'
+      && get(adminPath(email())).data.get('scopeType', '') == 'faculty'
+      && get(adminPath(email())).data.get('scopeId', '') == 'mtcn'; }
+    function departmentSubAdmin(){ return subAdmin() && adminRole() == 'sub_admin'
+      && get(adminPath(email())).data.get('scopeType', '') == 'department'; }
+    function subAdminDepartmentId(){ return get(adminPath(email())).data.get('scopeId', ''); }
     function participant(){ return student() || staff() || admin(); }
-    function highAdmin(){ return owner() || (admin() && get(/databases/$(database)/documents/admins/$(email())).data.get('role', 'admin') != 'subadmin'); }
-    function subAdmin(){ return admin() && !owner() && get(/databases/$(database)/documents/admins/$(email())).data.role == 'subadmin'; }
+    function validDepartment(value){ return value == 'graphic' || value == 'industrial' || value == 'interior' || value == 'fashion' || value == 'digital-art'; }
+    function validResourceScope(data){ return (data.get('scopeType', '') == 'faculty' && data.get('scopeId', '') == 'mtcn')
+      || (data.get('scopeType', '') == 'department' && validDepartment(data.get('scopeId', '')))
+      || data.get('scopeType', '') == 'legacy'; }
+    function categoryDepartment(category){ return category == 'Ngành Đồ họa' ? 'graphic'
+      : category == 'Ngành Thiết kế công nghiệp' ? 'industrial'
+      : category == 'Ngành Thiết kế nội thất' ? 'interior'
+      : category == 'Ngành Thiết kế thời trang' ? 'fashion'
+      : category == 'Ngành Nghệ thuật số' ? 'digital-art' : ''; }
+    function externalCategory(category){ return category == 'Sự kiện Trường' || category == 'Sự kiện Khoa khác'; }
+    function resourceDepartment(data){ return data.get('scopeType', '') == 'department' ? data.get('scopeId', '') : categoryDepartment(data.get('category', '')); }
+    function scopeFieldsUnchanged(){ return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['scopeType','scopeId']); }
+    function storedAdminCanManageResourceData(data){
+      let actor = get(adminPath(email())).data;
+      let role = actor.get('role', 'admin');
+      let scopeId = actor.get('scopeId', '');
+      return role == 'admin' || role == 'high_admin' || role == 'faculty_admin'
+        || ((role == 'subadmin' || role == 'sub_admin') && data.createdByUid == request.auth.uid)
+        || (role == 'department_admin' && resourceDepartment(data) == scopeId)
+        || (role == 'department_admin' && resourceDepartment(data) == '' && data.createdByUid == request.auth.uid);
+    }
+    function canManageResourceData(data){ return owner() || (signedIn() && exists(adminPath(email())) && storedAdminCanManageResourceData(data)); }
+    function storedAdminCanCreateScopedResource(data){
+      let actor = get(adminPath(email())).data;
+      let role = actor.get('role', 'admin');
+      let scopeType = actor.get('scopeType', role == 'subadmin' ? 'legacy' : '');
+      let scopeId = actor.get('scopeId', '');
+      return ((role == 'admin' || role == 'high_admin' || role == 'subadmin') && data.get('scopeType', '') == '')
+        || (validResourceScope(data) && (role == 'admin' || role == 'high_admin' || role == 'faculty_admin'
+          || (role == 'department_admin' && data.scopeType == 'department' && data.scopeId == scopeId)
+          || (role == 'sub_admin' && scopeType == 'faculty'
+            && ((data.scopeType == 'faculty' && data.scopeId == 'mtcn')
+              || (data.scopeType == 'department' && validDepartment(data.scopeId))))
+          || (role == 'sub_admin' && scopeType == 'department' && data.scopeType == 'department' && data.scopeId == scopeId)
+          || (role == 'subadmin' && data.scopeType == 'legacy')));
+    }
+    function canCreateScopedResource(data){ return (owner() && (data.get('scopeType', '') == '' || validResourceScope(data)))
+      || (signedIn() && exists(adminPath(email())) && storedAdminCanCreateScopedResource(data)); }
+    function validEventScope(data){ return data.get('scopeType', '') == '' || data.get('scopeType', '') == 'legacy'
+      ? canCreateScopedResource(data) : (externalCategory(data.category)
+      ? canCreateScopedResource(data)
+      : categoryDepartment(data.category) != ''
+        ? data.scopeType == 'department' && data.scopeId == categoryDepartment(data.category) && canCreateScopedResource(data)
+        : data.category == 'Sự kiện Khoa' && data.scopeType == 'faculty' && data.scopeId == 'mtcn' && canCreateScopedResource(data));
+    }
+    function validAdminData(data){ return (data.role == 'high_admin' && data.scopeType == 'global' && data.get('scopeId', '') == '')
+      || (data.role == 'faculty_admin' && data.scopeType == 'faculty' && data.scopeId == 'mtcn')
+      || (data.role == 'department_admin' && data.scopeType == 'department' && validDepartment(data.scopeId))
+      || (data.role == 'sub_admin' && ((data.scopeType == 'faculty' && data.scopeId == 'mtcn')
+        || (data.scopeType == 'department' && validDepartment(data.scopeId)))); }
+    function canManageAdminData(data){ return systemAdmin() && data.get('role', 'admin') != 'system_admin'
+      || (highAdmin() && !systemAdmin() && (data.role == 'faculty_admin' || data.role == 'department_admin' || data.role == 'sub_admin' || data.role == 'subadmin'))
+      || (facultyAdmin() && data.role == 'sub_admin')
+      || (departmentAdmin() && data.role == 'sub_admin' && data.scopeType == 'department' && data.scopeId == departmentId()); }
     function assignmentPath(sessionId){ return /databases/$(database)/documents/scannerAssignments/$(sessionId + '_' + email()); }
     function assigned(sessionId){ return signedIn() && exists(assignmentPath(sessionId)) && get(assignmentPath(sessionId)).data.active == true; }
     function leader(sessionId){ return assigned(sessionId) && get(assignmentPath(sessionId)).data.role == 'leader'; }
@@ -24,9 +94,9 @@ service cloud.firestore {
     function eventCoManager(eventId){ return signedIn() && get(eventPath(eventId)).data.get('coManagerUids', []).hasAny([request.auth.uid]); }
     function attendanceCoManagerData(data){ return signedIn() && data.get('coManagerUids', []).hasAny([request.auth.uid]); }
     function attendanceCoManager(sessionId){ return signedIn() && attendanceSession(sessionId).get('coManagerUids', []).hasAny([request.auth.uid]); }
-    function managesEvent(eventId){ return highAdmin() || (subAdmin() && get(eventPath(eventId)).data.createdByUid == request.auth.uid) || eventCoManager(eventId); }
-    function managesSession(sessionId){ return highAdmin() || (subAdmin() && attendanceSession(sessionId).createdByUid == request.auth.uid) || attendanceCoManager(sessionId); }
-    function managesSessionAfter(sessionId){ return highAdmin() || (subAdmin()
+    function managesEvent(eventId){ return eventCoManager(eventId) || canManageResourceData(get(eventPath(eventId)).data); }
+    function managesSession(sessionId){ return attendanceCoManager(sessionId) || canManageResourceData(attendanceSession(sessionId)); }
+    function managesSessionAfter(sessionId){ return (existsAfter(attendanceSessionPath(sessionId)) && canManageResourceData(attendanceSessionAfter(sessionId))) || (subAdmin()
       && existsAfter(attendanceSessionPath(sessionId))
       && attendanceSessionAfter(sessionId).createdByUid == request.auth.uid)
       || (signedIn()
@@ -233,6 +303,47 @@ service cloud.firestore {
           && data.groupName == get(groupPath(data.groupId)).data.name
           && data.groupMaxRegistrations == get(groupPath(data.groupId)).data.maxRegistrations);
     }
+    function validManagedEventUpdate(eventId){
+      let hierarchy = canManageResourceData(resource.data);
+      let coManager = eventCoManager(eventId);
+      return (hierarchy || coManager)
+        && request.resource.data.createdByUid == resource.data.createdByUid
+        && request.resource.data.createdByEmail == resource.data.createdByEmail
+        && request.resource.data.createdAt == resource.data.createdAt
+        && ownershipFieldsUnchanged()
+        && (scopeFieldsUnchanged() || (hierarchy && validEventScope(request.resource.data)))
+        && eventCount(request.resource.data) == eventCount(resource.data)
+        && request.resource.data.capacity >= eventCount(resource.data)
+        && request.resource.data.allowedFaculties is list
+        && request.resource.data.allowedFaculties.size() >= 1
+        && validCoManagers(request.resource.data)
+        && (eventCount(resource.data) == 0 || request.resource.data.groupId == resource.data.groupId)
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['coManagerUids','deletedAt','deletedByUid','deletedByEmail','deletedWithGroupId']) || hierarchy)
+        && validEventGroup(request.resource.data);
+    }
+    function validAttendanceMetadataUpdate(sessionId){
+      let ownSubAdmin = subAdmin() && resource.data.createdByUid == request.auth.uid;
+      let hierarchy = ownSubAdmin ? false : canManageResourceData(resource.data);
+      let coManager = attendanceCoManager(sessionId);
+      return ((coManager
+          && request.resource.data.createdByUid == resource.data.createdByUid
+          && request.resource.data.createdByEmail == resource.data.createdByEmail
+          && request.resource.data.createdAt == resource.data.createdAt
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['coManagerUids','deletedAt','deletedByUid','deletedByEmail']))
+        || hierarchy
+        || (ownSubAdmin
+          && request.resource.data.createdByUid == resource.data.createdByUid
+          && resource.data.status != 'finalized'
+          && request.resource.data.status != 'finalized'
+          && (resource.data.status != 'ended'
+            || request.resource.data.status != 'open'
+            || (resource.data.endedAt is timestamp && request.time <= resource.data.endedAt + duration.value(5, 'd')))))
+        && ownershipFieldsUnchanged()
+        && scopeFieldsUnchanged()
+        && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount')
+        && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount')
+        && validCoManagers(request.resource.data);
+    }
 
     match /settings/main {
       allow read: if true;
@@ -241,8 +352,21 @@ service cloud.firestore {
     }
 
     match /admins/{adminEmail} {
-      allow get: if owner() || (signedIn() && email() == adminEmail);
-      allow list, create, update, delete: if owner();
+      allow get: if signedIn() && (email() == adminEmail || systemAdmin() || highAdmin() || canManageAdminData(resource.data));
+      allow list: if systemAdmin() || highAdmin() || canManageAdminData(resource.data);
+      allow create: if signedIn() && adminEmail != email()
+        && request.resource.data.email == adminEmail
+        && request.resource.data.addedByUid == request.auth.uid
+        && validAdminData(request.resource.data)
+        && canManageAdminData(request.resource.data);
+      allow update: if signedIn() && adminEmail != email()
+        && request.resource.data.email == adminEmail
+        && request.resource.data.get('addedByUid', '') == resource.data.get('addedByUid', '')
+        && request.resource.data.get('addedAt', null) == resource.data.get('addedAt', null)
+        && validAdminData(request.resource.data)
+        && canManageAdminData(resource.data)
+        && canManageAdminData(request.resource.data);
+      allow delete: if signedIn() && adminEmail != email() && canManageAdminData(resource.data);
     }
 
     match /storageAdminAccess/{uid} {
@@ -263,7 +387,7 @@ service cloud.firestore {
 
     match /profiles/{uid} {
       allow get: if admin() || (participant() && uid == request.auth.uid);
-      allow list: if admin();
+      allow list: if highAdmin() || facultyAdmin();
       allow create: if participant() && uid == request.auth.uid
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.email == email()
@@ -277,22 +401,23 @@ service cloud.firestore {
         && request.resource.data.name is string
         && request.resource.data.phone is string
         && request.resource.data.faculty is string;
-      allow delete: if highAdmin();
+      allow delete: if highAdmin() || facultyAdmin();
     }
 
     match /eventGroups/{groupId} {
       allow read: if true;
-      allow create: if admin()
+      allow create: if canCreateScopedResource(request.resource.data)
         && request.resource.data.createdByUid == request.auth.uid
         && request.resource.data.name is string
         && (!request.resource.data.keys().hasAll(['unlimited']) || request.resource.data.unlimited is bool)
         && request.resource.data.maxRegistrations is int
         && request.resource.data.maxRegistrations >= 1
         && request.resource.data.maxRegistrations <= 20;
-      allow update: if (highAdmin() || (admin() && resource.data.createdByUid == request.auth.uid))
+      allow update: if canManageResourceData(resource.data)
         && request.resource.data.createdByUid == resource.data.createdByUid
         && request.resource.data.createdByEmail == resource.data.createdByEmail
         && request.resource.data.createdAt == resource.data.createdAt
+        && scopeFieldsUnchanged()
         && (!request.resource.data.keys().hasAll(['unlimited']) || request.resource.data.unlimited is bool)
         && request.resource.data.maxRegistrations is int
         && request.resource.data.maxRegistrations >= 1
@@ -302,14 +427,16 @@ service cloud.firestore {
 
     match /events/{eventId} {
       allow read: if true;
-      allow create: if admin()
+      allow create: if validEventScope(request.resource.data)
         && request.resource.data.createdByUid == request.auth.uid
         && request.resource.data.registeredCount == 0
         && validCoManagers(request.resource.data)
         && request.resource.data.allowedFaculties is list
         && request.resource.data.allowedFaculties.size() >= 1
         && validEventGroup(request.resource.data);
-      allow update: if (participant()
+      allow update: if eventCount(request.resource.data) == eventCount(resource.data)
+        ? validManagedEventUpdate(eventId)
+        : (participant()
         && (
           (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['registeredCount','registrationMutationId','updatedAt'])
             && request.resource.data.registeredCount == eventCount(resource.data) + 1
@@ -346,27 +473,14 @@ service cloud.firestore {
                   && resource.data.allowCancellation == true
                   && exists(regPath(request.auth.uid, eventId))
                   && !existsAfter(regPath(request.auth.uid, eventId)))))))
-        ))
-        || (managesEvent(eventId)
-          && request.resource.data.createdByUid == resource.data.createdByUid
-          && request.resource.data.createdByEmail == resource.data.createdByEmail
-          && request.resource.data.createdAt == resource.data.createdAt
-          && ownershipFieldsUnchanged()
-          && eventCount(request.resource.data) == eventCount(resource.data)
-          && request.resource.data.capacity >= eventCount(resource.data)
-          && request.resource.data.allowedFaculties is list
-          && request.resource.data.allowedFaculties.size() >= 1
-          && validCoManagers(request.resource.data)
-          && (eventCount(resource.data) == 0 || request.resource.data.groupId == resource.data.groupId)
-          && (highAdmin() || resource.data.createdByUid == request.auth.uid || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['coManagerUids','deletedAt','deletedByUid','deletedByEmail','deletedWithGroupId']))
-          && validEventGroup(request.resource.data));
+        ));
       allow delete: if eventCount(resource.data) == 0
-        && (owner() || (admin() && resource.data.createdByUid == request.auth.uid));
+        && highAdmin();
     }
 
     match /registrations/{regId} {
-      allow list: if admin() || managesEvent(resource.data.eventId) || (participant() && resource.data.uid == request.auth.uid);
-      allow get: if admin() || managesEvent(resource.data.eventId) || (participant() && (regId.matches('^' + request.auth.uid + '_.*$') || resource.data.uid == request.auth.uid));
+      allow list: if managesEvent(resource.data.eventId) || (participant() && resource.data.uid == request.auth.uid);
+      allow get: if managesEvent(resource.data.eventId) || (participant() && (regId.matches('^' + request.auth.uid + '_.*$') || resource.data.uid == request.auth.uid));
       allow create: if participant()
         && regId == request.auth.uid + '_' + request.resource.data.eventId
         && request.resource.data.uid == request.auth.uid
@@ -392,8 +506,10 @@ service cloud.firestore {
     }
 
     match /registrationLimits/{limitId} {
-      allow get: if admin() || (participant() && limitId.matches('^' + request.auth.uid + '_.*$'));
-      allow list: if admin() || (participant() && resource.data.uid == request.auth.uid);
+      allow get: if (exists(groupPath(resource.data.groupId)) && canManageResourceData(get(groupPath(resource.data.groupId)).data))
+        || (participant() && limitId.matches('^' + request.auth.uid + '_.*$'));
+      allow list: if (exists(groupPath(resource.data.groupId)) && canManageResourceData(get(groupPath(resource.data.groupId)).data))
+        || (participant() && resource.data.uid == request.auth.uid);
       allow create: if participant()
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.email == email()
@@ -405,7 +521,7 @@ service cloud.firestore {
         && (unlimitedGroup(request.resource.data.groupId)
           || request.resource.data.count <= get(groupPath(request.resource.data.groupId)).data.maxRegistrations)
         && request.resource.data.eventIds.size() == request.resource.data.count;
-      allow update: if (admin()
+      allow update: if ((exists(groupPath(resource.data.groupId)) && canManageResourceData(get(groupPath(resource.data.groupId)).data))
         && request.resource.data.uid == resource.data.uid
         && request.resource.data.email == resource.data.email
         && request.resource.data.groupId == resource.data.groupId
@@ -429,33 +545,19 @@ service cloud.firestore {
     }
 
     match /attendanceSessions/{sessionId} {
-      allow read: if admin() || attendanceCoManagerData(resource.data) || assigned(sessionId);
-      allow create: if admin()
+      allow read: if attendanceCoManagerData(resource.data) || canManageResourceData(resource.data) || assigned(sessionId);
+      allow create: if canCreateScopedResource(request.resource.data)
         && request.resource.data.createdByUid == request.auth.uid
         && request.resource.data.status == 'open'
-        && validCoManagers(request.resource.data);
-      allow update: if (
-          (highAdmin()
-            || (subAdmin()
-              && resource.data.createdByUid == request.auth.uid
-              && request.resource.data.createdByUid == resource.data.createdByUid
-              && resource.data.status != 'finalized'
-              && request.resource.data.status != 'finalized'
-              && (resource.data.status != 'ended'
-                || request.resource.data.status != 'open'
-                || (resource.data.endedAt is timestamp
-                  && request.time <= resource.data.endedAt + duration.value(5, 'd'))))
-            || (attendanceCoManager(sessionId)
-              && request.resource.data.createdByUid == resource.data.createdByUid
-              && request.resource.data.createdByEmail == resource.data.createdByEmail
-              && request.resource.data.createdAt == resource.data.createdAt
-              && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['coManagerUids','deletedAt','deletedByUid','deletedByEmail'])))
-          && ownershipFieldsUnchanged()
-          && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount')
-          && counter(request.resource.data, 'pendingCount') == counter(resource.data, 'pendingCount')
-          && validCoManagers(request.resource.data)
-        )
-        || (((assigned(sessionId) && attendanceAccepting(sessionId))
+        && validCoManagers(request.resource.data)
+        && (request.resource.data.get('eventId', '') == ''
+          || (exists(eventPath(request.resource.data.eventId))
+            && request.resource.data.get('scopeType', '') == get(eventPath(request.resource.data.eventId)).data.get('scopeType', '')
+            && request.resource.data.get('scopeId', '') == get(eventPath(request.resource.data.eventId)).data.get('scopeId', '')));
+      allow update: if !request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(['checkinCount','pendingCount','counterMutationId','counterSourceId'])
+        ? validAttendanceMetadataUpdate(sessionId)
+        : (((assigned(sessionId) && attendanceAccepting(sessionId))
             || managesSession(sessionId))
           && counter(request.resource.data, 'checkinCount') is int
           && counter(request.resource.data, 'pendingCount') is int
@@ -474,17 +576,17 @@ service cloud.firestore {
 
     match /facultyStudents/{mssv} {
       allow get: if participant();
-      allow list: if admin();
-      allow create, update: if highAdmin()
+      allow list: if highAdmin() || facultyAdmin();
+      allow create, update: if (highAdmin() || facultyAdmin())
         && request.resource.data.mssv == mssv
         && request.resource.data.name is string
         && request.resource.data.name.size() > 0
         && request.resource.data.name.size() <= 150;
-      allow delete: if highAdmin();
+      allow delete: if highAdmin() || facultyAdmin();
     }
     match /facultyStudentMeta/{metaId} {
       allow read: if participant();
-      allow create, update, delete: if highAdmin();
+      allow create, update, delete: if highAdmin() || facultyAdmin();
     }
 
     match /attendanceRoster/{rosterId} {
