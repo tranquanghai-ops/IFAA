@@ -103,7 +103,7 @@
 .hot-option{border-color:#fdba74;background:#fff7ed;color:#9a3412}
 .admin-event-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 .admin-event-card{min-height:340px;margin:0;box-shadow:0 10px 28px rgba(24,33,58,.07)}
-.admin-event-card.event-ended,.admin-event-card.event-closed{background:#fff2f1;border-color:#f4aaa3}
+.admin-event-card.event-ended,.admin-event-card.event-closed{background:#fff;border-color:#e3a5a0}
 .admin-event-card.event-hidden{background:#f4f5f7;border-color:#cfd5dd}
 .admin-position-actions{display:flex;align-items:center;gap:7px;margin:4px 0 13px;padding:8px 10px;border-radius:11px;background:#f7f8fa}
 .admin-position-actions span{margin-right:auto;color:var(--muted);font-size:13px;font-weight:750}
@@ -535,3 +535,7 @@
   #groupRows .actions .btn{width:100%;min-height:38px;padding:7px 6px;font-size:12px;line-height:1.2;white-space:normal}
   #groupRows .actions .btn-download-list{grid-column:1/-1}
 }
+.group-action-buttons{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));width:100%}
+.group-action-buttons .btn{min-height:34px;padding:6px 10px!important;font-size:12px!important;line-height:1.2}
+.group-action-buttons .btn-soft{grid-column:1/-1}
+#groupRows .group-action-buttons .btn-download-list{grid-column:auto!important}

@@ -5,6 +5,7 @@ import { getBlob, getStorage, ref } from "https://www.gstatic.com/firebasejs/11.
 import { firebaseConfig, STUDENT_DOMAIN, OWNER_EMAIL } from "./firebase-config.mjs";
 import { canQuickEditEvent, eventNeedsRegistrationForm, registrationConfig, registrationFormSnapshot, validPersonalEmail, validPhone, validateRegistrationSubmission } from "./registration-form.mjs";
 import { EVENT_ATTACHMENT_MAX_BYTES, formatAttachmentSize, normalizeEventAttachments } from "./event-attachments.mjs";
+import { compareStudentAllEvents, matchesStudentGroupFilter } from "./student-event-sort.mjs?v=1";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
 const DEFAULT_CATEGORY = "Sự kiện Khoa";
@@ -484,8 +485,7 @@ function render() {
 
   const candidates = accessibleEvents.filter((event) => {
     if (categoryFilter && (event.category || DEFAULT_CATEGORY) !== categoryFilter) return false;
-    if (studentGroupFilter === "__ungrouped__" && event.groupId) return false;
-    if (studentGroupFilter && studentGroupFilter !== "__ungrouped__" && event.groupId !== studentGroupFilter) return false;
+    if (!matchesStudentGroupFilter(event, studentGroupFilter)) return false;
     return true;
   });
   const list = candidates.filter((event) => {
@@ -495,6 +495,7 @@ function render() {
     if (filter === "ended") return state === "ended";
     return ["upcoming", "open", "full"].includes(state);
   }).sort((a, b) => {
+    if (filter === "all") return compareStudentAllEvents(a, b, eventState);
     const sameGroup = (a.groupId || "__ungrouped__") === (b.groupId || "__ungrouped__");
     if (sameGroup) {
       const byExternalType = Number(isExternalEvent(a)) - Number(isExternalEvent(b));
@@ -514,6 +515,10 @@ function render() {
   const grid = $("#eventGrid");
   if (!list.length) {
     grid.innerHTML = '<div class="card empty event-empty"><h3>Hiện chưa có sự kiện phù hợp</h3><p>Các bạn vui lòng quay lại sau nhé!</p></div>';
+    return;
+  }
+  if (filter === "all" && !linkedCode) {
+    grid.innerHTML = `<div class="event-grid ungrouped-events">${list.map(eventCard).join("")}</div>`;
     return;
   }
 
