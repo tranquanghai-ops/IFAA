@@ -1,6 +1,7 @@
 import { collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, Timestamp, updateDoc, where } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
 import { REGISTRATION_QUESTION_TYPES, normalizeRegistrationFormItems, normalizeRegistrationProfileFields, validateRegistrationConfig } from "../../../registration-form.mjs";
 import { activeAttendanceSessionForEvent } from "../../../attendance-link.mjs";
+import { eventsVisibleInAdmin } from "../resource-ui.mjs?v=1";
 
 export function createAdminEventService({ db, select, safe, toMillis, formatTimestamp, formatVietnamDate, parseVietnamDate, getEvents, setEvents, getGroups, getAttendanceSessions, getUser, getIsOwner, getIsSubAdmin, getIsScopedManager = () => false, getTrashSelection, defaultFaculty, externalCategories, trashRetentionMs, shareCode, groupCode, groupPosition, configuredPublicBaseUrl, confirmAction, notice, copyText, refreshGroupOptions, setLimitInputState, renderEventFaculties, fetchRegistrations, removeRegistration, deleteCachedExport, openEventAttachments, cleanupEventAttachments, getCoManagerUids = () => [], onEventOpen = () => {}, onRender }) {
   let statusFilter = "all";
@@ -259,18 +260,19 @@ export function createAdminEventService({ db, select, safe, toMillis, formatTime
     const activeEvents = events.filter((item) => !item.deletedAt);
     const trashedEvents = events.filter((item) => item.deletedAt);
     const activeGroups = groups.filter((item) => !item.deletedAt);
-    const counts = activeEvents.reduce((result, item) => {
+    const adminEvents = eventsVisibleInAdmin(activeEvents, activeGroups);
+    const counts = adminEvents.reduce((result, item) => {
       result[eventState(item)] += 1;
       return result;
     }, { upcoming: 0, open: 0, ended: 0, hidden: 0 });
-    select("#metricEvents").textContent = activeEvents.length;
+    select("#metricEvents").textContent = adminEvents.length;
     select("#metricUpcoming").textContent = counts.upcoming;
     select("#metricOpen").textContent = counts.open;
     select("#metricEnded").textContent = counts.ended;
     select("#metricHidden").textContent = counts.hidden;
-    select("#metricRegs").textContent = activeEvents.reduce((total, item) => total + Number(item.registeredCount || 0), 0);
+    select("#metricRegs").textContent = adminEvents.reduce((total, item) => total + Number(item.registeredCount || 0), 0);
 
-    const filteredEvents = (statusFilter === "all" ? activeEvents.filter((event) => eventState(event) !== "hidden") : activeEvents.filter((event) => eventState(event) === statusFilter))
+    const filteredEvents = (statusFilter === "all" ? adminEvents.filter((event) => eventState(event) !== "hidden") : adminEvents.filter((event) => eventState(event) === statusFilter))
       .slice().sort((a, b) => Number(isExternalEvent(a)) - Number(isExternalEvent(b)) || eventPosition(a) - eventPosition(b));
     const orderedGroups = activeGroups.slice().sort((a, b) => groupPosition(a) - groupPosition(b));
     select("#eventRows").className = `admin-event-groups view-${eventView}`;
@@ -288,7 +290,7 @@ export function createAdminEventService({ db, select, safe, toMillis, formatTime
       const canCreateGlobal = !getIsScopedManager();
       const [statusClass, statusText] = statusLabel(event);
       const state = eventState(event);
-      const orderedSiblings = activeEvents.filter((item) => (item.groupId || "__ungrouped__") === (event.groupId || "__ungrouped__") && isExternalEvent(item) === isExternalEvent(event)).sort((a, b) => eventPosition(a) - eventPosition(b));
+      const orderedSiblings = adminEvents.filter((item) => (item.groupId || "__ungrouped__") === (event.groupId || "__ungrouped__") && isExternalEvent(item) === isExternalEvent(event)).sort((a, b) => eventPosition(a) - eventPosition(b));
       const eventIndex = orderedSiblings.findIndex((item) => item.id === event.id);
       const hotTag = event.isHot ? '<span class="tag hot">🔥 HOT</span>' : "";
       const newTag = isNewEvent(event) ? '<span class="tag new">NEW</span>' : "";
@@ -322,7 +324,7 @@ export function createAdminEventService({ db, select, safe, toMillis, formatTime
       const limitText = groupId === "__ungrouped__" ? "" : eventGroup?.unlimited ? "" : `Tối đa ${eventGroup?.maxRegistrations || items[0]?.groupMaxRegistrations || 1}/sự kiện`;
       const toneClass = groupId === "__ungrouped__" ? "admin-group-ungrouped" : `group-tone-${adminTone++ % 5}`;
       const groupIndex = orderedGroups.findIndex((item) => item.id === groupId);
-      const groupRegistrationCount = activeEvents.filter((item) => item.groupId === groupId).reduce((total, item) => total + Number(item.registeredCount || 0), 0);
+      const groupRegistrationCount = adminEvents.filter((item) => item.groupId === groupId).reduce((total, item) => total + Number(item.registeredCount || 0), 0);
       const groupMove = groupId === "__ungrouped__" ? `<b>${items.length} sự kiện</b>` : `<div class="admin-group-move"><b>${items.length} sự kiện · ${groupRegistrationCount} lượt đăng ký</b><button class="btn btn-small btn-download-list" data-export-group="${groupId}" ${groupRegistrationCount ? "" : "disabled"}><span class="sheet-icon" aria-hidden="true">▦</span> Tải danh sách nhóm</button>${eventGroup?.shareCode ? `<button class="btn btn-small btn-copy-link" data-copy-group-link="${groupId}">🔗 Sao chép link nhóm</button>` : ""}<button class="btn btn-small" data-move-group="${groupId}" data-direction="-1" ${groupIndex <= 0 ? "disabled" : ""}>↑ Lên</button><button class="btn btn-small" data-move-group="${groupId}" data-direction="1" ${groupIndex < 0 || groupIndex >= orderedGroups.length - 1 ? "disabled" : ""}>↓ Xuống</button></div>`;
       return `<section class="admin-event-group ${toneClass}"><div class="admin-event-group-head"><div><span>${groupId === "__ungrouped__" ? "SỰ KIỆN RIÊNG" : "NHÓM SỰ KIỆN"}</span><h3>${safe(title)}</h3>${limitText ? `<small>${safe(limitText)}</small>` : ""}</div>${groupMove}</div><div class="event-grid admin-event-grid">${items.map((item) => adminEventCard(item)).join("")}</div></section>`;
     }).join("") : '<div class="card empty">Không có sự kiện ở trạng thái này.</div>';

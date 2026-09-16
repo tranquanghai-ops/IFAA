@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { creatorLabel, groupsForVisibility, isGroupHidden } from "../admin/modules/resource-ui.mjs";
+import { creatorLabel, eventsVisibleInAdmin, groupsForVisibility, isGroupHidden } from "../admin/modules/resource-ui.mjs";
 
 const adminSource = readFileSync("admin/admin.mjs", "utf8");
 const groupSource = readFileSync("admin/modules/groups/group-service.mjs", "utf8");
@@ -10,6 +10,7 @@ const attendanceCss = readFileSync("attendance.css", "utf8");
 const styles = readFileSync("styles.css", "utf8");
 const studentSource = readFileSync("student.mjs", "utf8");
 const rulesSource = readFileSync("firestore.rules", "utf8");
+const eventServiceSource = readFileSync("admin/modules/events/event-service.mjs", "utf8");
 
 test("Event kết thúc có nền hồng nhạt và phân cấp cảnh báo rõ", () => {
   assert.match(styles, /\.admin-event-card\.event-ended,\.admin-event-card\.event-closed\{background:#fff5f6;border-color:#e9a5ad\}/);
@@ -61,6 +62,24 @@ test("Group hidden chỉ nằm tab Đã ẩn và restore quay về active", () =
   assert.deepEqual(groupsForVisibility([active, hidden], "hidden"), [hidden]);
   assert.equal(isGroupHidden({ ...hidden, hidden: false, hiddenAt: null }), false);
   assert.match(adminHtml, /data-group-visibility="active">Đang hoạt động<\/button><button[^>]+data-group-visibility="hidden">Đã ẩn/);
+});
+
+test("Admin Events ẩn Event thuộc hidden Group nhưng giữ Event riêng", () => {
+  const events = [
+    { id: "active-event", groupId: "active-group" },
+    { id: "hidden-event", groupId: "hidden-group" },
+    { id: "ungrouped-event" }
+  ];
+  const groups = [{ id: "active-group" }, { id: "hidden-group", hidden: true }];
+  assert.deepEqual(eventsVisibleInAdmin(events, groups).map((event) => event.id), ["active-event", "ungrouped-event"]);
+  assert.match(eventServiceSource, /const adminEvents = eventsVisibleInAdmin\(activeEvents, activeGroups\)/);
+  assert.match(eventServiceSource, /statusFilter === "all" \? adminEvents\.filter/);
+});
+
+test("restore Group làm Event xuất hiện lại trong Admin", () => {
+  const event = { id: "event", groupId: "group" };
+  assert.deepEqual(eventsVisibleInAdmin([event], [{ id: "group", hiddenAt: new Date() }]), []);
+  assert.deepEqual(eventsVisibleInAdmin([event], [{ id: "group", hidden: false, hiddenAt: null }]), [event]);
 });
 
 test("Hide/restore Group chỉ cập nhật document eventGroups, không cascade", () => {

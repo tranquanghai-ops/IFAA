@@ -67,3 +67,15 @@ test("các filter student hiện hữu giữ điều kiện eligibility", () => 
   assert.match(studentSource, /if \(filter === "ended"\) return state === "ended"/);
   assert.match(studentSource, /return \["upcoming", "open", "full"\]\.includes\(state\)/);
 });
+
+test("hidden Group không ảnh hưởng ended/open hoặc sorting phía student", () => {
+  const hiddenGroupEvents = [
+    { id: "ended-hidden-group", groupId: "hidden-group", state: "ended", date: "2026-09-15", endTime: "10:00" },
+    { id: "open-hidden-group", groupId: "hidden-group", state: "open", openAt: "2026-09-15T11:30:00Z" },
+    { id: "upcoming-active-group", groupId: "active-group", state: "upcoming", openAt: "2026-09-15T13:00:00Z" }
+  ];
+  assert.deepEqual(sortAll(hiddenGroupEvents).map((event) => event.id), ["upcoming-active-group", "open-hidden-group", "ended-hidden-group"]);
+  assert.equal(hiddenGroupEvents.filter((event) => event.state === "ended").some((event) => event.id === "ended-hidden-group"), true);
+  assert.equal(hiddenGroupEvents.filter((event) => ["upcoming", "open", "full"].includes(event.state)).some((event) => event.id === "open-hidden-group"), true);
+  assert.doesNotMatch(studentSource, /groups\.get\(event\.groupId\)\?\.(hidden|hiddenAt)/);
+});
