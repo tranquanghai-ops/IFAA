@@ -11,10 +11,12 @@ const styles = readFileSync("styles.css", "utf8");
 const studentSource = readFileSync("student.mjs", "utf8");
 const rulesSource = readFileSync("firestore.rules", "utf8");
 
-test("Event kết thúc giữ nền card trắng và vẫn có chỉ báo trạng thái", () => {
-  assert.match(styles, /\.admin-event-card\.event-ended,\.admin-event-card\.event-closed\{background:#fff;border-color:/);
-  assert.doesNotMatch(styles, /\.admin-event-card\.event-ended,\.admin-event-card\.event-closed\{background:#fff2f1/);
-  assert.match(styles, /\.tag\.admin-ended\{background:#fee4e2;color:#b42318\}/);
+test("Event kết thúc có nền hồng nhạt và phân cấp cảnh báo rõ", () => {
+  assert.match(styles, /\.admin-event-card\.event-ended,\.admin-event-card\.event-closed\{background:#fff5f6;border-color:#e9a5ad\}/);
+  assert.match(styles, /\.tag\.admin-ended\{border:1px solid #e98f99;background:#f8cbd0;color:#861528;font-weight:900\}/);
+  assert.match(styles, /\.admin-event-card\.event-ended \.countdown,\.admin-event-card\.event-closed \.countdown\{color:#97152a;font-weight:900\}/);
+  assert.match(styles, /\.admin-event-card\.event-ended \.admin-card-actions \.btn-danger,\.admin-event-card\.event-closed \.admin-card-actions \.btn-danger\{border-color:#b42318;background:#b42318;color:#fff\}/);
+  assert.match(styles, /\.admin-event-card\.event-ended \.admin-card-actions \.btn-danger:hover,\.admin-event-card\.event-closed \.admin-card-actions \.btn-danger:hover\{border-color:#8f1b14;background:#8f1b14;color:#fff\}/);
 });
 
 test("creator label ưu tiên tên, fallback email rồi dấu gạch", () => {
