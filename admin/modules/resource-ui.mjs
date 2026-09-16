@@ -11,3 +11,8 @@ export function isGroupHidden(group) {
 export function groupsForVisibility(groups, visibility = "active") {
   return groups.filter((group) => visibility === "hidden" ? isGroupHidden(group) : !isGroupHidden(group));
 }
+
+export function eventsVisibleInAdmin(events, groups) {
+  const hiddenGroupIds = new Set(groups.filter(isGroupHidden).map((group) => group.id));
+  return events.filter((event) => !event.groupId || !hiddenGroupIds.has(event.groupId));
+}

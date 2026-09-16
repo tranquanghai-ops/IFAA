@@ -5,7 +5,7 @@ import { getStorage, ref, getBytes, getDownloadURL, getMetadata, uploadBytes, de
 import { firebaseConfig, OWNER_EMAIL } from "../firebase-config.mjs";
 import { activeAttendanceSessionById, activeAttendanceSessionForEvent, activeAttendanceSessions, countdown } from "../attendance-link.mjs";
 import { loadFacultyDataset, publishFacultyDataset } from "../faculty-dataset.mjs";
-import { createAdminEventService } from "./modules/events/event-service.mjs?v=5";
+import { createAdminEventService } from "./modules/events/event-service.mjs?v=6";
 import { createEventAttachmentService } from "./modules/events/event-attachment-service.mjs?v=1";
 import { createAdminExportService } from "./modules/exports/export-service.mjs?v=2";
 import { createAdminGroupService } from "./modules/groups/group-service.mjs?v=1";
