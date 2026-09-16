@@ -3,7 +3,7 @@ import { REGISTRATION_QUESTION_TYPES, normalizeRegistrationFormItems, normalizeR
 import { activeAttendanceSessionForEvent } from "../../../attendance-link.mjs";
 import { eventsVisibleInAdmin } from "../resource-ui.mjs?v=1";
 
-export function createAdminEventService({ db, select, safe, toMillis, formatTimestamp, formatVietnamDate, parseVietnamDate, getEvents, setEvents, getGroups, getAttendanceSessions, getUser, getIsOwner, getIsSubAdmin, getIsScopedManager = () => false, getTrashSelection, defaultFaculty, externalCategories, trashRetentionMs, shareCode, groupCode, groupPosition, configuredPublicBaseUrl, confirmAction, notice, copyText, refreshGroupOptions, setLimitInputState, renderEventFaculties, fetchRegistrations, removeRegistration, deleteCachedExport, openEventAttachments, cleanupEventAttachments, getCoManagerUids = () => [], onEventOpen = () => {}, onRender }) {
+export function createAdminEventService({ db, select, safe, toMillis, formatTimestamp, formatVietnamDate, parseVietnamDate, getEvents, setEvents, getGroups, getAttendanceSessions, getUser, getIsOwner, getIsSubAdmin, getIsScopedManager = () => false, getAccess = () => ({}), canManageResource = () => false, canCreateCategory = () => true, getCategoryScope = () => ({ scopeType: "faculty", scopeId: "mtcn" }), getTrashSelection, defaultFaculty, externalCategories, trashRetentionMs, shareCode, groupCode, groupPosition, configuredPublicBaseUrl, confirmAction, notice, copyText, refreshGroupOptions, setLimitInputState, renderEventFaculties, fetchRegistrations, removeRegistration, deleteCachedExport, openEventAttachments, cleanupEventAttachments, getCoManagerUids = () => [], onEventOpen = () => {}, onRender }) {
   let statusFilter = "all";
   let eventView = localStorage.getItem("ifaa-admin-event-view") === "list" ? "list" : "cards";
   let registrationFormItems = [];
@@ -285,8 +285,8 @@ export function createAdminEventService({ db, select, safe, toMillis, formatTime
     });
     const adminEventCard = (event) => {
       const isCoManager = Array.isArray(event.coManagerUids) && event.coManagerUids.includes(user?.uid);
-      const canManage = getIsScopedManager() ? isCoManager : (!getIsSubAdmin() || event.createdByUid === user?.uid || isCoManager);
-      const canDelete = !getIsScopedManager() && (!getIsSubAdmin() || event.createdByUid === user?.uid);
+      const canManage = getIsScopedManager() ? isCoManager : (canManageResource(event) || isCoManager);
+      const canDelete = !getIsScopedManager() && canManageResource(event);
       const canCreateGlobal = !getIsScopedManager();
       const [statusClass, statusText] = statusLabel(event);
       const state = eventState(event);
@@ -355,20 +355,29 @@ export function createAdminEventService({ db, select, safe, toMillis, formatTime
 
   function subscribeEvents(onLoaded) {
     const user = getUser();
-    if (getIsSubAdmin()) {
-      const own = new Map(), assigned = new Map();
+    const access = getAccess();
+    if (getIsSubAdmin() || access.role === "department_admin") {
+      const sources = [];
+      if (getIsSubAdmin()) sources.push(query(collection(db, "events"), where("createdByUid", "==", user.uid)));
+      if (access.role === "department_admin") {
+        sources.push(query(collection(db, "events"), where("scopeType", "==", "department"), where("scopeId", "==", access.scopeId)));
+        const category = { graphic: "Ngành Đồ họa", industrial: "Ngành Thiết kế công nghiệp", interior: "Ngành Thiết kế nội thất", fashion: "Ngành Thiết kế thời trang", "digital-art": "Ngành Nghệ thuật số" }[access.scopeId];
+        if (category) sources.push(query(collection(db, "events"), where("category", "==", category)));
+        sources.push(query(collection(db, "events"), where("createdByUid", "==", user.uid)));
+      }
+      sources.push(query(collection(db, "events"), where("coManagerUids", "array-contains", user.uid)));
+      const maps = sources.map(() => new Map());
       let initialSnapshots = 0;
       const apply = (target, snapshot) => {
         target.clear();
         snapshot.docs.forEach((item) => target.set(item.id, { id: item.id, ...item.data(), coManagerUids: Array.isArray(item.data().coManagerUids) ? item.data().coManagerUids : [] }));
-        setEvents([...new Map([...own, ...assigned]).values()]);
+        setEvents([...new Map(maps.flatMap((map) => [...map])).values()]);
         onRender();
         initialSnapshots += 1;
-        if (initialSnapshots === 2) onLoaded?.();
+        if (initialSnapshots === sources.length) onLoaded?.();
       };
-      const unsubscribeOwn = onSnapshot(query(collection(db, "events"), where("createdByUid", "==", user.uid)), (snapshot) => apply(own, snapshot), (error) => notice(error.message, "error"));
-      const unsubscribeAssigned = onSnapshot(query(collection(db, "events"), where("coManagerUids", "array-contains", user.uid)), (snapshot) => apply(assigned, snapshot), (error) => notice(error.message, "error"));
-      return () => { unsubscribeOwn(); unsubscribeAssigned(); };
+      const unsubscribes = sources.map((source, index) => onSnapshot(source, (snapshot) => apply(maps[index], snapshot), (error) => notice(error.message, "error")));
+      return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
     }
     const eventsQuery = getIsScopedManager()
       ? query(collection(db, "events"), where("coManagerUids", "array-contains", user.uid))
@@ -404,7 +413,8 @@ export function createAdminEventService({ db, select, safe, toMillis, formatTime
     select("#eventDialogTitle").textContent = copy ? "Sao chép sự kiện" : event ? "Chỉnh sửa sự kiện" : "Tạo sự kiện";
     for (const key of ["title", "category", "location", "startTime", "endTime", "capacity", "status"]) if (event && select("#" + key)) select("#" + key).value = event[key] ?? "";
     select("#date").value = event ? formatVietnamDate(event.date) : "";
-    if (!select("#category").value) select("#category").value = "Sự kiện Khoa";
+    [...select("#category").options].forEach((option) => { option.disabled = !canCreateCategory(option.value); });
+    if (!select("#category").value || !canCreateCategory(select("#category").value)) select("#category").value = [...select("#category").options].find((option) => !option.disabled)?.value || "";
     if (event?.status === "draft") select("#status").value = "hidden";
     if (event) {
       const opens = inputDateTimeParts(event.openAt);
@@ -415,7 +425,7 @@ export function createAdminEventService({ db, select, safe, toMillis, formatTime
       select("#closeTime").value = closes.time;
     } else {
       select("#status").value = "open";
-      select("#category").value = "Sự kiện Khoa";
+      select("#category").value = [...select("#category").options].find((option) => !option.disabled)?.value || "";
     }
     select("#eventAllowCancellation").checked = !!event?.allowCancellation;
     select("#eventHot").checked = !!event?.isHot;
@@ -537,6 +547,8 @@ export function createAdminEventService({ db, select, safe, toMillis, formatTime
     data.registrationFormItems = registrationConfig.items;
     data.updatedAt = serverTimestamp();
     data.coManagerUids = [...new Set(getCoManagerUids())];
+    if (!canCreateCategory(data.category)) throw Error("Bạn không được tạo sự kiện ngoài phạm vi được cấp.");
+    Object.assign(data, getCategoryScope(data.category));
     if (!data.title || !data.category || !data.date || !data.location || !Number.isInteger(data.capacity) || data.capacity < 1) throw Error("Vui lòng nhập đầy đủ các trường bắt buộc.");
     if ((data.startTime && !validTime24(data.startTime)) || (data.endTime && !validTime24(data.endTime))) throw Error("Nếu nhập giờ sự kiện, vui lòng dùng định dạng 24 giờ HH:mm, ví dụ 08:30 hoặc 17:45.");
     if ((openDateText && !openTimeText) || (!openDateText && openTimeText)) throw Error("Thời gian mở đăng ký: hãy nhập đủ ngày và giờ, hoặc để trống cả hai để mở ngay.");

@@ -17,7 +17,8 @@ service firebase.storage {
     function highAdmin() {
       return owner() || (signedIn()
         && firestore.exists(/databases/(default)/documents/admins/$(email()))
-        && firestore.get(/databases/(default)/documents/admins/$(email())).data.get('role', 'admin') != 'subadmin');
+        && (firestore.get(/databases/(default)/documents/admins/$(email())).data.get('role', 'admin') == 'admin'
+          || firestore.get(/databases/(default)/documents/admins/$(email())).data.get('role', '') == 'high_admin'));
     }
     function admin() {
       return owner() || (signedIn()
@@ -26,12 +27,43 @@ service firebase.storage {
     function exportCacheAdmin() {
       return owner() || (signedIn()
         && firestore.exists(/databases/(default)/documents/admins/$(email()))
-        && firestore.get(/databases/(default)/documents/admins/$(email())).data.get('role', '') == 'admin');
+        && (firestore.get(/databases/(default)/documents/admins/$(email())).data.get('role', 'admin') == 'admin'
+          || firestore.get(/databases/(default)/documents/admins/$(email())).data.get('role', '') == 'high_admin'
+          || firestore.get(/databases/(default)/documents/admins/$(email())).data.get('role', '') == 'faculty_admin'));
+    }
+    function adminRole() {
+      return owner() ? 'system_admin' : firestore.get(/databases/(default)/documents/admins/$(email())).data.get('role', 'admin');
+    }
+    function facultyAdmin() {
+      return admin() && !owner() && adminRole() == 'faculty_admin';
+    }
+    function departmentAdmin() {
+      return admin() && !owner() && adminRole() == 'department_admin';
+    }
+    function subAdmin() {
+      return admin() && !owner() && (adminRole() == 'subadmin' || adminRole() == 'sub_admin');
+    }
+    function departmentId() {
+      return firestore.get(/databases/(default)/documents/admins/$(email())).data.get('scopeId', '');
+    }
+    function categoryDepartment(category) {
+      return category == 'Ngành Đồ họa' ? 'graphic'
+        : category == 'Ngành Thiết kế công nghiệp' ? 'industrial'
+        : category == 'Ngành Thiết kế nội thất' ? 'interior'
+        : category == 'Ngành Thiết kế thời trang' ? 'fashion'
+        : category == 'Ngành Nghệ thuật số' ? 'digital-art' : '';
+    }
+    function resourceDepartment(data) {
+      return data.get('scopeType', '') == 'department' ? data.get('scopeId', '') : categoryDepartment(data.get('category', ''));
+    }
+    function managesResource(data) {
+      return highAdmin() || facultyAdmin()
+        || (departmentAdmin() && resourceDepartment(data) == departmentId())
+        || ((departmentAdmin() || subAdmin()) && resourceDepartment(data) == '' && data.createdByUid == request.auth.uid)
+        || (subAdmin() && data.createdByUid == request.auth.uid);
     }
     function managesSession(sessionId) {
-      return highAdmin() || (admin()
-        && firestore.get(/databases/(default)/documents/admins/$(email())).data.get('role', 'admin') == 'subadmin'
-        && firestore.get(/databases/(default)/documents/attendanceSessions/$(sessionId)).data.createdByUid == request.auth.uid)
+      return managesResource(firestore.get(/databases/(default)/documents/attendanceSessions/$(sessionId)).data)
         || (signedIn()
           && firestore.get(/databases/(default)/documents/attendanceSessions/$(sessionId)).data.get('coManagerUids', []).hasAny([request.auth.uid]));
     }
@@ -45,9 +77,7 @@ service firebase.storage {
     }
     function managesEvent(eventId) {
       return firestore.exists(eventPath(eventId))
-        && (highAdmin() || (admin()
-        && firestore.get(/databases/(default)/documents/admins/$(email())).data.get('role', 'admin') == 'subadmin'
-        && firestore.get(eventPath(eventId)).data.createdByUid == request.auth.uid)
+        && (managesResource(firestore.get(eventPath(eventId)).data)
         || (signedIn() && firestore.get(eventPath(eventId)).data.get('coManagerUids', []).hasAny([request.auth.uid])));
     }
     function downloadableEvent(eventId) {
@@ -67,7 +97,7 @@ service firebase.storage {
 
     match /datasets/{datasetFile} {
       allow read: if participant();
-      allow create, update: if highAdmin()
+      allow create, update: if (highAdmin() || facultyAdmin())
         && datasetFile == 'faculty-students.json.gz'
         && request.resource.size < 12 * 1024 * 1024
         && request.resource.contentType == 'application/gzip';

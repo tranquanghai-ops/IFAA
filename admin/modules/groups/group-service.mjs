@@ -1,7 +1,7 @@
 import { addDoc, collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc, where } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
 import { creatorLabel, groupsForVisibility, isGroupHidden } from "../resource-ui.mjs?v=1";
 
-export function createAdminGroupService({ db, select, safe, toMillis, getGroups, setGroups, getEvents, getUser, getIsOwner, getIsSubAdmin, getTrashSelection, shareCode, configuredPublicBaseUrl, copyText, notice, confirmAction, trashRetentionMs, getEventState, getCalendarRange, getCalendarStamp, getPermanentlyDeleteEvent, deleteCachedExport, getFetchRegistrations, getDownloadRegistrationExcel, onRender, onGroupsUpdated }) {
+export function createAdminGroupService({ db, select, safe, toMillis, getGroups, setGroups, getEvents, getUser, getIsOwner, getIsSubAdmin, getAccess = () => ({}), canManageResource = () => false, getDefaultResourceScope = () => ({ scopeType: "faculty", scopeId: "mtcn" }), getTrashSelection, shareCode, configuredPublicBaseUrl, copyText, notice, confirmAction, trashRetentionMs, getEventState, getCalendarRange, getCalendarStamp, getPermanentlyDeleteEvent, deleteCachedExport, getFetchRegistrations, getDownloadRegistrationExcel, onRender, onGroupsUpdated }) {
   let groupVisibilityFilter = "active";
   function groupCode(group) {
     return shareCode(group?.shareCode || group?.name) || group?.id || "NHOM";
@@ -59,9 +59,10 @@ export function createAdminGroupService({ db, select, safe, toMillis, getGroups,
       const hiddenCount = groupedItems.filter((item) => getEventState()(item) === "hidden").length;
       const endedCount = groupedItems.filter((item) => getEventState()(item) === "ended").length;
       const groupState = hiddenCount === eventCount && eventCount ? "Đã ẩn toàn bộ" : endedCount === eventCount && eventCount ? "Đã kết thúc" : "Theo từng sự kiện";
-      const positionActions = groupVisibilityFilter === "active" ? `<button class="btn btn-small" data-move-group="${group.id}" data-direction="-1" ${groupIndex <= 0 ? "disabled" : ""}>↑</button><button class="btn btn-small" data-move-group="${group.id}" data-direction="1" ${groupIndex >= visibleGroups.length - 1 ? "disabled" : ""}>↓</button>` : "";
-      const visibilityAction = isGroupHidden(group) ? `<button class="btn btn-small btn-restore" data-show-group="${group.id}">Hiện lại</button>` : `<button class="btn btn-small" data-hide-group="${group.id}">Ẩn nhóm</button>`;
-      return `<tr><td><b>${safe(group.name)}</b><br><small>Mã: ${safe(groupCode(group))}</small><br><small>Người tạo: ${safe(creatorLabel(group))}</small></td><td>${limit}</td><td>${eventCount}<br><small>${groupState}</small></td><td>${visibility}</td><td><div class="actions group-action-buttons"><button class="btn btn-small btn-soft" data-copy-group-link="${group.id}">Sao chép liên kết</button><button class="btn btn-small btn-calendar" data-calendar-group="${group.id}">＋ Lịch cả nhóm</button><button class="btn btn-small btn-download-list" data-export-group="${group.id}" ${groupRegisteredCount ? "" : "disabled"}><span class="sheet-icon" aria-hidden="true">▦</span> Tải danh sách nhóm</button></div></td><td><div class="actions">${positionActions}<button class="btn btn-small" data-edit-group="${group.id}">Sửa nhóm</button>${visibilityAction}<button class="btn btn-small btn-danger" data-delete-group="${group.id}">Xóa nhóm</button></div></td></tr>`;
+      const manageable = canManageResource(group);
+      const positionActions = groupVisibilityFilter === "active" ? `<button class="btn btn-small" data-move-group="${group.id}" data-direction="-1" ${!manageable || groupIndex <= 0 ? "disabled" : ""}>↑</button><button class="btn btn-small" data-move-group="${group.id}" data-direction="1" ${!manageable || groupIndex >= visibleGroups.length - 1 ? "disabled" : ""}>↓</button>` : "";
+      const visibilityAction = isGroupHidden(group) ? `<button class="btn btn-small btn-restore" data-show-group="${group.id}" ${manageable ? "" : "disabled"}>Hiện lại</button>` : `<button class="btn btn-small" data-hide-group="${group.id}" ${manageable ? "" : "disabled"}>Ẩn nhóm</button>`;
+      return `<tr><td><b>${safe(group.name)}</b><br><small>Mã: ${safe(groupCode(group))}</small><br><small>Người tạo: ${safe(creatorLabel(group))}</small></td><td>${limit}</td><td>${eventCount}<br><small>${groupState}</small></td><td>${visibility}</td><td><div class="actions group-action-buttons"><button class="btn btn-small btn-soft" data-copy-group-link="${group.id}">Sao chép liên kết</button><button class="btn btn-small btn-calendar" data-calendar-group="${group.id}">＋ Lịch cả nhóm</button><button class="btn btn-small btn-download-list" data-export-group="${group.id}" ${groupRegisteredCount ? "" : "disabled"}><span class="sheet-icon" aria-hidden="true">▦</span> Tải danh sách nhóm</button></div></td><td><div class="actions">${positionActions}<button class="btn btn-small" data-edit-group="${group.id}" ${manageable ? "" : "disabled"}>Sửa nhóm</button>${visibilityAction}<button class="btn btn-small btn-danger" data-delete-group="${group.id}" ${manageable ? "" : "disabled"}>Xóa nhóm</button></div></td></tr>`;
     }).join("") || `<tr><td colspan="6" class="empty">${groupVisibilityFilter === "hidden" ? "Chưa có nhóm đã ẩn." : "Chưa có nhóm sự kiện đang hoạt động."}</td></tr>`;
     if (select("#trashGroupRows")) {
       select("#trashGroupRows").innerHTML = getIsOwner() && trashedGroups.length
@@ -76,9 +77,12 @@ export function createAdminGroupService({ db, select, safe, toMillis, getGroups,
 
   function subscribeGroups() {
     const user = getUser();
+    const access = getAccess();
     const groupsQuery = getIsSubAdmin()
       ? query(collection(db, "eventGroups"), where("createdByUid", "==", user.uid))
-      : query(collection(db, "eventGroups"), orderBy("createdAt", "desc"));
+      : access.role === "department_admin"
+        ? query(collection(db, "eventGroups"), where("scopeType", "==", "department"), where("scopeId", "==", access.scopeId))
+        : query(collection(db, "eventGroups"), orderBy("createdAt", "desc"));
     return onSnapshot(groupsQuery, (snapshot) => {
       setGroups(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => (toMillis(b.createdAt) || 0) - (toMillis(a.createdAt) || 0)));
       refreshGroupOptions(select("#groupId").value);
@@ -138,7 +142,7 @@ export function createAdminGroupService({ db, select, safe, toMillis, getGroups,
       } else {
         const groupPositions = groups.map(groupPosition).filter(Number.isFinite), sortOrder = groupPositions.length ? Math.min(...groupPositions) - 1 : 0;
         const user = getUser();
-        await addDoc(collection(db, "eventGroups"), { ...data, sortOrder, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdByName: user.displayName || "", createdAt: serverTimestamp() });
+        await addDoc(collection(db, "eventGroups"), { ...data, ...getDefaultResourceScope(), sortOrder, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdByName: user.displayName || "", createdAt: serverTimestamp() });
       }
       select("#groupDialog").close();
       notice(bulkStatus && groupedEvents.length ? `Đã cập nhật nhóm và ${statusNames[bulkStatus]} ${groupedEvents.length} sự kiện.` : id ? "Đã cập nhật nhóm sự kiện." : "Đã tạo nhóm sự kiện.", "success");

@@ -5,14 +5,15 @@ import { getStorage, ref, getBytes, getDownloadURL, getMetadata, uploadBytes, de
 import { firebaseConfig, OWNER_EMAIL } from "../firebase-config.mjs";
 import { activeAttendanceSessionById, activeAttendanceSessionForEvent, activeAttendanceSessions, countdown } from "../attendance-link.mjs";
 import { loadFacultyDataset, publishFacultyDataset } from "../faculty-dataset.mjs";
-import { createAdminEventService } from "./modules/events/event-service.mjs?v=6";
+import { createAdminEventService } from "./modules/events/event-service.mjs?v=7";
 import { createEventAttachmentService } from "./modules/events/event-attachment-service.mjs?v=1";
 import { createAdminExportService } from "./modules/exports/export-service.mjs?v=2";
-import { createAdminGroupService } from "./modules/groups/group-service.mjs?v=1";
+import { createAdminGroupService } from "./modules/groups/group-service.mjs?v=2";
 import { creatorLabel } from "./modules/resource-ui.mjs?v=1";
 import { createAdminRegistrationService } from "./modules/registrations/registration-service.mjs?v=2";
 import { createAdminStudentService } from "./modules/students/student-service.mjs?v=2";
 import { addCoManagerUid, canEditResourceCoManagers, inheritedAttendanceCoManagerUids, isResourceCoManager, normalizeCoManagerUids } from "./modules/co-managers.mjs?v=1";
+import { DEPARTMENTS, FACULTY_SCOPE_ID, ROLE_LABELS, accessLabel, allowedScopeForNewAdmin, canCreateCategory, canManageAdmin, canManageResource, categoryScope, creatableRoles, defaultResourceScope, normalizeAdminAccess, roleDocument, scopeLabel } from "./modules/role-scope.mjs?v=1";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
 const DEFAULT_PUBLIC_BASE_URL = "https://ifa.tdtu.edu.vn/dang-ky-su-kien";
@@ -102,6 +103,7 @@ function confirmAction({ title, message, verification = "", confirmLabel = "Xác
 let user = null;
 let isOwner = false;
 let currentRole = "admin";
+let currentAccess = normalizeAdminAccess({ role: "admin" });
 let isSubAdmin = false;
 let isScopedManager = false;
 let events = [];
@@ -137,7 +139,7 @@ const trashSelection = { events: new Set(), attendance: new Set(), groups: new S
 const trashBulkBusy = { events: false, attendance: false, groups: false };
 
 function canEditCoManagers(record) {
-  return canEditResourceCoManagers(record, user?.uid, highAdminAccess());
+  return canEditResourceCoManagers(record, user?.uid, managesResource(record));
 }
 async function loadCoManagerProfiles(uids) {
   const missing = normalizeCoManagerUids(uids).filter((uid) => !coManagerProfiles.has(uid));
@@ -212,6 +214,9 @@ const {
   getUser: () => user,
   getIsOwner: () => isOwner,
   getIsSubAdmin: () => isSubAdmin,
+  getAccess: () => currentAccess,
+  canManageResource: (resource) => canManageResource(currentAccess, resource, user?.uid),
+  getDefaultResourceScope: () => defaultResourceScope(currentAccess),
   getTrashSelection: () => trashSelection,
   shareCode,
   configuredPublicBaseUrl,
@@ -283,6 +288,10 @@ const {
   getIsOwner: () => isOwner,
   getIsSubAdmin: () => isSubAdmin,
   getIsScopedManager: () => isScopedManager,
+  getAccess: () => currentAccess,
+  canManageResource: (resource) => canManageResource(currentAccess, resource, user?.uid),
+  canCreateCategory: (category) => canCreateCategory(currentAccess, category),
+  getCategoryScope: (category) => categoryScope(category, currentAccess),
   getTrashSelection: () => trashSelection,
   defaultFaculty: DEFAULT_FACULTY,
   externalCategories: EXTERNAL_CATEGORIES,
@@ -556,22 +565,24 @@ function notice(message, type = "") {
 }
 
 async function accessRole(currentUser) {
-  if (currentUser.email.toLowerCase() === OWNER_EMAIL) return "owner";
+  if (currentUser.email.toLowerCase() === OWNER_EMAIL) return normalizeAdminAccess({}, { owner: true });
   const snapshot = await getDoc(doc(db, "admins", currentUser.email.toLowerCase()));
-  if (snapshot.exists()) return snapshot.data().role === "subadmin" ? "subadmin" : "admin";
+  if (snapshot.exists()) return normalizeAdminAccess(snapshot.data());
   const [eventAssignments, attendanceAssignments] = await Promise.all([
     getDocs(query(collection(db, "events"), where("coManagerUids", "array-contains", currentUser.uid), limit(1))),
     getDocs(query(collection(db, "attendanceSessions"), where("coManagerUids", "array-contains", currentUser.uid), limit(1)))
   ]);
-  return eventAssignments.empty && attendanceAssignments.empty ? "" : "scoped";
+  return eventAssignments.empty && attendanceAssignments.empty ? null : { role: "scoped_manager", scopeType: "resource", scopeId: "", legacy: false };
 }
 
-async function syncStorageAdminAccess(currentUser, role) {
-  if (role === "owner") return;
+async function syncStorageAdminAccess(currentUser, access) {
+  if (access.role === "system_admin") return;
   await setDoc(doc(db, "storageAdminAccess", currentUser.uid), {
     uid: currentUser.uid,
     email: currentUser.email.toLowerCase(),
-    role: role === "subadmin" ? "subadmin" : "admin",
+    role: access.role,
+    scopeType: access.scopeType,
+    scopeId: access.scopeId || "",
     updatedAt: serverTimestamp()
   }, { merge: true });
 }
@@ -683,6 +694,53 @@ $("#purgeEventsSelected").onclick = () => purgeSelectedTrash("events");
 $("#purgeAttendanceSelected").onclick = () => purgeSelectedTrash("attendance");
 $("#purgeGroupsSelected").onclick = () => purgeSelectedTrash("groups");
 
+function storedAdminAccess(record) {
+  return normalizeAdminAccess(record || {});
+}
+
+function renderAdminRows() {
+  const rows = admins.filter((record) => canManageAdmin(currentAccess, storedAdminAccess(record)));
+  $("#adminRows").innerHTML = rows.map((record) => {
+    const access = storedAdminAccess(record);
+    return `<tr><td>${safe(record.name || "")}</td><td>${safe(record.email || record.id)}</td><td>${safe(accessLabel(access))}</td><td>${safe(scopeLabel(access))}</td><td>${safe(record.addedByEmail || record.addedByUid || "—")}</td><td>${ts(record.addedAt)}</td><td><div class="actions"><button class="btn btn-small" data-edit-admin="${safe(record.email || record.id)}">Sửa</button><button class="btn btn-small btn-danger" data-remove-admin="${safe(record.email || record.id)}">Xóa</button></div></td></tr>`;
+  }).join("") || '<tr><td colspan="7" class="empty">Không có tài khoản thuộc phạm vi được quản lý.</td></tr>';
+}
+
+function syncAdminScopeForm() {
+  const role = $("#adminRole").value;
+  const scopeField = $("#adminScopeTypeField"), departmentField = $("#adminDepartmentField"), scope = $("#adminScopeType");
+  if (role === "high_admin") {
+    scope.value = "global";
+    scopeField.classList.add("hidden");
+    departmentField.classList.add("hidden");
+    return;
+  }
+  scopeField.classList.remove("hidden");
+  if (role === "faculty_admin") scope.value = "faculty";
+  if (role === "department_admin") scope.value = "department";
+  if (currentAccess.role === "department_admin") scope.value = "department";
+  scope.disabled = role === "faculty_admin" || role === "department_admin" || currentAccess.role === "department_admin";
+  departmentField.classList.toggle("hidden", scope.value !== "department");
+}
+
+function configureAdminForm() {
+  const roleSelect = $("#adminRole"), departmentSelect = $("#adminDepartment");
+  if (!roleSelect || !departmentSelect) return;
+  roleSelect.innerHTML = creatableRoles(currentAccess).map((role) => `<option value="${role}">${safe(ROLE_LABELS[role])}</option>`).join("");
+  departmentSelect.innerHTML = DEPARTMENTS.map((department) => `<option value="${department.id}">${safe(department.label)}</option>`).join("");
+  if (currentAccess.role === "department_admin") departmentSelect.value = currentAccess.scopeId;
+  syncAdminScopeForm();
+}
+
+function resetAdminForm() {
+  $("#adminForm").reset();
+  $("#adminEditEmail").value = "";
+  $("#adminEmail").disabled = false;
+  $("#adminSubmit").textContent = "Thêm tài khoản";
+  $("#adminEditCancel").classList.add("hidden");
+  configureAdminForm();
+}
+
 function render() {
   const { activeEvents, orderedGroups } = renderEvents();
   renderGroups({ activeEvents, orderedGroups });
@@ -693,7 +751,7 @@ function render() {
   }
   refreshRegistrationFilters();
   renderRegs();
-  if (isOwner) $("#adminRows").innerHTML = admins.map((admin) => `<tr><td>${safe(admin.name || "")}</td><td>${safe(admin.email)}</td><td><select class="admin-role-select" data-admin-role="${safe(admin.email)}"><option value="admin" ${(admin.role || "admin") === "admin" ? "selected" : ""}>Admin</option><option value="subadmin" ${admin.role === "subadmin" ? "selected" : ""}>Sub-admin</option></select></td><td>${ts(admin.addedAt)}</td><td><button class="btn btn-small btn-danger" data-remove-admin="${safe(admin.email)}">Xóa</button></td></tr>`).join("");
+  if (creatableRoles(currentAccess).length) renderAdminRows();
   syncTrashBulkUi();
 }
 
@@ -776,16 +834,22 @@ function applyAttendanceSessions(nextSessions) {
 
 function subscribeAttendanceSessions() {
   const handleError = (error) => notice("Không thể tải dữ liệu điểm danh: " + error.message, "error");
-  if (isSubAdmin) {
-    const own = new Map(), assigned = new Map();
+  if (isSubAdmin || currentRole === "department_admin") {
+    const sources = [];
+    if (isSubAdmin) sources.push(query(collection(db, "attendanceSessions"), where("createdByUid", "==", user.uid)));
+    if (currentRole === "department_admin") {
+      sources.push(query(collection(db, "attendanceSessions"), where("scopeType", "==", "department"), where("scopeId", "==", currentAccess.scopeId)));
+      sources.push(query(collection(db, "attendanceSessions"), where("createdByUid", "==", user.uid)));
+    }
+    sources.push(query(collection(db, "attendanceSessions"), where("coManagerUids", "array-contains", user.uid)));
+    const maps = sources.map(() => new Map());
     const apply = (target, snapshot) => {
       target.clear();
       snapshot.docs.map(normalizeAttendanceSession).forEach((item) => target.set(item.id, item));
-      applyAttendanceSessions([...new Map([...own, ...assigned]).values()]);
+      applyAttendanceSessions([...new Map(maps.flatMap((map) => [...map])).values()]);
     };
-    const unsubscribeOwn = onSnapshot(query(collection(db, "attendanceSessions"), where("createdByUid", "==", user.uid)), (snapshot) => apply(own, snapshot), handleError);
-    const unsubscribeAssigned = onSnapshot(query(collection(db, "attendanceSessions"), where("coManagerUids", "array-contains", user.uid)), (snapshot) => apply(assigned, snapshot), handleError);
-    return () => { unsubscribeOwn(); unsubscribeAssigned(); };
+    const unsubscribes = sources.map((source, index) => onSnapshot(source, (snapshot) => apply(maps[index], snapshot), handleError));
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
   }
   const sessionsQuery = isScopedManager
     ? query(collection(db, "attendanceSessions"), where("coManagerUids", "array-contains", user.uid))
@@ -822,10 +886,15 @@ function listen() {
 
   // Danh sách đăng ký chỉ được truy vấn sau khi Admin chọn một sự kiện.
 
-  if (isOwner) onSnapshot(collection(db, "admins"), (snapshot) => {
-    admins = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
-    render();
-  }, (error) => notice(error.message, "error"));
+  if (creatableRoles(currentAccess).length) {
+    let adminsQuery = collection(db, "admins");
+    if (currentAccess.role === "faculty_admin") adminsQuery = query(collection(db, "admins"), where("role", "==", "sub_admin"));
+    if (currentAccess.role === "department_admin") adminsQuery = query(collection(db, "admins"), where("role", "==", "sub_admin"), where("scopeType", "==", "department"), where("scopeId", "==", currentAccess.scopeId));
+    onSnapshot(adminsQuery, (snapshot) => {
+      admins = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+      render();
+    }, (error) => notice(error.message, "error"));
+  }
 }
 
 $("#groupId").onchange = () => {
@@ -919,7 +988,7 @@ $("#eventForm").onsubmit = async (event) => {
       if (groups.some((item) => groupCode(item) === code)) throw Error(`Mã liên kết ${code} đã được một nhóm khác sử dụng.`);
       const groupPositions = groups.map(groupPosition).filter(Number.isFinite);
       const groupSortOrder = groupPositions.length ? Math.min(...groupPositions) - 1 : 0;
-      const groupRef = await addDoc(collection(db, "eventGroups"), { name, shareCode: code, sortOrder: groupSortOrder, maxRegistrations: unlimited ? 2 : maxRegistrations, unlimited, linkOnly: false, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdByName: user.displayName || "", createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      const groupRef = await addDoc(collection(db, "eventGroups"), { name, shareCode: code, sortOrder: groupSortOrder, maxRegistrations: unlimited ? 2 : maxRegistrations, unlimited, linkOnly: false, scopeType: data.scopeType, scopeId: data.scopeId, createdByUid: user.uid, createdByEmail: user.email.toLowerCase(), createdByName: user.displayName || "", createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
       selectedGroup = groupRef.id;
       group = { id: groupRef.id, name, maxRegistrations: unlimited ? 2 : maxRegistrations, unlimited };
     } else if (selectedGroup) {
@@ -1022,16 +1091,32 @@ $("#settingsForm").onsubmit = async (event) => {
 $("#adminForm").onsubmit = async (event) => {
   event.preventDefault();
   const email = $("#adminEmail").value.trim().toLowerCase();
-  const role = $("#adminRole").value === "subadmin" ? "subadmin" : "admin";
+  const editingEmail = $("#adminEditEmail").value;
   try {
-    await setDoc(doc(db, "admins", email), { email, name: $("#adminName").value.trim(), role, addedByUid: user.uid, addedAt: serverTimestamp() });
-    event.target.reset();
-    $("#adminRole").value = "admin";
-    notice(`Đã thêm ${role === "subadmin" ? "Sub-admin" : "Admin"}.`, "success");
+    const role = $("#adminRole").value;
+    const scopeType = role === "high_admin" ? "global" : role === "faculty_admin" ? "faculty" : role === "department_admin" ? "department" : $("#adminScopeType").value;
+    const scopeId = scopeType === "faculty" ? FACULTY_SCOPE_ID : scopeType === "department" ? $("#adminDepartment").value : "";
+    const targetAccess = roleDocument(role, scopeType, scopeId);
+    if (!allowedScopeForNewAdmin(currentAccess, targetAccess)) throw Error("Bạn không được cấp vai trò hoặc phạm vi này.");
+    const payload = { email, name: $("#adminName").value.trim(), ...targetAccess, updatedAt: serverTimestamp() };
+    if (editingEmail) {
+      if (editingEmail !== email) throw Error("Không thể đổi email tài khoản quản trị.");
+      await updateDoc(doc(db, "admins", email), payload);
+      await clearStorageAdminAccess(email);
+      notice("Đã cập nhật vai trò và phạm vi.", "success");
+    } else {
+      await setDoc(doc(db, "admins", email), { ...payload, addedByUid: user.uid, addedByEmail: user.email.toLowerCase(), addedAt: serverTimestamp() });
+      notice(`Đã thêm ${accessLabel(targetAccess)}.`, "success");
+    }
+    resetAdminForm();
   } catch (error) {
     notice(error.message, "error");
   }
 };
+
+$("#adminRole").onchange = syncAdminScopeForm;
+$("#adminScopeType").onchange = syncAdminScopeForm;
+$("#adminEditCancel").onclick = resetAdminForm;
 
 document.addEventListener("change", async (event) => {
   const attendanceRole = event.target.closest("[data-attendance-assignment-role]");
@@ -1044,16 +1129,6 @@ document.addEventListener("change", async (event) => {
       notice("Đã cập nhật nhanh vai trò sinh viên.", "success");
     } catch (error) { notice(error.message || "Không thể đổi vai trò.", "error"); }
     return;
-  }
-  const select = event.target.closest("[data-admin-role]");
-  if (!select || !isOwner) return;
-  try {
-    await updateDoc(doc(db, "admins", select.dataset.adminRole), { role: select.value === "subadmin" ? "subadmin" : "admin", updatedAt: serverTimestamp() });
-    await clearStorageAdminAccess(select.dataset.adminRole);
-    notice("Đã cập nhật quyền quản trị.", "success");
-  } catch (error) {
-    notice(error.message || "Không thể cập nhật quyền.", "error");
-    render();
   }
 });
 
@@ -1176,12 +1251,33 @@ document.addEventListener("click", async (event) => {
       notice(error.message, "error");
     }
   }
-  if (button.dataset.removeAdmin && await confirmAction({ title: "Xóa quyền Admin?", message: `Tài khoản ${button.dataset.removeAdmin} sẽ không còn quyền quản trị.` })) try {
-    await clearStorageAdminAccess(button.dataset.removeAdmin);
-    await deleteDoc(doc(db, "admins", button.dataset.removeAdmin));
-    notice("Đã xóa Admin.", "success");
-  } catch (error) {
-    notice(error.message, "error");
+  if (button.dataset.editAdmin) {
+    const selected = admins.find((record) => (record.email || record.id) === button.dataset.editAdmin);
+    const targetAccess = storedAdminAccess(selected);
+    if (!selected || !canManageAdmin(currentAccess, targetAccess)) return notice("Bạn không có quyền sửa tài khoản này.", "error");
+    $("#adminEditEmail").value = selected.email || selected.id;
+    $("#adminEmail").value = selected.email || selected.id;
+    $("#adminEmail").disabled = true;
+    $("#adminName").value = selected.name || "";
+    $("#adminRole").value = targetAccess.role;
+    $("#adminScopeType").value = targetAccess.scopeType === "department" ? "department" : "faculty";
+    if (targetAccess.scopeId) $("#adminDepartment").value = targetAccess.scopeId;
+    syncAdminScopeForm();
+    $("#adminSubmit").textContent = "Lưu thay đổi";
+    $("#adminEditCancel").classList.remove("hidden");
+    $("#adminEmail").scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  if (button.dataset.removeAdmin) {
+    const selected = admins.find((record) => (record.email || record.id) === button.dataset.removeAdmin);
+    if (!selected || !canManageAdmin(currentAccess, storedAdminAccess(selected))) return notice("Bạn không có quyền xóa tài khoản này.", "error");
+    if (!(await confirmAction({ title: "Xóa quyền Admin?", message: `Tài khoản ${button.dataset.removeAdmin} sẽ không còn quyền quản trị.` }))) return;
+    try {
+      await clearStorageAdminAccess(button.dataset.removeAdmin);
+      await deleteDoc(doc(db, "admins", button.dataset.removeAdmin));
+      notice("Đã xóa quyền quản trị.", "success");
+    } catch (error) {
+      notice(error.message, "error");
+    }
   }
   if (button.dataset.removeFaculty) {
     settings.faculties = (settings.faculties || []).filter((faculty) => faculty !== button.dataset.removeFaculty);
@@ -1281,7 +1377,9 @@ function attendanceHasRegistrationRoster(item) {
   return Boolean(item?.eventId || item?.hasRegistrationRoster === true);
 }
 
-function highAdminAccess() { return isOwner || currentRole === "admin"; }
+function highAdminAccess() { return ["system_admin", "high_admin", "faculty_admin"].includes(currentRole); }
+function managesResource(item) { return canManageResource(currentAccess, item, user?.uid); }
+function managesAttendance(item) { return managesResource(item) || isResourceCoManager(item, user?.uid); }
 function canReopenAttendance(item) {
   if (!item || !["ended", "finalized"].includes(item.status)) return false;
   if (highAdminAccess()) return true;
@@ -1399,7 +1497,7 @@ function renderAttendance() {
     const checkinCount = attendanceCheckinCounts.get(item.id) || 0;
     const scannerCount = attendanceScannerCounts.get(item.id) || 0;
     const pendingCount = Number(item.pendingCount || 0);
-    const canDeleteAttendance = highAdminAccess() || item.createdByUid === user?.uid;
+    const canDeleteAttendance = managesResource(item);
     return `<article class="att-row">
     <div><span class="att-badge ${safe(runtimeState)}" data-attendance-state="${item.id}" data-runtime-state="${safe(runtimeState)}">${safe(attendanceStatusLabel(runtimeState))}</span>
     <h3>${safe(item.title)}</h3><div class="att-meta">${safe(vietnamDate(item.date))}${item.location ? ` · ${safe(item.location)}` : ""}${rosterMeta}</div><div class="att-meta"><b>Người tạo:</b> ${safe(creatorLabel(item))}</div><div class="att-meta attendance-timing" data-attendance-timing="${item.id}">${safe(attendanceTimingStatus(item))}</div><div class="attendance-card-stats"><span><b>${checkinCount}</b> SV đã điểm danh</span><span><b>${scannerCount}</b> SV được cấp quyền quét</span>${pendingCount ? `<button type="button" class="attendance-pending-stat" data-attendance-open-pending="${item.id}"><b>${pendingCount}</b> hình cần nhập MSSV</button>` : ""}</div></div>
@@ -1755,8 +1853,12 @@ async function createStandaloneAttendance() {
   const roster = [...rosterMap.values()];
   const hasRegistrationRoster = Boolean(eventId) || roster.length > 0;
   const permissionMembers = attendancePermissionMembers;
+  const sourceEvent = eventId ? events.find((item) => item.id === eventId) : null;
+  const attendanceScope = sourceEvent?.scopeType
+    ? { scopeType: sourceEvent.scopeType, scopeId: sourceEvent.scopeId || "" }
+    : sourceEvent ? categoryScope(sourceEvent.category, currentAccess) : defaultResourceScope(currentAccess);
   const writes = [
-    { ref: doc(db, "attendanceSessions", sessionId), data: { eventId, source: eventId ? "registration" : "standalone", hasRegistrationRoster, liveRegistrationRoster: Boolean(eventId), title, date, endDate, startAt: attendanceStartTimestamp(date, startTime), endAt: attendanceEndTimestamp(endDate, endTime), location, startTime, endTime, status: "open", rosterCount: eventId ? Number(events.find((item) => item.id === eventId)?.registeredCount || 0) : roster.length, checkinCount: 0, pendingCount: 0, scannerCount: permissionMembers.length, coManagerUids: [...new Set(attendanceCoManagerUids)], createdByUid: user.uid, createdByEmail: user.email, createdByName: user.displayName || "", createdAt: serverTimestamp() } },
+    { ref: doc(db, "attendanceSessions", sessionId), data: { eventId, source: eventId ? "registration" : "standalone", ...attendanceScope, hasRegistrationRoster, liveRegistrationRoster: Boolean(eventId), title, date, endDate, startAt: attendanceStartTimestamp(date, startTime), endAt: attendanceEndTimestamp(endDate, endTime), location, startTime, endTime, status: "open", rosterCount: eventId ? Number(sourceEvent?.registeredCount || 0) : roster.length, checkinCount: 0, pendingCount: 0, scannerCount: permissionMembers.length, coManagerUids: [...new Set(attendanceCoManagerUids)], createdByUid: user.uid, createdByEmail: user.email, createdByName: user.displayName || "", createdAt: serverTimestamp() } },
     ...roster.map((item) => ({ ref: doc(db, "attendanceRoster", sessionId + "_" + item.mssv), data: { sessionId, eventId, mssv: item.mssv, name: item.name || "", email: item.email || item.mssv.toLowerCase() + "@student.tdtu.edu.vn", uid: item.uid || "", createdAt: serverTimestamp() } }))
   ];
   const assignmentWrites = permissionMembers.flatMap((item) => {
@@ -2115,7 +2217,7 @@ document.addEventListener("click", async (event) => {
   }
   if (button.dataset.deleteAttendance) {
     const selected = attendanceSessions.find((item) => item.id === button.dataset.deleteAttendance);
-    if (!selected || (!highAdminAccess() && selected.createdByUid !== user.uid)) return notice("Bạn không có quyền xóa phiên điểm danh này.", "error");
+    if (!selected || !managesResource(selected)) return notice("Bạn không có quyền xóa phiên điểm danh này.", "error");
     if (!(await confirmAction({ title: "Đưa điểm danh vào thùng rác?", message: "Phiên điểm danh sẽ được giữ 30 ngày. Nhập XÓA để tiếp tục.", verification: "XÓA" }))) return;
     await updateDoc(doc(db, "attendanceSessions", selected.id), { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email });
     if (selectedAttendanceSession?.id === selected.id) {
@@ -2217,7 +2319,7 @@ $("#attendanceImageSaveMssv").onclick = async () => {
   finally { button.disabled = false; }
 };
 $("#attendanceEditForm").onsubmit = async (event) => {
-  event.preventDefault(); const item = selectedAttendanceSession; if (!item || (!highAdminAccess() && item.createdByUid !== user.uid && !isResourceCoManager(item, user.uid))) return notice("Bạn không có quyền chỉnh sửa phiên điểm danh này.", "error");
+  event.preventDefault(); const item = selectedAttendanceSession; if (!item || !managesAttendance(item)) return notice("Bạn không có quyền chỉnh sửa phiên điểm danh này.", "error");
   const id = item.id;
   const date = parseVietnamDate($("#attendanceEditDate").value), endDate = parseVietnamDate($("#attendanceEditEndDate").value); if (!date || !endDate) return notice("Ngày không hợp lệ. Vui lòng nhập theo dạng ngày/tháng/năm.", "error"); if (endDate < date) return notice("Ngày kết thúc không được trước ngày tổ chức.", "error");
   const endTime = $("#attendanceEditEndTime").value;
@@ -2298,24 +2400,25 @@ onAuthStateChanged(auth, async (currentUser) => {
     $("#adminApp").classList.add("hidden");
     return;
   }
-  const resolvedRole = currentUser.emailVerified ? await accessRole(currentUser) : "";
-  if (!resolvedRole) {
+  const resolvedAccess = currentUser.emailVerified ? await accessRole(currentUser) : null;
+  if (!resolvedAccess?.role) {
     await signOut(auth);
     showAdminLoginNotice(`Google đã chọn tài khoản ${currentUser.email || "(không có email)"}, nhưng tài khoản này chưa có quyền quản trị IFA+A.`);
     return;
   }
   showAdminLoginNotice();
   user = currentUser;
-  currentRole = resolvedRole;
-  isOwner = currentRole === "owner";
-  isSubAdmin = currentRole === "subadmin";
-  isScopedManager = currentRole === "scoped";
+  currentAccess = resolvedAccess;
+  currentRole = currentAccess.role;
+  isOwner = currentRole === "system_admin";
+  isSubAdmin = currentRole === "sub_admin";
+  isScopedManager = currentRole === "scoped_manager";
   $("#accountEmail").textContent = currentUser.email;
-  $("#roleText").textContent = `Quyền hiện tại: ${isOwner ? "Chủ sở hữu" : isSubAdmin ? "Sub-admin · chỉ quản lý sự kiện tự tạo" : isScopedManager ? "Đồng quản lý · chỉ tài nguyên được giao" : "Admin"}`;
+  $("#roleText").textContent = `Quyền hiện tại: ${isScopedManager ? "Đồng quản lý · chỉ tài nguyên được giao" : accessLabel(currentAccess)}`;
   $("#adminLogin").classList.add("hidden");
   $("#adminApp").classList.remove("hidden");
   $("#logoutBtn").classList.remove("hidden");
-  $("#adminNav").classList.toggle("hidden", !isOwner);
+  $("#adminNav").classList.toggle("hidden", !creatableRoles(currentAccess).length);
   $("#settingsNav").classList.toggle("hidden", !isOwner);
   $("#trashNav").classList.toggle("hidden", !highAdminAccess());
   $("#studentsNav").classList.toggle("hidden", !highAdminAccess());
@@ -2327,6 +2430,8 @@ onAuthStateChanged(auth, async (currentUser) => {
     });
   }
   $("#auditLogSection").classList.toggle("hidden", !highAdminAccess());
+  configureAdminForm();
+  void syncStorageAdminAccess(currentUser, currentAccess).catch(() => {});
   listen();
   if (isScopedManager) showPane("events");
   else void loadSystemStatus();

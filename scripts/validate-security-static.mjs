@@ -25,9 +25,9 @@ assert.match(firestore, /function canonicalizationTargetLinked\(checkinId, sessi
 assert.match(firestore, /function canonicalizationSourceLinked\(checkinId, sessionId\)/);
 assert.match(firestore, /counterSourceId/);
 assert.match(firestore, /validRegistrationZeroCleanup/);
-assert.match(storage, /data\.get\('role', 'admin'\) != 'subadmin'/);
+assert.match(storage, /data\.get\('role', 'admin'\) == 'admin'/);
+assert.match(storage, /data\.get\('role', ''\) == 'high_admin'/);
 assert.match(storage, /function exportCacheAdmin\(\)/);
-assert.match(storage, /data\.get\('role', ''\) == 'admin'/);
 assert.match(storage, /match \/exports\/\{exportType\}\/\{exportFile\}[\s\S]*allow read: if exportCacheAdmin\(\);[\s\S]*allow create, update: if exportCacheAdmin\(\)/);
 assert.match(storage, /match \/event-attachments\/\{eventId\}\/\{attachmentFile\}[\s\S]*allow read: if highAdmin\(\) \|\| downloadableEvent\(eventId\);[\s\S]*allow create: if managesEvent\(eventId\)[\s\S]*allow update: if false;[\s\S]*allow delete: if managesEvent\(eventId\);/);
 assert.match(storage, /request\.resource\.size <= 20 \* 1024 \* 1024/);
@@ -55,8 +55,8 @@ assert.match(adminRegistrations, /doc\(db, "registrationLimits", `\$\{liveRegist
 assert.match(adminRegistrations, /registeredCount: Math\.max\(0, Number\(eventSnapshot\.data\(\)\.registeredCount \|\| 0\) - 1\)/);
 assert.match(adminRegistrations, /transaction\.delete\(registrationRef\)/);
 assert.match(adminEvents, /query\(collection\(db, "events"\), where\("createdByUid", "==", user\.uid\)\)/);
-assert.match(adminEvents, /const canManage = getIsScopedManager\(\) \? isCoManager : \(!getIsSubAdmin\(\) \|\| event\.createdByUid === user\?\.uid \|\| isCoManager\)/);
-assert.match(adminEvents, /const canDelete = !getIsScopedManager\(\) && \(!getIsSubAdmin\(\) \|\| event\.createdByUid === user\?\.uid\)/);
+assert.match(adminEvents, /const canManage = getIsScopedManager\(\) \? isCoManager : \(canManageResource\(event\) \|\| isCoManager\)/);
+assert.match(adminEvents, /const canDelete = !getIsScopedManager\(\) && canManageResource\(event\)/);
 assert.match(adminEvents, /updateDoc\(doc\(db, "events", selected\.id\), \{\s*deletedAt: serverTimestamp\(\), deletedByUid: user\.uid, deletedByEmail: user\.email/);
 assert.match(adminEvents, /if \(!selected \|\| !getIsOwner\(\)\) throw Error\("Chỉ Chủ sở hữu được xóa vĩnh viễn\."\)/);
 assert.match(adminGroups, /getFetchRegistrations\(\)\("groupId", id\)/);

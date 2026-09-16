@@ -10,7 +10,7 @@
     "test:registration-form": "node --test tests/registration-form.test.mjs",
     "test:registration-ui": "node --test tests/registration-ui.test.mjs",
     "test:event-attachments": "node --test tests/event-attachments.test.mjs",
-    "test:rules": "firebase emulators:exec --only firestore,storage --project ifa-activities \"node --test tests/firebase-rules.test.mjs\""
+    "test:rules": "firebase emulators:exec --only firestore,storage --project ifa-activities \"node --test --test-concurrency=1 tests/firebase-rules.test.mjs tests/admin-role-rules.test.mjs\""
   },
   "dependencies": {
     "firebase-admin": "^13.4.0"
