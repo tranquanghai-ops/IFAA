@@ -12,6 +12,21 @@ function eventDateTime(event, useEnd = false) {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
+export const STUDENT_ENDED_RETENTION_MS = 60 * 24 * 60 * 60 * 1000;
+
+export function studentEventState(event, now = Date.now()) {
+  const end = eventDateTime(event, true);
+  if (end !== null && now > end) return now - end >= STUDENT_ENDED_RETENTION_MS ? "hidden" : "ended";
+  if (event?.status === "hidden" || event?.status === "draft") return "hidden";
+  if (event?.status === "closed") return "closed";
+  const open = valueMillis(event?.openAt) ?? 0;
+  const close = valueMillis(event?.closeAt) ?? Infinity;
+  if (now < open) return "upcoming";
+  if (now > close) return "closed";
+  if (!event?.unlimitedCapacity && (event?.registeredCount || 0) >= (event?.capacity || 0)) return "full";
+  return "open";
+}
+
 function relevantTime(event, state) {
   if (state === "upcoming") return valueMillis(event.openAt) ?? eventDateTime(event) ?? Infinity;
   if (state === "open" || state === "full") return valueMillis(event.openAt) ?? eventDateTime(event);

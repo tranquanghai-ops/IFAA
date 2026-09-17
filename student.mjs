@@ -5,7 +5,7 @@ import { getBlob, getStorage, ref } from "https://www.gstatic.com/firebasejs/11.
 import { firebaseConfig, STUDENT_DOMAIN, OWNER_EMAIL } from "./firebase-config.mjs";
 import { eventNeedsRegistrationForm, formatRegistrationAnswer, registrationConfig, registrationFormSnapshot, validPersonalEmail, validPhone, validateRegistrationSubmission } from "./registration-form.mjs";
 import { EVENT_ATTACHMENT_MAX_BYTES, formatAttachmentSize, normalizeEventAttachments } from "./event-attachments.mjs";
-import { compareStudentAllEvents, matchesStudentGroupFilter } from "./student-event-sort.mjs?v=1";
+import { compareStudentAllEvents, matchesStudentGroupFilter, studentEventState } from "./student-event-sort.mjs?v=2";
 import { canManageResource, normalizeAdminAccess } from "./admin/modules/role-scope.mjs?v=2";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
@@ -410,22 +410,8 @@ function dayPeriod(time) {
   return "Buổi tối";
 }
 
-function eventEnd(event) {
-  const date = new Date(`${event.date}T${event.endTime || event.startTime || "23:59"}:00`);
-  return Number.isNaN(date.getTime()) ? Infinity : date.getTime();
-}
-
 function eventState(event) {
-  if (event.status === "hidden" || event.status === "draft") return "hidden";
-  const now = Date.now();
-  if (now > eventEnd(event)) return "ended";
-  if (event.status === "closed") return "closed";
-  const open = millis(event.openAt) ?? 0;
-  const close = millis(event.closeAt) ?? Infinity;
-  if (now < open) return "upcoming";
-  if (now > close) return "closed";
-  if (!event.unlimitedCapacity && (event.registeredCount || 0) >= (event.capacity || 0)) return "full";
-  return "open";
+  return studentEventState(event);
 }
 
 async function runRegistrationTransaction(operation) {
@@ -573,16 +559,23 @@ function refreshStudentFilters(sourceEvents, focusedGroup) {
   const availableGroupIds = [...new Set(sourceEvents.map((event) => event.groupId).filter(Boolean))];
   const availableGroups = availableGroupIds.map((id) => groups.get(id)).filter(Boolean).sort((a, b) => groupPosition(a) - groupPosition(b));
   const hasUngrouped = sourceEvents.some((event) => !event.groupId);
+  const showGroupFilter = availableGroups.length > 0;
+  $("#studentGroupFilterField").classList.toggle("hidden", !showGroupFilter);
+  $("#studentAdvancedFilters").classList.toggle("single-filter", !showGroupFilter);
   groupSelect.innerHTML = '<option value="">Tất cả nhóm sự kiện</option>' + availableGroups.map((group) => `<option value="${group.id}">${safe(group.name)}</option>`).join("") + (hasUngrouped ? '<option value="__ungrouped__">Không thuộc nhóm</option>' : "");
   const validCurrentGroup = availableGroups.some((group) => group.id === currentGroup) || (hasUngrouped && currentGroup === "__ungrouped__");
   groupSelect.value = validCurrentGroup ? currentGroup : "";
-  groupSelect.disabled = !!focusedGroup;
+  groupSelect.disabled = !!focusedGroup || !showGroupFilter;
   studentGroupFilter = groupSelect.value;
 }
 
+function groupHiddenFromStudents(group) {
+  return group?.hidden === true || Boolean(group?.hiddenAt);
+}
+
 function render() {
-  const focusedEvent = linkedEventCode ? events.find((event) => !event.deletedAt && event.shareCode && shareCode(event.shareCode) === shareCode(linkedEventCode)) : null;
-  const focusedGroup = linkedCode ? [...groups.values()].find((group) => !group.deletedAt && (group.id === linkedCode || groupCode(group) === shareCode(linkedCode))) : null;
+  const focusedEvent = linkedEventCode ? events.find((event) => !event.deletedAt && eventState(event) !== "hidden" && !groupHiddenFromStudents(groups.get(event.groupId)) && event.shareCode && shareCode(event.shareCode) === shareCode(linkedEventCode)) : null;
+  const focusedGroup = linkedCode ? [...groups.values()].find((group) => !group.deletedAt && !groupHiddenFromStudents(group) && (group.id === linkedCode || groupCode(group) === shareCode(linkedCode))) : null;
   const linkedEventMode = !!focusedEvent;
   const linkedMode = !!linkedCode;
   $("#linkedEventPanel").classList.toggle("hidden", !linkedEventMode && !(linkedEventCode && eventsLoaded));
@@ -624,7 +617,7 @@ function render() {
   }
 
   const accessibleEvents = events.filter((event) => {
-    if (event.deletedAt || groups.get(event.groupId)?.deletedAt) return false;
+    if (event.deletedAt || groups.get(event.groupId)?.deletedAt || groupHiddenFromStudents(groups.get(event.groupId))) return false;
     if (!facultyAllowed(event)) return false;
     if (filter === "mine") return myRegs.has(event.id) && (!linkedCode || event.groupId === focusedGroup?.id);
     if (eventState(event) === "hidden") return false;
@@ -951,7 +944,7 @@ async function register(eventId, submission = null) {
       if (event.deletedAt) throw Error("Sự kiện không còn khả dụng.");
       if (event.groupId) {
         const activeGroupSnapshot = await transaction.get(doc(db, "eventGroups", event.groupId));
-        if (!activeGroupSnapshot.exists() || activeGroupSnapshot.data().deletedAt) throw Error("Nhóm sự kiện không còn khả dụng.");
+        if (!activeGroupSnapshot.exists() || activeGroupSnapshot.data().deletedAt || groupHiddenFromStudents(activeGroupSnapshot.data())) throw Error("Nhóm sự kiện không còn khả dụng.");
       }
       if (!allowedFaculties(event).includes(profile.faculty)) throw Error("Sự kiện không mở cho khoa/đơn vị của bạn.");
       let group = null;
