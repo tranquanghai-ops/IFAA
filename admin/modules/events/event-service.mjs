@@ -2,6 +2,7 @@ import { collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp
 import { REGISTRATION_QUESTION_TYPES, normalizeRegistrationFormItems, normalizeRegistrationProfileFields, validateRegistrationConfig } from "../../../registration-form.mjs";
 import { activeAttendanceSessionForEvent } from "../../../attendance-link.mjs";
 import { eventsVisibleInAdmin } from "../resource-ui.mjs?v=1";
+import { departmentCategory } from "../role-scope.mjs?v=2";
 
 export function createAdminEventService({ db, select, safe, toMillis, formatTimestamp, formatVietnamDate, parseVietnamDate, getEvents, setEvents, getGroups, getAttendanceSessions, getUser, getIsOwner, getIsSubAdmin, getIsScopedManager = () => false, getAccess = () => ({}), canManageResource = () => false, canCreateCategory = () => true, getCategoryScope = () => ({ scopeType: "faculty", scopeId: "mtcn" }), getTrashSelection, defaultFaculty, externalCategories, trashRetentionMs, shareCode, groupCode, groupPosition, configuredPublicBaseUrl, confirmAction, notice, copyText, refreshGroupOptions, setLimitInputState, renderEventFaculties, fetchRegistrations, removeRegistration, deleteCachedExport, openEventAttachments, cleanupEventAttachments, getCoManagerUids = () => [], onEventOpen = () => {}, onRender }) {
   let statusFilter = "all";
@@ -360,9 +361,14 @@ export function createAdminEventService({ db, select, safe, toMillis, formatTime
       const sources = [];
       if (getIsSubAdmin()) sources.push(query(collection(db, "events"), where("createdByUid", "==", user.uid)));
       if (access.role === "department_admin") {
-        sources.push(query(collection(db, "events"), where("scopeType", "==", "department"), where("scopeId", "==", access.scopeId)));
-        const category = { graphic: "Ngành Đồ họa", industrial: "Ngành Thiết kế công nghiệp", interior: "Ngành Thiết kế nội thất", fashion: "Ngành Thiết kế thời trang", "digital-art": "Ngành Nghệ thuật số" }[access.scopeId];
-        if (category) sources.push(query(collection(db, "events"), where("category", "==", category)));
+        // Mỗi scope của trưởng ngành tương ứng một truy vấn theo scopeType/scopeId và theo category
+        // (bắt cả sự kiện legacy chưa có scopeType). Bản ghi trùng được hợp nhất theo id.
+        const scopeIds = Array.isArray(access.scopeIds) && access.scopeIds.length ? access.scopeIds : [access.scopeId].filter(Boolean);
+        for (const scopeId of scopeIds) {
+          sources.push(query(collection(db, "events"), where("scopeType", "==", "department"), where("scopeId", "==", scopeId)));
+          const category = departmentCategory(scopeId);
+          if (category) sources.push(query(collection(db, "events"), where("category", "==", category)));
+        }
         sources.push(query(collection(db, "events"), where("createdByUid", "==", user.uid)));
       }
       sources.push(query(collection(db, "events"), where("coManagerUids", "array-contains", user.uid)));

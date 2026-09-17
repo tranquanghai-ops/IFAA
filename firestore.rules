@@ -16,7 +16,6 @@ service cloud.firestore {
       && get(adminPath(email())).data.get('scopeId', '') == 'mtcn'; }
     function departmentAdmin(){ return admin() && !owner() && adminRole() == 'department_admin'
       && get(adminPath(email())).data.get('scopeType', '') == 'department'; }
-    function departmentId(){ return get(adminPath(email())).data.get('scopeId', ''); }
     function subAdmin(){ return admin() && !owner() && (adminRole() == 'subadmin' || adminRole() == 'sub_admin'); }
     function legacySubAdmin(){ return subAdmin() && adminRole() == 'subadmin'; }
     function facultySubAdmin(){ return subAdmin() && adminRole() == 'sub_admin'
@@ -24,9 +23,19 @@ service cloud.firestore {
       && get(adminPath(email())).data.get('scopeId', '') == 'mtcn'; }
     function departmentSubAdmin(){ return subAdmin() && adminRole() == 'sub_admin'
       && get(adminPath(email())).data.get('scopeType', '') == 'department'; }
-    function subAdminDepartmentId(){ return get(adminPath(email())).data.get('scopeId', ''); }
     function participant(){ return student() || staff() || admin(); }
-    function validDepartment(value){ return value == 'graphic' || value == 'industrial' || value == 'interior' || value == 'fashion' || value == 'digital-art'; }
+    // Danh sách scope canonical: 5 ngành + Cao học / Thạc sĩ.
+    function canonicalScopeIds(){ return ['graphic', 'industrial', 'interior', 'fashion', 'digital-art', 'graduate']; }
+    function validDepartment(value){ return canonicalScopeIds().hasAny([value]); }
+    // Bản ghi legacy chỉ có scopeId (không có scopeIds) được hiểu là danh sách một phần tử khi đọc.
+    function adminScopeList(data){
+      let ids = data.get('scopeIds', []);
+      return ids is list && ids.size() > 0 ? ids : [data.get('scopeId', '')];
+    }
+    function actorScopeIds(){ return adminScopeList(get(adminPath(email())).data); }
+    function validStoredScopeIds(ids){
+      return ids is list && ids.size() >= 1 && ids.size() <= 10 && ids.hasOnly(canonicalScopeIds());
+    }
     function validResourceScope(data){ return (data.get('scopeType', '') == 'faculty' && data.get('scopeId', '') == 'mtcn')
       || (data.get('scopeType', '') == 'department' && validDepartment(data.get('scopeId', '')))
       || data.get('scopeType', '') == 'legacy'; }
@@ -34,17 +43,17 @@ service cloud.firestore {
       : category == 'Ngành Thiết kế công nghiệp' ? 'industrial'
       : category == 'Ngành Thiết kế nội thất' ? 'interior'
       : category == 'Ngành Thiết kế thời trang' ? 'fashion'
-      : category == 'Ngành Nghệ thuật số' ? 'digital-art' : ''; }
+      : category == 'Ngành Nghệ thuật số' ? 'digital-art'
+      : category == 'Sau đại học' ? 'graduate' : ''; }
     function externalCategory(category){ return category == 'Sự kiện Trường' || category == 'Sự kiện Khoa khác'; }
     function resourceDepartment(data){ return data.get('scopeType', '') == 'department' ? data.get('scopeId', '') : categoryDepartment(data.get('category', '')); }
     function scopeFieldsUnchanged(){ return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['scopeType','scopeId']); }
     function storedAdminCanManageResourceData(data){
       let actor = get(adminPath(email())).data;
       let role = actor.get('role', 'admin');
-      let scopeId = actor.get('scopeId', '');
       return role == 'admin' || role == 'high_admin' || role == 'faculty_admin'
         || ((role == 'subadmin' || role == 'sub_admin') && data.createdByUid == request.auth.uid)
-        || (role == 'department_admin' && resourceDepartment(data) == scopeId)
+        || (role == 'department_admin' && resourceDepartment(data) != '' && actorScopeIds().hasAny([resourceDepartment(data)]))
         || (role == 'department_admin' && resourceDepartment(data) == '' && data.createdByUid == request.auth.uid);
     }
     function canManageResourceData(data){ return owner() || (signedIn() && exists(adminPath(email())) && storedAdminCanManageResourceData(data)); }
@@ -52,14 +61,13 @@ service cloud.firestore {
       let actor = get(adminPath(email())).data;
       let role = actor.get('role', 'admin');
       let scopeType = actor.get('scopeType', role == 'subadmin' ? 'legacy' : '');
-      let scopeId = actor.get('scopeId', '');
       return ((role == 'admin' || role == 'high_admin' || role == 'subadmin') && data.get('scopeType', '') == '')
         || (validResourceScope(data) && (role == 'admin' || role == 'high_admin' || role == 'faculty_admin'
-          || (role == 'department_admin' && data.scopeType == 'department' && data.scopeId == scopeId)
+          || (role == 'department_admin' && data.scopeType == 'department' && data.get('scopeId', '') != '' && actorScopeIds().hasAny([data.scopeId]))
           || (role == 'sub_admin' && scopeType == 'faculty'
             && ((data.scopeType == 'faculty' && data.scopeId == 'mtcn')
               || (data.scopeType == 'department' && validDepartment(data.scopeId))))
-          || (role == 'sub_admin' && scopeType == 'department' && data.scopeType == 'department' && data.scopeId == scopeId)
+          || (role == 'sub_admin' && scopeType == 'department' && data.scopeType == 'department' && data.get('scopeId', '') != '' && actorScopeIds().hasAny([data.scopeId]))
           || (role == 'subadmin' && data.scopeType == 'legacy')));
     }
     function canCreateScopedResource(data){ return (owner() && (data.get('scopeType', '') == '' || validResourceScope(data)))
@@ -71,15 +79,24 @@ service cloud.firestore {
         ? data.scopeType == 'department' && data.scopeId == categoryDepartment(data.category) && canCreateScopedResource(data)
         : data.category == 'Sự kiện Khoa' && data.scopeType == 'faculty' && data.scopeId == 'mtcn' && canCreateScopedResource(data));
     }
+    // Scope kiểu department: bắt buộc scopeIds canonical; bản ghi legacy chỉ có scopeId vẫn hợp lệ
+    // để không vỡ frontend cũ trong lúc triển khai (đọc luôn fallback về [scopeId]).
+    function validDepartmentScopedAdminData(data){
+      let ids = data.get('scopeIds', null);
+      return data.get('scopeType', '') == 'department'
+        && ((ids != null && ids is list && ids.size() >= 1 && ids.size() <= 10 && ids.hasOnly(canonicalScopeIds()) && ids[0] == data.get('scopeId', ''))
+          || (ids == null && validDepartment(data.get('scopeId', ''))));
+    }
     function validAdminData(data){ return (data.role == 'high_admin' && data.scopeType == 'global' && data.get('scopeId', '') == '')
       || (data.role == 'faculty_admin' && data.scopeType == 'faculty' && data.scopeId == 'mtcn')
-      || (data.role == 'department_admin' && data.scopeType == 'department' && validDepartment(data.scopeId))
+      || (data.role == 'department_admin' && validDepartmentScopedAdminData(data))
       || (data.role == 'sub_admin' && ((data.scopeType == 'faculty' && data.scopeId == 'mtcn')
-        || (data.scopeType == 'department' && validDepartment(data.scopeId)))); }
+        || validDepartmentScopedAdminData(data))); }
     function canManageAdminData(data){ return systemAdmin() && data.get('role', 'admin') != 'system_admin'
       || (highAdmin() && !systemAdmin() && (data.role == 'faculty_admin' || data.role == 'department_admin' || data.role == 'sub_admin' || data.role == 'subadmin'))
       || (facultyAdmin() && data.role == 'sub_admin')
-      || (departmentAdmin() && data.role == 'sub_admin' && data.scopeType == 'department' && data.scopeId == departmentId()); }
+      || (departmentAdmin() && data.role == 'sub_admin' && data.scopeType == 'department'
+        && adminScopeList(data).hasOnly(actorScopeIds())); }
     function assignmentPath(sessionId){ return /databases/$(database)/documents/scannerAssignments/$(sessionId + '_' + email()); }
     function assigned(sessionId){ return signedIn() && exists(assignmentPath(sessionId)) && get(assignmentPath(sessionId)).data.active == true; }
     function leader(sessionId){ return assigned(sessionId) && get(assignmentPath(sessionId)).data.role == 'leader'; }
@@ -353,7 +370,11 @@ service cloud.firestore {
 
     match /admins/{adminEmail} {
       allow get: if signedIn() && (email() == adminEmail || systemAdmin() || highAdmin() || canManageAdminData(resource.data));
-      allow list: if systemAdmin() || highAdmin() || canManageAdminData(resource.data);
+      // Trưởng ngành liệt kê được Sub-admin chia sẻ ít nhất một scope của mình (scopeId nằm trong
+      // truy vấn nên mọi kết quả đều thỏa hasAny); thêm/sửa/xóa vẫn bắt buộc subset đầy đủ.
+      allow list: if systemAdmin() || highAdmin() || canManageAdminData(resource.data)
+        || (departmentAdmin() && resource.data.role == 'sub_admin' && resource.data.scopeType == 'department'
+          && adminScopeList(resource.data).hasAny(actorScopeIds()));
       allow create: if signedIn() && adminEmail != email()
         && request.resource.data.email == adminEmail
         && request.resource.data.addedByUid == request.auth.uid

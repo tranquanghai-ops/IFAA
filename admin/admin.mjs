@@ -13,7 +13,7 @@ import { creatorLabel } from "./modules/resource-ui.mjs?v=1";
 import { createAdminRegistrationService } from "./modules/registrations/registration-service.mjs?v=2";
 import { createAdminStudentService } from "./modules/students/student-service.mjs?v=2";
 import { addCoManagerUid, canEditResourceCoManagers, inheritedAttendanceCoManagerUids, isResourceCoManager, normalizeCoManagerUids } from "./modules/co-managers.mjs?v=1";
-import { DEPARTMENTS, FACULTY_SCOPE_ID, ROLE_LABELS, accessLabel, allowedScopeForNewAdmin, canCreateCategory, canManageAdmin, canManageResource, categoryScope, creatableRoles, defaultResourceScope, normalizeAdminAccess, roleDocument, scopeLabel } from "./modules/role-scope.mjs?v=1";
+import { DEPARTMENTS, FACULTY_SCOPE_ID, ROLE_LABELS, accessLabel, assignableScopeOptions, canCreateCategory, canManageAdmin, canManageResource, categoryScope, creatableRoles, defaultResourceScope, filterSortAdmins, grantorLabel, normalizeAdminAccess, roleDocument, scopeLabels } from "./modules/role-scope.mjs?v=2";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
 const DEFAULT_PUBLIC_BASE_URL = "https://ifa.tdtu.edu.vn/dang-ky-su-kien";
@@ -134,6 +134,10 @@ const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const purgingEventIds = new Set();
 const purgingGroupIds = new Set();
 let admins = [];
+let adminGrantorProfiles = new Map();
+let adminRoleFilter = "all";
+let adminScopeFilter = "all";
+let adminSortMode = "default";
 let groups = [];
 const trashSelection = { events: new Set(), attendance: new Set(), groups: new Set() };
 const trashBulkBusy = { events: false, attendance: false, groups: false };
@@ -583,6 +587,7 @@ async function syncStorageAdminAccess(currentUser, access) {
     role: access.role,
     scopeType: access.scopeType,
     scopeId: access.scopeId || "",
+    scopeIds: Array.isArray(access.scopeIds) ? access.scopeIds : [],
     updatedAt: serverTimestamp()
   }, { merge: true });
 }
@@ -698,12 +703,50 @@ function storedAdminAccess(record) {
   return normalizeAdminAccess(record || {});
 }
 
+// Cột "Người cấp quyền": resolve UID thành tên/email qua profiles, cache theo UID để tránh truy vấn lặp.
+async function loadAdminGrantorProfiles() {
+  const missing = [...new Set(admins.map((record) => record.addedByUid).filter(Boolean))].filter((uid) => !adminGrantorProfiles.has(uid));
+  await Promise.all(missing.map(async (uid) => {
+    try {
+      const snapshot = await getDoc(doc(db, "profiles", uid));
+      const data = snapshot.exists() ? snapshot.data() : {};
+      adminGrantorProfiles.set(uid, { name: data.name || data.displayName || "", email: data.email || "" });
+    } catch {
+      adminGrantorProfiles.set(uid, null);
+    }
+  }));
+  if (missing.length) renderAdminRows();
+}
+
 function renderAdminRows() {
-  const rows = admins.filter((record) => canManageAdmin(currentAccess, storedAdminAccess(record)));
-  $("#adminRows").innerHTML = rows.map((record) => {
-    const access = storedAdminAccess(record);
-    return `<tr><td>${safe(record.name || "")}</td><td>${safe(record.email || record.id)}</td><td>${safe(accessLabel(access))}</td><td>${safe(scopeLabel(access))}</td><td>${safe(record.addedByEmail || record.addedByUid || "—")}</td><td>${ts(record.addedAt)}</td><td><div class="actions"><button class="btn btn-small" data-edit-admin="${safe(record.email || record.id)}">Sửa</button><button class="btn btn-small btn-danger" data-remove-admin="${safe(record.email || record.id)}">Xóa</button></div></td></tr>`;
+  const rows = filterSortAdmins(
+    admins
+      .filter((record) => canManageAdmin(currentAccess, storedAdminAccess(record)))
+      .map((record) => ({ record, access: storedAdminAccess(record), name: record.name || "" })),
+    { roleFilter: adminRoleFilter, scopeFilter: adminScopeFilter, sort: adminSortMode }
+  );
+  $("#adminRows").innerHTML = rows.map(({ record, access }) => {
+    const chips = scopeLabels(access).map((label) => `<span class="scope-chip">${safe(label)}</span>`).join(" ") || "—";
+    const grantor = grantorLabel(record, (uid) => adminGrantorProfiles.get(uid));
+    return `<tr><td>${safe(record.name || "")}</td><td>${safe(record.email || record.id)}</td><td>${safe(ROLE_LABELS[access.role] || access.role)}</td><td><div class="scope-chip-list">${chips}</div></td><td>${safe(grantor)}</td><td>${ts(record.addedAt)}</td><td><div class="actions"><button class="btn btn-small" data-edit-admin="${safe(record.email || record.id)}">Sửa</button><button class="btn btn-small btn-danger" data-remove-admin="${safe(record.email || record.id)}">Xóa</button></div></td></tr>`;
   }).join("") || '<tr><td colspan="7" class="empty">Không có tài khoản thuộc phạm vi được quản lý.</td></tr>';
+}
+
+function populateAdminFilters() {
+  const roleFilter = $("#adminRoleFilter"), scopeFilter = $("#adminScopeFilter");
+  if (!roleFilter || !scopeFilter) return;
+  roleFilter.innerHTML = '<option value="all">Tất cả vai trò</option>' + Object.entries(ROLE_LABELS).map(([value, label]) => `<option value="${value}">${safe(label)}</option>`).join("");
+  scopeFilter.innerHTML = '<option value="all">Tất cả phạm vi</option><option value="global">Toàn hệ thống</option><option value="faculty">Khoa MTCN</option>'
+    + DEPARTMENTS.map((department) => `<option value="${department.id}">${safe(department.label)}</option>`).join("");
+  roleFilter.value = adminRoleFilter;
+  scopeFilter.value = adminScopeFilter;
+}
+
+function renderAdminDepartmentOptions(selected = []) {
+  const list = $("#adminDepartmentList");
+  if (!list) return;
+  const chosen = selected.filter(Boolean);
+  list.innerHTML = assignableScopeOptions(currentAccess).map((department) => `<label class="check-chip"><input class="admin-scope-option" type="checkbox" value="${department.id}" ${chosen.includes(department.id) ? "checked" : ""}> ${safe(department.label)}</label>`).join("");
 }
 
 function syncAdminScopeForm() {
@@ -724,11 +767,11 @@ function syncAdminScopeForm() {
 }
 
 function configureAdminForm() {
-  const roleSelect = $("#adminRole"), departmentSelect = $("#adminDepartment");
-  if (!roleSelect || !departmentSelect) return;
+  const roleSelect = $("#adminRole");
+  if (!roleSelect) return;
   roleSelect.innerHTML = creatableRoles(currentAccess).map((role) => `<option value="${role}">${safe(ROLE_LABELS[role])}</option>`).join("");
-  departmentSelect.innerHTML = DEPARTMENTS.map((department) => `<option value="${department.id}">${safe(department.label)}</option>`).join("");
-  if (currentAccess.role === "department_admin") departmentSelect.value = currentAccess.scopeId;
+  renderAdminDepartmentOptions([]);
+  populateAdminFilters();
   syncAdminScopeForm();
 }
 
@@ -740,6 +783,10 @@ function resetAdminForm() {
   $("#adminEditCancel").classList.add("hidden");
   configureAdminForm();
 }
+
+$("#adminRoleFilter").onchange = () => { adminRoleFilter = $("#adminRoleFilter").value; renderAdminRows(); };
+$("#adminScopeFilter").onchange = () => { adminScopeFilter = $("#adminScopeFilter").value; renderAdminRows(); };
+$("#adminSort").onchange = () => { adminSortMode = $("#adminSort").value; renderAdminRows(); };
 
 function render() {
   const { activeEvents, orderedGroups } = renderEvents();
@@ -838,7 +885,10 @@ function subscribeAttendanceSessions() {
     const sources = [];
     if (isSubAdmin) sources.push(query(collection(db, "attendanceSessions"), where("createdByUid", "==", user.uid)));
     if (currentRole === "department_admin") {
-      sources.push(query(collection(db, "attendanceSessions"), where("scopeType", "==", "department"), where("scopeId", "==", currentAccess.scopeId)));
+      const scopeIds = currentAccess.scopeIds.length ? currentAccess.scopeIds : [currentAccess.scopeId].filter(Boolean);
+      for (const scopeId of scopeIds) {
+        sources.push(query(collection(db, "attendanceSessions"), where("scopeType", "==", "department"), where("scopeId", "==", scopeId)));
+      }
       sources.push(query(collection(db, "attendanceSessions"), where("createdByUid", "==", user.uid)));
     }
     sources.push(query(collection(db, "attendanceSessions"), where("coManagerUids", "array-contains", user.uid)));
@@ -887,13 +937,29 @@ function listen() {
   // Danh sách đăng ký chỉ được truy vấn sau khi Admin chọn một sự kiện.
 
   if (creatableRoles(currentAccess).length) {
-    let adminsQuery = collection(db, "admins");
-    if (currentAccess.role === "faculty_admin") adminsQuery = query(collection(db, "admins"), where("role", "==", "sub_admin"));
-    if (currentAccess.role === "department_admin") adminsQuery = query(collection(db, "admins"), where("role", "==", "sub_admin"), where("scopeType", "==", "department"), where("scopeId", "==", currentAccess.scopeId));
-    onSnapshot(adminsQuery, (snapshot) => {
-      admins = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    // Trưởng ngành nhiều scope: một truy vấn cho từng scope (scopeId = scopeIds[0] của tài khoản đích),
+    // hợp nhất client-side. Firestore Rules không cho phép truy vấn trả về tài khoản ngoài quyền.
+    const sources = [];
+    if (currentAccess.role === "department_admin") {
+      const scopeIds = currentAccess.scopeIds.length ? currentAccess.scopeIds : [currentAccess.scopeId].filter(Boolean);
+      for (const scopeId of scopeIds) {
+        sources.push(query(collection(db, "admins"), where("role", "==", "sub_admin"), where("scopeType", "==", "department"), where("scopeId", "==", scopeId)));
+      }
+    } else if (currentAccess.role === "faculty_admin") {
+      sources.push(query(collection(db, "admins"), where("role", "==", "sub_admin")));
+    } else {
+      sources.push(collection(db, "admins"));
+    }
+    const maps = sources.map(() => new Map());
+    const applyAdmins = (index, snapshot) => {
+      maps[index].clear();
+      snapshot.docs.forEach((item) => maps[index].set(item.id, { id: item.id, ...item.data() }));
+      admins = [...new Map(maps.flatMap((map) => [...map])).values()];
       render();
-    }, (error) => notice(error.message, "error"));
+      void loadAdminGrantorProfiles();
+    };
+    const unsubscribes = sources.map((source, index) => onSnapshot(source, (snapshot) => applyAdmins(index, snapshot), (error) => notice(error.message, "error")));
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
   }
 }
 
@@ -1095,8 +1161,9 @@ $("#adminForm").onsubmit = async (event) => {
   try {
     const role = $("#adminRole").value;
     const scopeType = role === "high_admin" ? "global" : role === "faculty_admin" ? "faculty" : role === "department_admin" ? "department" : $("#adminScopeType").value;
-    const scopeId = scopeType === "faculty" ? FACULTY_SCOPE_ID : scopeType === "department" ? $("#adminDepartment").value : "";
-    const targetAccess = roleDocument(role, scopeType, scopeId);
+    const selectedScopes = [...document.querySelectorAll(".admin-scope-option:checked")].map((input) => input.value);
+    if ((role === "department_admin" || (role === "sub_admin" && scopeType === "department")) && !selectedScopes.length) throw Error("Vui lòng chọn ít nhất một ngành/chương trình.");
+    const targetAccess = roleDocument(role, scopeType, selectedScopes);
     if (!allowedScopeForNewAdmin(currentAccess, targetAccess)) throw Error("Bạn không được cấp vai trò hoặc phạm vi này.");
     const payload = { email, name: $("#adminName").value.trim(), ...targetAccess, updatedAt: serverTimestamp() };
     if (editingEmail) {
@@ -1261,7 +1328,7 @@ document.addEventListener("click", async (event) => {
     $("#adminName").value = selected.name || "";
     $("#adminRole").value = targetAccess.role;
     $("#adminScopeType").value = targetAccess.scopeType === "department" ? "department" : "faculty";
-    if (targetAccess.scopeId) $("#adminDepartment").value = targetAccess.scopeId;
+    renderAdminDepartmentOptions(targetAccess.scopeType === "department" ? (targetAccess.scopeIds.length ? targetAccess.scopeIds : [targetAccess.scopeId]) : []);
     syncAdminScopeForm();
     $("#adminSubmit").textContent = "Lưu thay đổi";
     $("#adminEditCancel").classList.remove("hidden");

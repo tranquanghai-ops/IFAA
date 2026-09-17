@@ -78,17 +78,33 @@ export function createAdminGroupService({ db, select, safe, toMillis, getGroups,
   function subscribeGroups() {
     const user = getUser();
     const access = getAccess();
-    const groupsQuery = getIsSubAdmin()
-      ? query(collection(db, "eventGroups"), where("createdByUid", "==", user.uid))
-      : access.role === "department_admin"
-        ? query(collection(db, "eventGroups"), where("scopeType", "==", "department"), where("scopeId", "==", access.scopeId))
-        : query(collection(db, "eventGroups"), orderBy("createdAt", "desc"));
-    return onSnapshot(groupsQuery, (snapshot) => {
-      setGroups(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => (toMillis(b.createdAt) || 0) - (toMillis(a.createdAt) || 0)));
+    if (!getIsSubAdmin() && access.role !== "department_admin") {
+      return onSnapshot(query(collection(db, "eventGroups"), orderBy("createdAt", "desc")), (snapshot) => {
+        setGroups(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => (toMillis(b.createdAt) || 0) - (toMillis(a.createdAt) || 0)));
+        refreshGroupOptions(select("#groupId").value);
+        onRender();
+        onGroupsUpdated();
+      }, (error) => notice(error.message, "error"));
+    }
+    const sources = [];
+    if (getIsSubAdmin()) sources.push(query(collection(db, "eventGroups"), where("createdByUid", "==", user.uid)));
+    if (access.role === "department_admin") {
+      const scopeIds = Array.isArray(access.scopeIds) && access.scopeIds.length ? access.scopeIds : [access.scopeId].filter(Boolean);
+      for (const scopeId of scopeIds) {
+        sources.push(query(collection(db, "eventGroups"), where("scopeType", "==", "department"), where("scopeId", "==", scopeId)));
+      }
+    }
+    const maps = sources.map(() => new Map());
+    const apply = (index, snapshot) => {
+      maps[index].clear();
+      snapshot.docs.forEach((item) => maps[index].set(item.id, { id: item.id, ...item.data() }));
+      setGroups([...new Map(maps.flatMap((map) => [...map])).values()].sort((a, b) => (toMillis(b.createdAt) || 0) - (toMillis(a.createdAt) || 0)));
       refreshGroupOptions(select("#groupId").value);
       onRender();
       onGroupsUpdated();
-    }, (error) => notice(error.message, "error"));
+    };
+    const unsubscribes = sources.map((source, index) => onSnapshot(source, (snapshot) => apply(index, snapshot), (error) => notice(error.message, "error")));
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
   }
 
   async function permanentlyDeleteGroup(selected) {

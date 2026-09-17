@@ -43,22 +43,25 @@ service firebase.storage {
     function subAdmin() {
       return admin() && !owner() && (adminRole() == 'subadmin' || adminRole() == 'sub_admin');
     }
-    function departmentId() {
-      return firestore.get(/databases/(default)/documents/admins/$(email())).data.get('scopeId', '');
+    function departmentScopeIds() {
+      let data = firestore.get(/databases/(default)/documents/admins/$(email())).data;
+      let ids = data.get('scopeIds', []);
+      return ids is list && ids.size() > 0 ? ids : [data.get('scopeId', '')];
     }
     function categoryDepartment(category) {
       return category == 'Ngành Đồ họa' ? 'graphic'
         : category == 'Ngành Thiết kế công nghiệp' ? 'industrial'
         : category == 'Ngành Thiết kế nội thất' ? 'interior'
         : category == 'Ngành Thiết kế thời trang' ? 'fashion'
-        : category == 'Ngành Nghệ thuật số' ? 'digital-art' : '';
+        : category == 'Ngành Nghệ thuật số' ? 'digital-art'
+        : category == 'Sau đại học' ? 'graduate' : '';
     }
     function resourceDepartment(data) {
       return data.get('scopeType', '') == 'department' ? data.get('scopeId', '') : categoryDepartment(data.get('category', ''));
     }
     function managesResource(data) {
       return highAdmin() || facultyAdmin()
-        || (departmentAdmin() && resourceDepartment(data) == departmentId())
+        || (departmentAdmin() && resourceDepartment(data) != '' && departmentScopeIds().hasAny([resourceDepartment(data)]))
         || ((departmentAdmin() || subAdmin()) && resourceDepartment(data) == '' && data.createdByUid == request.auth.uid)
         || (subAdmin() && data.createdByUid == request.auth.uid);
     }

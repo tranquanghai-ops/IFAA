@@ -40,4 +40,5 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:syntax
       - run: pnpm test:security-static
+      - run: pnpm test:admin-scope
       - run: pnpm test:rules

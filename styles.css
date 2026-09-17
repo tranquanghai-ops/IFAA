@@ -78,6 +78,14 @@
 .batch-field-list{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .batch-field-list .check-chip{background:#fff;border-color:#cfd5dd;font-weight:750}
 .batch-field-list .check-chip:has(input:checked){background:#eaf8f0;border-color:#79c69b;color:#087a43}
+
+/* V3.10: multi-scope chọn ngành/chương trình dạng chip và hiển thị scope trong bảng Admin */
+.check-chip-list{display:flex;flex-wrap:wrap;gap:8px}
+.check-chip-list .check-chip{background:#fff;border-color:#cfd5dd;font-weight:750}
+.check-chip-list .check-chip:has(input:checked){background:#eaf8f0;border-color:#79c69b;color:#087a43}
+.scope-chip-list{display:flex;flex-direction:column;gap:4px;align-items:flex-start}
+.scope-chip{display:inline-block;border:1px solid #cfd5dd;border-radius:999px;padding:2px 9px;background:#f8f9fb;font-size:12.5px;font-weight:700;white-space:nowrap}
+tr.admin-event-ended .scope-chip{background:#fff}
 .admin-event-groups{display:grid;gap:20px;margin-top:14px}
 .admin-event-group{--group-accent:#3157c8;border:2px solid color-mix(in srgb,var(--group-accent) 35%,white);border-left:7px solid var(--group-accent);border-radius:20px;padding:15px;background:color-mix(in srgb,var(--group-accent) 5%,white);box-shadow:0 14px 36px rgba(24,33,58,.07)}
 .admin-event-group-head{display:flex;align-items:end;justify-content:space-between;gap:14px;padding:1px 3px 12px}
