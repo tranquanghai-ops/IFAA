@@ -33,3 +33,11 @@ test("header hiển thị tên phía trên và email nhỏ phía dưới", () =>
   assert.match(styleSource, /\.account-name\{font-size:15px/);
   assert.match(styleSource, /\.account-email\{font-size:12px/);
 });
+
+test("trường hồ sơ đã khóa có giao diện rõ ràng và select không còn mũi tên", () => {
+  assert.match(styleSource, /#profileForm input:read-only,#profileForm select:disabled/);
+  assert.match(styleSource, /#profileFaculty:disabled,#profileMajor:disabled/);
+  assert.match(styleSource, /appearance:none/);
+  assert.match(styleSource, /background-image:none/);
+  assert.match(studentSource, /safe\(name\.replace\(\/\^Ngành\\s\+\//);
+});
