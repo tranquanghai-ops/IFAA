@@ -742,11 +742,14 @@ function populateAdminFilters() {
   scopeFilter.value = adminScopeFilter;
 }
 
-function renderAdminDepartmentOptions(selected = []) {
+function renderAdminDepartmentOptions(selected = [], facultySelected = false) {
   const list = $("#adminDepartmentList");
   if (!list) return;
   const chosen = selected.filter(Boolean);
-  list.innerHTML = assignableScopeOptions(currentAccess).map((department) => `<label class="check-chip"><input class="admin-scope-option" type="checkbox" value="${department.id}" ${chosen.includes(department.id) ? "checked" : ""}> ${safe(department.label)}</label>`).join("");
+  const facultyOption = $("#adminRole").value === "sub_admin" && currentAccess.role !== "department_admin"
+    ? `<label class="check-chip"><input class="admin-scope-option admin-faculty-scope" type="checkbox" value="${FACULTY_SCOPE_ID}" ${facultySelected ? "checked" : ""}> Khoa Mỹ thuật Công nghiệp</label>`
+    : "";
+  list.innerHTML = facultyOption + assignableScopeOptions(currentAccess).map((department) => `<label class="check-chip"><input class="admin-scope-option" type="checkbox" value="${department.id}" ${chosen.includes(department.id) ? "checked" : ""}> ${safe(department.label)}</label>`).join("");
 }
 
 function syncAdminScopeForm() {
@@ -758,7 +761,14 @@ function syncAdminScopeForm() {
     departmentField.classList.add("hidden");
     return;
   }
+  if (role === "sub_admin") {
+    scopeField.classList.add("hidden");
+    departmentField.classList.remove("hidden");
+    $("#adminDepartmentLabel").innerHTML = "Khoa / Ngành / Chương trình <small>(chọn Khoa hoặc một hay nhiều ngành)</small>";
+    return;
+  }
   scopeField.classList.remove("hidden");
+  $("#adminDepartmentLabel").innerHTML = "Ngành / Chương trình <small>(chọn một hoặc nhiều)</small>";
   if (role === "faculty_admin") scope.value = "faculty";
   if (role === "department_admin") scope.value = "department";
   if (currentAccess.role === "department_admin") scope.value = "department";
@@ -931,7 +941,7 @@ function listen() {
 
   subscribeAttendanceSessions();
 
-  loadFacultyStudentMeta();
+  if (highAdminAccess()) loadFacultyStudentMeta();
   if (!isScopedManager) loadFavoriteScanners();
 
   // Danh sách đăng ký chỉ được truy vấn sau khi Admin chọn một sự kiện.
@@ -1160,8 +1170,9 @@ $("#adminForm").onsubmit = async (event) => {
   const editingEmail = $("#adminEditEmail").value;
   try {
     const role = $("#adminRole").value;
-    const scopeType = role === "high_admin" ? "global" : role === "faculty_admin" ? "faculty" : role === "department_admin" ? "department" : $("#adminScopeType").value;
-    const selectedScopes = [...document.querySelectorAll(".admin-scope-option:checked")].map((input) => input.value);
+    const facultyScopeSelected = Boolean(document.querySelector(".admin-faculty-scope:checked"));
+    const scopeType = role === "high_admin" ? "global" : role === "faculty_admin" ? "faculty" : role === "department_admin" ? "department" : facultyScopeSelected ? "faculty" : "department";
+    const selectedScopes = [...document.querySelectorAll(".admin-scope-option:checked:not(.admin-faculty-scope)")].map((input) => input.value);
     if ((role === "department_admin" || (role === "sub_admin" && scopeType === "department")) && !selectedScopes.length) throw Error("Vui lòng chọn ít nhất một ngành/chương trình.");
     const targetAccess = roleDocument(role, scopeType, selectedScopes);
     if (!allowedScopeForNewAdmin(currentAccess, targetAccess)) throw Error("Bạn không được cấp vai trò hoặc phạm vi này.");
@@ -1181,9 +1192,23 @@ $("#adminForm").onsubmit = async (event) => {
   }
 };
 
-$("#adminRole").onchange = syncAdminScopeForm;
+$("#adminRole").onchange = () => {
+  renderAdminDepartmentOptions([], $("#adminRole").value === "sub_admin");
+  syncAdminScopeForm();
+};
 $("#adminScopeType").onchange = syncAdminScopeForm;
 $("#adminEditCancel").onclick = resetAdminForm;
+
+$("#adminDepartmentList").onchange = (event) => {
+  const changed = event.target.closest(".admin-scope-option");
+  if (!changed || $("#adminRole").value !== "sub_admin" || !changed.checked) return;
+  if (changed.classList.contains("admin-faculty-scope")) {
+    document.querySelectorAll(".admin-scope-option:not(.admin-faculty-scope)").forEach((input) => { input.checked = false; });
+  } else {
+    const facultyScope = document.querySelector(".admin-faculty-scope");
+    if (facultyScope) facultyScope.checked = false;
+  }
+};
 
 document.addEventListener("change", async (event) => {
   const attendanceRole = event.target.closest("[data-attendance-assignment-role]");
@@ -1328,7 +1353,7 @@ document.addEventListener("click", async (event) => {
     $("#adminName").value = selected.name || "";
     $("#adminRole").value = targetAccess.role;
     $("#adminScopeType").value = targetAccess.scopeType === "department" ? "department" : "faculty";
-    renderAdminDepartmentOptions(targetAccess.scopeType === "department" ? (targetAccess.scopeIds.length ? targetAccess.scopeIds : [targetAccess.scopeId]) : []);
+    renderAdminDepartmentOptions(targetAccess.scopeType === "department" ? (targetAccess.scopeIds.length ? targetAccess.scopeIds : [targetAccess.scopeId]) : [], targetAccess.scopeType === "faculty");
     syncAdminScopeForm();
     $("#adminSubmit").textContent = "Lưu thay đổi";
     $("#adminEditCancel").classList.remove("hidden");

@@ -59,3 +59,19 @@ test("Preview dùng cùng card và option layout, không có thao tác ghi dữ 
   const previewSource = adminEventModule.slice(previewStart, previewEnd);
   assert.doesNotMatch(previewSource, /setDoc|updateDoc|addDoc|runTransaction/);
 });
+
+test("Admin hoặc creator có thao tác xem nhanh và tải đăng ký ngay trên public", () => {
+  const publicHtml = readFileSync("index.html", "utf8");
+  assert.match(studentModule, /function canManagePublicRegistrations\(event\)/);
+  assert.match(studentModule, /canManageResource\(adminAccess, event, user\.uid\)/);
+  assert.match(studentModule, /data-public-registrations/);
+  assert.match(studentModule, /data-public-export/);
+  assert.match(studentModule, /where\("eventId", "==", eventId\)/);
+  assert.match(studentModule, /XLSX\.writeFile/);
+  assert.match(publicHtml, /id="publicRegistrationDialog"/);
+});
+
+test("Tài khoản Admin không chạy truy vấn lịch sử điểm danh chỉ dành cho sinh viên", () => {
+  assert.match(studentModule, /if \(studentIdentifier\(user\.email\)\) \{[\s\S]*where\("email", "==", user\.email\)/);
+  assert.match(studentModule, /else \{\s*attendanceByEvent = new Map\(\);/);
+});

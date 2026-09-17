@@ -1,11 +1,12 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
-import { getFirestore, collection, doc, getDoc, setDoc, updateDoc, onSnapshot, query, where, runTransaction, serverTimestamp, increment } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
+import { getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, onSnapshot, query, where, runTransaction, serverTimestamp, increment } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
 import { getBlob, getStorage, ref } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
 import { firebaseConfig, STUDENT_DOMAIN, OWNER_EMAIL } from "./firebase-config.mjs";
-import { canQuickEditEvent, eventNeedsRegistrationForm, registrationConfig, registrationFormSnapshot, validPersonalEmail, validPhone, validateRegistrationSubmission } from "./registration-form.mjs";
+import { eventNeedsRegistrationForm, formatRegistrationAnswer, registrationConfig, registrationFormSnapshot, validPersonalEmail, validPhone, validateRegistrationSubmission } from "./registration-form.mjs";
 import { EVENT_ATTACHMENT_MAX_BYTES, formatAttachmentSize, normalizeEventAttachments } from "./event-attachments.mjs";
 import { compareStudentAllEvents, matchesStudentGroupFilter } from "./student-event-sort.mjs?v=1";
+import { canManageResource, normalizeAdminAccess } from "./admin/modules/role-scope.mjs?v=2";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
 const DEFAULT_CATEGORY = "Sự kiện Khoa";
@@ -150,6 +151,7 @@ let user = null;
 let profile = null;
 let facultyStudent = null;
 let adminRole = "";
+let adminAccess = null;
 let events = [];
 let myRegs = new Map();
 let attendanceByEvent = new Map();
@@ -179,10 +181,85 @@ async function participantAccess(currentUser) {
 
 async function resolveAdminRole(currentUser) {
   const email = String(currentUser?.email || "").toLowerCase();
-  if (email === OWNER_EMAIL.toLowerCase()) return "owner";
+  if (email === OWNER_EMAIL.toLowerCase()) {
+    adminAccess = normalizeAdminAccess({}, { owner: true });
+    return "owner";
+  }
   const snapshot = await getDoc(doc(db, "admins", email));
-  if (!snapshot.exists()) return "";
+  if (!snapshot.exists()) {
+    adminAccess = null;
+    return "";
+  }
+  adminAccess = normalizeAdminAccess(snapshot.data());
   return snapshot.data().role === "subadmin" ? "subadmin" : "admin";
+}
+
+function canManagePublicRegistrations(event) {
+  return Boolean(user?.uid && adminAccess && canManageResource(adminAccess, event, user.uid));
+}
+
+function publicRegistrationActions(event) {
+  if (isExternalEvent(event) || !canManagePublicRegistrations(event)) return "";
+  const disabled = Number(event.registeredCount || 0) < 1 ? "disabled" : "";
+  return `<button class="btn btn-soft" data-public-registrations="${event.id}" ${disabled}>Xem nhanh danh sách</button><button class="btn btn-download-list" data-public-export="${event.id}" ${disabled}>▦ Tải danh sách</button>`;
+}
+
+async function fetchManagedRegistrations(eventId) {
+  const selected = events.find((item) => item.id === eventId && !item.deletedAt);
+  if (!selected || !canManagePublicRegistrations(selected)) throw Error("Bạn không có quyền xem danh sách đăng ký của sự kiện này.");
+  const snapshot = await getDocs(query(collection(db, "registrations"), where("eventId", "==", eventId)));
+  return snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => (millis(b.createdAt) || 0) - (millis(a.createdAt) || 0));
+}
+
+async function openPublicRegistrations(eventId, button) {
+  const selected = events.find((item) => item.id === eventId);
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = "Đang tải…";
+  try {
+    const rows = await fetchManagedRegistrations(eventId);
+    $("#publicRegistrationTitle").textContent = selected?.title || "Danh sách đăng ký";
+    $("#publicRegistrationSummary").textContent = `${rows.length} lượt đăng ký`;
+    $("#publicRegistrationRows").innerHTML = rows.map((item, index) => `<tr><td>${index + 1}</td><td><b>${safe(item.identifier || item.mssv || "")}</b></td><td>${safe(item.name || "")}</td><td>${safe(item.faculty || "")}</td><td>${safe(item.participantType || "Sinh viên")}</td><td>${safe(formatDateTime(item.createdAt))}</td></tr>`).join("") || '<tr><td colspan="6" class="empty">Sự kiện này chưa có người đăng ký.</td></tr>';
+    $("#publicRegistrationDialog").showModal();
+  } catch (error) {
+    show(error.message || "Không thể tải danh sách đăng ký.", "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+}
+
+async function downloadPublicRegistrations(eventId, button) {
+  const selected = events.find((item) => item.id === eventId);
+  const originalHtml = button.innerHTML;
+  button.disabled = true;
+  button.textContent = "Đang tải…";
+  try {
+    const registrations = await fetchManagedRegistrations(eventId);
+    if (!registrations.length) throw Error("Sự kiện này chưa có người đăng ký.");
+    const questionColumns = [];
+    registrations.forEach((registration) => (registration.registrationFormSnapshot?.items || []).forEach((question) => {
+      if (!questionColumns.some((item) => item.id === question.id && item.label === question.label)) questionColumns.push({ id: question.id, label: question.label || "Câu hỏi bổ sung" });
+    }));
+    const rows = registrations.map((registration, index) => {
+      const profile = registration.profileSnapshot || {};
+      const row = { STT: index + 1, "MSSV/Mã số": registration.identifier || registration.mssv || "", "Họ tên": registration.name || "", "Khoa/Đơn vị": registration.faculty || "", "Đối tượng": registration.participantType || "Sinh viên", "Email trường": registration.email || "", "Email cá nhân": profile.personalEmail || registration.personalEmail || "", "Số điện thoại": profile.phone || registration.phone || "", "Thời gian đăng ký": formatDateTime(registration.createdAt) };
+      questionColumns.forEach((question) => { row[question.label] = formatRegistrationAnswer(registration.answers?.[question.id]); });
+      return row;
+    });
+    const sheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, "Danh sách đăng ký");
+    const cleanTitle = String(selected?.title || "Su_kien").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 70) || "Su_kien";
+    XLSX.writeFile(workbook, `IFAA_${cleanTitle}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    show(`Đã tải ${registrations.length} lượt đăng ký.`, "success");
+  } catch (error) {
+    show(error.message || "Không thể tải danh sách đăng ký.", "error");
+  } finally {
+    button.disabled = false;
+    button.innerHTML = originalHtml;
+  }
 }
 
 function show(message, type = "") {
@@ -370,8 +447,8 @@ function eventCard(event) {
   } else {
     actionButton = `<button class="btn ${state === "full" ? "btn-full" : ["closed", "ended"].includes(state) ? "btn-expired" : "btn-register"}" data-register="${event.id}" ${disabled || registered ? "disabled" : ""}>${registered ? "Đã đăng ký" : state === "full" ? "Đã đủ" : ["closed", "ended"].includes(state) ? "Hết thời gian đăng ký" : group.blocked ? "Đã đạt giới hạn đăng ký" : state === "upcoming" ? "Chưa đến giờ" : "Đăng ký"}</button>`;
   }
-  const canEdit = canQuickEditEvent(adminRole, user?.uid, event);
-  return `<article class="card event event-${state} ${external ? "event-external" : ""} ${registered ? "event-registered" : ""}">${canEdit ? `<button class="btn-quick-edit" data-quick-edit="${event.id}" title="Chỉnh sửa sự kiện" aria-label="Chỉnh sửa sự kiện">✎</button>` : ""}<div class="event-top"><div><div class="event-badge-row"><span class="tag event-category">${safe(category)}</span><span class="tag ${tagClass}">${label}</span>${hotTag}${newTag}${external ? '<span class="tag external">ĐĂNG KÝ BÊN NGOÀI</span>' : ""}${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}</div><h3>${safe(event.title)}</h3></div></div><div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(event, state))}</span>${groupLine}</div>${capacityHtml}<div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${attendanceByEvent.has(event.id) ? `<button class="btn" data-history="${event.id}">Xem lịch sử điểm danh</button>` : ""}${STUDENT_CALENDAR_ENABLED && registered ? `<button class="btn btn-calendar" data-calendar="${event.id}">＋ Google Lịch</button>` : ""}${actionButton}</div></article>`;
+  const canEdit = canManagePublicRegistrations(event);
+  return `<article class="card event event-${state} ${external ? "event-external" : ""} ${registered ? "event-registered" : ""}">${canEdit ? `<button class="btn-quick-edit" data-quick-edit="${event.id}" title="Chỉnh sửa sự kiện" aria-label="Chỉnh sửa sự kiện">✎</button>` : ""}<div class="event-top"><div><div class="event-badge-row"><span class="tag event-category">${safe(category)}</span><span class="tag ${tagClass}">${label}</span>${hotTag}${newTag}${external ? '<span class="tag external">ĐĂNG KÝ BÊN NGOÀI</span>' : ""}${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}</div><h3>${safe(event.title)}</h3></div></div><div class="meta"><span class="event-schedule"><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</span><span class="event-location"><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</span><span class="countdown">${safe(timingStatus(event, state))}</span>${groupLine}</div>${capacityHtml}<div class="event-actions"><button class="btn" data-view="${event.id}">Xem chi tiết</button>${attendanceByEvent.has(event.id) ? `<button class="btn" data-history="${event.id}">Xem lịch sử điểm danh</button>` : ""}${STUDENT_CALENDAR_ENABLED && registered ? `<button class="btn btn-calendar" data-calendar="${event.id}">＋ Google Lịch</button>` : ""}${publicRegistrationActions(event)}${actionButton}</div></article>`;
 }
 function linkedEventPage(event) {
   const state = eventState(event);
@@ -399,13 +476,13 @@ function linkedEventPage(event) {
     const message = full ? "Đã đủ" : state === "upcoming" ? "Chưa đến giờ đăng ký" : state === "ended" ? "Hết thời gian đăng ký" : group.blocked ? "Đã đạt giới hạn đăng ký" : "Đã đóng đăng ký";
     action = `<button class="btn linked-primary-action unavailable" disabled>${message}</button>`;
   }
-  const canEdit = canQuickEditEvent(adminRole, user?.uid, event);
+  const canEdit = canManagePublicRegistrations(event);
   return `<article class="linked-event-form">
     ${canEdit ? `<button class="btn-quick-edit" data-quick-edit="${event.id}" title="Chỉnh sửa sự kiện" aria-label="Chỉnh sửa sự kiện">✎</button>` : ""}<header class="linked-event-header"><div class="linked-event-tags"><span class="tag ${safe(state)}">${safe(statusLabel)}</span>${event.isHot ? '<span class="tag hot">🔥 HOT</span>' : ""}${registered ? '<span class="tag mine">ĐÃ ĐĂNG KÝ</span>' : ""}</div><h2>${safe(event.title)}</h2></header>
     <section class="linked-event-info"><p><b>Ngày sự kiện:</b> ${safe(eventSchedule(event))}</p><p><b>Địa điểm sự kiện:</b> ${safe(event.location || "Chưa cập nhật")}</p><p class="countdown">${safe(timingStatus(event, state))}</p>${group.text && !external ? `<p><b>${safe(group.text)}</b></p>` : ""}</section>
     <section class="linked-event-description rich-content">${description}</section>${eventAttachmentsHtml(event)}
     ${availability}
-    <div class="linked-event-actions">${action}</div>
+    <div class="linked-event-actions">${publicRegistrationActions(event)}${action}</div>
   </article>`;
 }
 
@@ -651,10 +728,14 @@ function loadData() {
       myRegs = new Map(snapshot.docs.map((item) => [item.data().eventId, { id: item.id, ...item.data() }]));
       render();
     }, (error) => show(`Không thể tải đăng ký: ${error.message}`, "error")));
-    unsubscribers.push(onSnapshot(query(collection(db, "checkins"), where("email", "==", user.email)), (snapshot) => {
-      attendanceByEvent = new Map(snapshot.docs.filter((item) => !item.data().deletedAt).map((item) => [item.data().eventId, { id: item.id, ...item.data() }]));
-      render();
-    }, (error) => show(`Không thể tải lịch sử điểm danh: ${error.message}`, "error")));
+    if (studentIdentifier(user.email)) {
+      unsubscribers.push(onSnapshot(query(collection(db, "checkins"), where("email", "==", user.email)), (snapshot) => {
+        attendanceByEvent = new Map(snapshot.docs.filter((item) => !item.data().deletedAt).map((item) => [item.data().eventId, { id: item.id, ...item.data() }]));
+        render();
+      }, (error) => show(`Không thể tải lịch sử điểm danh: ${error.message}`, "error")));
+    } else {
+      attendanceByEvent = new Map();
+    }
     unsubscribers.push(onSnapshot(query(collection(db, "registrationLimits"), where("uid", "==", user.uid)), (snapshot) => {
       groupLimits = new Map(snapshot.docs.map((item) => [item.data().groupId, item.data()]));
       render();
@@ -924,7 +1005,7 @@ async function beginGoogleLogin() {
 
 function openQuickEdit(eventId) {
   const selected = events.find((item) => item.id === eventId);
-  const allowed = selected && canQuickEditEvent(adminRole, user?.uid, selected);
+  const allowed = selected && canManagePublicRegistrations(selected);
   if (!allowed) return show("Bạn không có quyền sửa sự kiện này.", "error");
   $("#quickEditId").value = selected.id;
   $("#quickEditTitle").value = selected.title || "";
@@ -967,7 +1048,7 @@ $("#quickEditUnlimited").onchange = () => { $("#quickEditCapacity").disabled = $
 $("#quickEditForm").onsubmit = async (event) => {
   event.preventDefault();
   const selected = events.find((item) => item.id === $("#quickEditId").value);
-  const allowed = selected && canQuickEditEvent(adminRole, user?.uid, selected);
+  const allowed = selected && canManagePublicRegistrations(selected);
   if (!allowed) return show("Bạn không có quyền sửa sự kiện này.", "error");
   const startTime = $("#quickEditStartTime").value, endTime = $("#quickEditEndTime").value;
   const errorTarget = $("#quickEditError");
@@ -1046,11 +1127,14 @@ document.addEventListener("click", async (event) => {
   if (button.dataset.close !== undefined) $("#detailDialog").close();
   if (button.dataset.closeQuickEdit !== undefined) $("#quickEditDialog").close();
   if (button.dataset.closeRegistrationForm !== undefined) { $("#registrationFormDialog").close(); registrationEvent = null; }
+  if (button.dataset.closePublicRegistration !== undefined) $("#publicRegistrationDialog").close();
   if (button.dataset.quickEdit) openQuickEdit(button.dataset.quickEdit);
   if (button.dataset.view) openDetail(button.dataset.view);
   if (button.dataset.register) openDetail(button.dataset.register);
   if (button.dataset.directRegister) startRegistration(button.dataset.directRegister);
   if (button.dataset.downloadEventAttachment) await downloadEventAttachment(button.dataset.downloadEventAttachment, button.dataset.attachmentId, button);
+  if (button.dataset.publicRegistrations) await openPublicRegistrations(button.dataset.publicRegistrations, button);
+  if (button.dataset.publicExport) await downloadPublicRegistrations(button.dataset.publicExport, button);
   if (button.dataset.externalUrl) {
     const url = button.dataset.externalUrl;
     if (/^https:\/\//i.test(url)) window.open(url, "_blank", "noopener,noreferrer");
@@ -1058,7 +1142,7 @@ document.addEventListener("click", async (event) => {
   }
   if (button.dataset.history) {
     const item = attendanceByEvent.get(button.dataset.history);
-    show(item ? `Đã điểm danh lúc ${ts(item.checkedAt)}.` : "Chưa có lịch sử điểm danh.");
+    show(item ? `Đã điểm danh lúc ${formatDateTime(item.checkedAt)}.` : "Chưa có lịch sử điểm danh.");
   }
   if (button.dataset.calendar) {
     const selectedEvent = events.find((item) => item.id === button.dataset.calendar);
@@ -1082,6 +1166,7 @@ onAuthStateChanged(auth, async (currentUser) => {
     profile = null;
     facultyStudent = null;
     adminRole = "";
+    adminAccess = null;
     myRegs = new Map();
     attendanceByEvent = new Map();
     groupLimits = new Map();
