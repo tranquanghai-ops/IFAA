@@ -657,6 +657,44 @@ function selectedFacultyValue() {
   return $("#profileFaculty").value === "__other__" ? $("#profileFacultyOther").value.trim() : $("#profileFaculty").value;
 }
 
+function normalizeFacultyMajor(value) {
+  const major = String(value || "").trim();
+  if (!major || FACULTY_MAJORS.includes(major)) return major;
+  const normalized = major.toLocaleLowerCase("vi").replace(/^ngành\s+/, "");
+  return FACULTY_MAJORS.find((option) => option !== DEFAULT_FACULTY && option.toLocaleLowerCase("vi").replace(/^ngành\s+/, "") === normalized) || major;
+}
+
+function directoryProfileFields() {
+  if (!facultyStudent) return { name: "", faculty: "", major: "" };
+  return {
+    name: String(facultyStudent.name || "").trim(),
+    faculty: String(facultyStudent.faculty || DEFAULT_FACULTY).trim(),
+    major: normalizeFacultyMajor(facultyStudent.major)
+  };
+}
+
+function lockDirectoryProfileFields() {
+  const directory = directoryProfileFields();
+  const lock = (selector, locked, message) => {
+    const control = $(selector);
+    control.disabled = locked;
+    control.title = locked ? message : "";
+  };
+  lock("#profileFaculty", !!directory.faculty, "Khoa/Đơn vị được lấy từ danh sách sinh viên và không thể chỉnh sửa.");
+  lock("#profileFacultyOther", !!directory.faculty, "Khoa/Đơn vị được lấy từ danh sách sinh viên và không thể chỉnh sửa.");
+  lock("#profileMajor", !!directory.major, "Ngành được lấy từ danh sách sinh viên và không thể chỉnh sửa.");
+  lock("#profileMajorOther", !!directory.major, "Ngành được lấy từ danh sách sinh viên và không thể chỉnh sửa.");
+  $("#profileName").readOnly = !!directory.name;
+  $("#profileName").title = directory.name ? "Họ tên được lấy từ danh sách sinh viên và không thể chỉnh sửa." : "";
+}
+
+function renderAccountIdentity() {
+  const name = directoryProfileFields().name || String(profile?.name || user?.displayName || "").trim();
+  $("#accountName").textContent = name || participantType(user?.email);
+  $("#accountEmail").textContent = user?.email || "";
+  $("#accountIdentity").classList.toggle("hidden", !user);
+}
+
 function syncProfileOrganizationFields(preserveValues = false) {
   const facultySelect = $("#profileFaculty");
   const facultyOther = $("#profileFacultyOther");
@@ -680,7 +718,8 @@ function populateFacultyOptions() {
   const configured = [...new Set(settings.faculties || [DEFAULT_FACULTY])].filter((name) => name && !FACULTY_MAJORS.includes(name));
   if (!configured.includes(DEFAULT_FACULTY)) configured.unshift(DEFAULT_FACULTY);
 
-  const sourceFaculty = profile?.faculty || facultyStudent?.faculty || DEFAULT_FACULTY;
+  const directory = directoryProfileFields();
+  const sourceFaculty = directory.faculty || profile?.faculty || DEFAULT_FACULTY;
   const legacyMajor = FACULTY_MAJORS.includes(sourceFaculty) && sourceFaculty !== DEFAULT_FACULTY ? sourceFaculty : "";
   const savedFaculty = legacyMajor ? DEFAULT_FACULTY : sourceFaculty;
   const isCustomFaculty = !!savedFaculty && !configured.includes(savedFaculty);
@@ -688,12 +727,13 @@ function populateFacultyOptions() {
   facultySelect.value = isCustomFaculty ? "__other__" : savedFaculty;
   $("#profileFacultyOther").value = isCustomFaculty ? savedFaculty : "";
 
-  const savedMajor = profile?.major || facultyStudent?.major || legacyMajor || "";
+  const savedMajor = directory.major || normalizeFacultyMajor(profile?.major) || legacyMajor || "";
   const mtcnMajors = FACULTY_MAJORS.filter((name) => name !== DEFAULT_FACULTY);
   $("#profileMajor").innerHTML = '<option value="">-- Chọn ngành --</option>' + mtcnMajors.map((name) => `<option value="${safe(name)}">${safe(name)}</option>`).join("");
   $("#profileMajor").value = mtcnMajors.includes(savedMajor) ? savedMajor : "";
   $("#profileMajorOther").value = savedMajor && !mtcnMajors.includes(savedMajor) ? savedMajor : "";
   syncProfileOrganizationFields(true);
+  lockDirectoryProfileFields();
 }
 
 function showProfileForm(force = false) {
@@ -724,6 +764,7 @@ async function loadProfile() {
     ]);
     facultyStudent = facultySnapshot?.exists() ? facultySnapshot.data() : null;
     profile = snapshot.exists() ? snapshot.data() : null;
+    renderAccountIdentity();
     showProfileForm(!profile);
     if (profile) {
       loadData();
@@ -987,16 +1028,18 @@ $("#profileForm").onsubmit = async (event) => {
     const previous = profile;
     const automaticIdentifier = studentIdentifier(user.email);
     const identifier = automaticIdentifier || $("#profileIdentifier").value.trim().toUpperCase();
-    const faculty = selectedFacultyValue();
-    const major = faculty === DEFAULT_FACULTY ? $("#profileMajor").value : $("#profileMajorOther").value.trim();
+    const directory = directoryProfileFields();
+    const faculty = directory.faculty || selectedFacultyValue();
+    const major = directory.major || (faculty === DEFAULT_FACULTY ? $("#profileMajor").value : $("#profileMajorOther").value.trim());
     const personalEmail = $("#profilePersonalEmail").value.trim();
     const phone = $("#profilePhone").value.trim();
-    const data = { uid: user.uid, email: user.email.toLowerCase(), participantType: participantType(user.email), identifier, mssv: identifier, name: $("#profileName").value.trim(), personalEmail, phone, faculty, major, updatedAt: serverTimestamp() };
+    const data = { uid: user.uid, email: user.email.toLowerCase(), participantType: participantType(user.email), identifier, mssv: identifier, name: directory.name || $("#profileName").value.trim(), personalEmail, phone, faculty, major, updatedAt: serverTimestamp() };
     if (!data.identifier || !data.name || !data.faculty || !data.major) throw Error("Vui lòng nhập đầy đủ thông tin.");
     if (!validPersonalEmail(personalEmail)) throw Error("Email cá nhân chưa đúng định dạng.");
     if (!validPhone(phone)) throw Error("Số điện thoại chưa hợp lệ.");
     await setDoc(doc(db, "profiles", user.uid), previous ? data : { ...data, createdAt: serverTimestamp() }, { merge: true });
     profile = { ...previous, ...data };
+    renderAccountIdentity();
     showProfileForm(false);
     loadData();
     if (pendingRegistrationId) {
@@ -1204,6 +1247,8 @@ onAuthStateChanged(auth, async (currentUser) => {
     $("#logoutBtn").classList.add("hidden");
     $("#loginBtn").classList.remove("hidden");
     $("#accountEmail").textContent = "";
+    $("#accountName").textContent = "";
+    $("#accountIdentity").classList.add("hidden");
     $("#editProfileBtn").classList.add("hidden");
     loadData();
     return;
@@ -1216,7 +1261,7 @@ onAuthStateChanged(auth, async (currentUser) => {
   }
   showLoginNotice();
   user = currentUser;
-  $("#accountEmail").textContent = `${currentUser.email} · ${participantType(currentUser.email)}`;
+  renderAccountIdentity();
   $("#studentApp").classList.remove("hidden");
   $("#loginBtn").classList.add("hidden");
   $("#logoutBtn").classList.remove("hidden");
