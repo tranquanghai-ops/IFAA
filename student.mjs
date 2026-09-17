@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
-import { getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, onSnapshot, query, where, runTransaction, serverTimestamp, increment } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
+import { getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, onSnapshot, query, where, orderBy, limit, startAfter, runTransaction, serverTimestamp, increment } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
 import { getBlob, getStorage, ref } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
 import { firebaseConfig, STUDENT_DOMAIN, OWNER_EMAIL } from "./firebase-config.mjs";
 import { eventNeedsRegistrationForm, formatRegistrationAnswer, registrationConfig, registrationFormSnapshot, validPersonalEmail, validPhone, validateRegistrationSubmission } from "./registration-form.mjs";
@@ -14,6 +14,7 @@ const FACULTY_MAJORS = ["Khoa Mỹ thuật Công nghiệp", "Ngành Đồ họa"
 const EVENT_CATEGORIES = ["Sự kiện Khoa", "Ngành Đồ họa", "Ngành Thiết kế công nghiệp", "Ngành Thiết kế nội thất", "Ngành Thiết kế thời trang", "Ngành Nghệ thuật số", "Sự kiện Trường", "Sự kiện Khoa khác"];
 const EXTERNAL_CATEGORIES = new Set(["Sự kiện Trường", "Sự kiện Khoa khác"]);
 const STUDENT_CALENDAR_ENABLED = false;
+const PUBLIC_REGISTRATION_PAGE_SIZE = 20;
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -165,6 +166,7 @@ let studentGroupFilter = "";
 let chosen = null;
 let registrationEvent = null;
 let unsubscribers = [];
+let publicRegistrationState = { eventId: "", total: 0, pageIndex: 0, pages: [] };
 
 const tdtuEmail = (email) => {
   const value = String(email || "").toLowerCase();
@@ -207,7 +209,7 @@ function publicRegistrationActions(event) {
 function ensurePublicRegistrationDialog() {
   let dialog = $("#publicRegistrationDialog");
   if (dialog) return dialog;
-  document.body.insertAdjacentHTML("beforeend", '<dialog id="publicRegistrationDialog"><div class="modal quick-registration-modal"><div class="modal-head"><div><h2 id="publicRegistrationTitle">Danh sách đăng ký</h2><p id="publicRegistrationSummary"></p></div><button type="button" class="btn btn-small" data-close-public-registration>Đóng</button></div><div class="table-wrap"><table class="quick-registration-table"><thead><tr><th>STT</th><th>MSSV/Mã số</th><th>Họ tên</th><th>Khoa/Đơn vị</th><th>Đối tượng</th><th>Thời gian</th></tr></thead><tbody id="publicRegistrationRows"></tbody></table></div></div></dialog>');
+  document.body.insertAdjacentHTML("beforeend", '<dialog id="publicRegistrationDialog"><div class="modal quick-registration-modal"><div class="modal-head"><div><h2 id="publicRegistrationTitle">Danh sách đăng ký</h2><p id="publicRegistrationSummary"></p></div><button type="button" class="btn btn-small" data-close-public-registration>Đóng</button></div><div class="table-wrap"><table class="quick-registration-table"><thead><tr><th>STT</th><th>MSSV/Mã số</th><th>Họ tên</th><th>Khoa/Đơn vị</th><th>Đối tượng</th><th>Thời gian</th></tr></thead><tbody id="publicRegistrationRows"></tbody></table></div><div class="public-registration-pagination"><button type="button" id="publicRegistrationPrev" class="btn btn-small" data-public-registration-prev>← Trước</button><span id="publicRegistrationPage">Trang 1</span><button type="button" id="publicRegistrationNext" class="btn btn-small" data-public-registration-next>Sau →</button></div></div></dialog>');
   dialog = $("#publicRegistrationDialog");
   return dialog;
 }
@@ -232,8 +234,52 @@ function ensureXlsx() {
 async function fetchManagedRegistrations(eventId) {
   const selected = events.find((item) => item.id === eventId && !item.deletedAt);
   if (!selected || !canManagePublicRegistrations(selected)) throw Error("Bạn không có quyền xem danh sách đăng ký của sự kiện này.");
-  const snapshot = await getDocs(query(collection(db, "registrations"), where("eventId", "==", eventId)));
-  return snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => (millis(b.createdAt) || 0) - (millis(a.createdAt) || 0));
+  const snapshot = await getDocs(query(collection(db, "registrations"), where("eventId", "==", eventId), orderBy("createdAt", "asc")));
+  return snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+}
+
+async function fetchManagedRegistrationPage(eventId, cursor = null) {
+  const selected = events.find((item) => item.id === eventId && !item.deletedAt);
+  if (!selected || !canManagePublicRegistrations(selected)) throw Error("Bạn không có quyền xem danh sách đăng ký của sự kiện này.");
+  const constraints = [where("eventId", "==", eventId), orderBy("createdAt", "asc")];
+  if (cursor) constraints.push(startAfter(cursor));
+  constraints.push(limit(PUBLIC_REGISTRATION_PAGE_SIZE));
+  const snapshot = await getDocs(query(collection(db, "registrations"), ...constraints));
+  return {
+    rows: snapshot.docs.map((item) => ({ id: item.id, ...item.data() })),
+    cursor: snapshot.docs.at(-1) || null
+  };
+}
+
+function renderPublicRegistrationPage() {
+  const page = publicRegistrationState.pages[publicRegistrationState.pageIndex] || { rows: [] };
+  const offset = publicRegistrationState.pageIndex * PUBLIC_REGISTRATION_PAGE_SIZE;
+  const totalPages = Math.max(1, Math.ceil(publicRegistrationState.total / PUBLIC_REGISTRATION_PAGE_SIZE));
+  $("#publicRegistrationSummary").textContent = `${publicRegistrationState.total} lượt đăng ký`;
+  $("#publicRegistrationPage").textContent = `Trang ${publicRegistrationState.pageIndex + 1}/${totalPages}`;
+  $("#publicRegistrationPrev").disabled = publicRegistrationState.pageIndex === 0;
+  $("#publicRegistrationNext").disabled = offset + page.rows.length >= publicRegistrationState.total || page.rows.length < PUBLIC_REGISTRATION_PAGE_SIZE;
+  $("#publicRegistrationRows").innerHTML = page.rows.map((item, index) => `<tr><td>${offset + index + 1}</td><td><b>${safe(item.identifier || item.mssv || "")}</b></td><td>${safe(item.name || "")}</td><td>${safe(item.faculty || "")}</td><td>${safe(item.participantType || "Sinh viên")}</td><td>${safe(formatDateTime(item.createdAt))}</td></tr>`).join("") || '<tr><td colspan="6" class="empty">Sự kiện này chưa có người đăng ký.</td></tr>';
+}
+
+async function changePublicRegistrationPage(direction, button) {
+  const nextIndex = publicRegistrationState.pageIndex + direction;
+  if (nextIndex < 0) return;
+  button.disabled = true;
+  try {
+    if (!publicRegistrationState.pages[nextIndex]) {
+      const current = publicRegistrationState.pages[publicRegistrationState.pageIndex];
+      if (!current?.cursor) return;
+      publicRegistrationState.pages[nextIndex] = await fetchManagedRegistrationPage(publicRegistrationState.eventId, current.cursor);
+    }
+    publicRegistrationState.pageIndex = nextIndex;
+    renderPublicRegistrationPage();
+  } catch (error) {
+    show(error.message || "Không thể tải trang danh sách đăng ký.", "error");
+  } finally {
+    button.disabled = false;
+    renderPublicRegistrationPage();
+  }
 }
 
 async function openPublicRegistrations(eventId, button) {
@@ -243,10 +289,10 @@ async function openPublicRegistrations(eventId, button) {
   button.textContent = "Đang tải…";
   try {
     const dialog = ensurePublicRegistrationDialog();
-    const rows = await fetchManagedRegistrations(eventId);
+    const firstPage = await fetchManagedRegistrationPage(eventId);
+    publicRegistrationState = { eventId, total: Number(selected?.registeredCount || 0), pageIndex: 0, pages: [firstPage] };
     $("#publicRegistrationTitle").textContent = selected?.title || "Danh sách đăng ký";
-    $("#publicRegistrationSummary").textContent = `${rows.length} lượt đăng ký`;
-    $("#publicRegistrationRows").innerHTML = rows.map((item, index) => `<tr><td>${index + 1}</td><td><b>${safe(item.identifier || item.mssv || "")}</b></td><td>${safe(item.name || "")}</td><td>${safe(item.faculty || "")}</td><td>${safe(item.participantType || "Sinh viên")}</td><td>${safe(formatDateTime(item.createdAt))}</td></tr>`).join("") || '<tr><td colspan="6" class="empty">Sự kiện này chưa có người đăng ký.</td></tr>';
+    renderPublicRegistrationPage();
     dialog.showModal();
   } catch (error) {
     show(error.message || "Không thể tải danh sách đăng ký.", "error");
@@ -1198,6 +1244,8 @@ document.addEventListener("click", async (event) => {
   if (button.dataset.closeQuickEdit !== undefined) $("#quickEditDialog").close();
   if (button.dataset.closeRegistrationForm !== undefined) { $("#registrationFormDialog").close(); registrationEvent = null; }
   if (button.dataset.closePublicRegistration !== undefined) $("#publicRegistrationDialog").close();
+  if (button.dataset.publicRegistrationPrev !== undefined) await changePublicRegistrationPage(-1, button);
+  if (button.dataset.publicRegistrationNext !== undefined) await changePublicRegistrationPage(1, button);
   if (button.dataset.quickEdit) openQuickEdit(button.dataset.quickEdit);
   if (button.dataset.view) openDetail(button.dataset.view);
   if (button.dataset.register) openDetail(button.dataset.register);

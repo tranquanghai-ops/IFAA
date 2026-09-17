@@ -74,6 +74,12 @@ test("Admin hoặc creator có thao tác xem nhanh và tải đăng ký ngay tr�
   assert.match(studentModule, /function ensurePublicRegistrationDialog\(\)/);
   assert.match(studentModule, /function ensureXlsx\(\)/);
   assert.match(studentModule, /const XLSX = await ensureXlsx\(\)/);
+  assert.match(studentModule, /const PUBLIC_REGISTRATION_PAGE_SIZE = 20/);
+  assert.match(studentModule, /orderBy\("createdAt", "asc"\)/);
+  assert.match(studentModule, /startAfter\(cursor\)/);
+  assert.match(studentModule, /limit\(PUBLIC_REGISTRATION_PAGE_SIZE\)/);
+  assert.match(studentModule, /offset \+ index \+ 1/);
+  assert.match(studentModule, /async function fetchManagedRegistrations[\s\S]*orderBy\("createdAt", "asc"\)[\s\S]*async function fetchManagedRegistrationPage/);
   assert.match(styles, /\.event-actions \.btn-public-registration\{[^}]*flex:0 1 auto[^}]*padding:8px 10px/);
 });
 
