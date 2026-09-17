@@ -69,6 +69,12 @@ test("Admin hoặc creator có thao tác xem nhanh và tải đăng ký ngay tr�
   assert.match(studentModule, /where\("eventId", "==", eventId\)/);
   assert.match(studentModule, /XLSX\.writeFile/);
   assert.match(publicHtml, /id="publicRegistrationDialog"/);
+  assert.match(studentModule, />Xem danh sách<\/button>/);
+  assert.doesNotMatch(studentModule, />Xem nhanh danh sách<\/button>/);
+  assert.match(studentModule, /function ensurePublicRegistrationDialog\(\)/);
+  assert.match(studentModule, /function ensureXlsx\(\)/);
+  assert.match(studentModule, /const XLSX = await ensureXlsx\(\)/);
+  assert.match(styles, /\.event-actions \.btn-public-registration\{[^}]*flex:0 1 auto[^}]*padding:8px 10px/);
 });
 
 test("Tài khoản Admin không chạy truy vấn lịch sử điểm danh chỉ dành cho sinh viên", () => {

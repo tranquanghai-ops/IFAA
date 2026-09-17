@@ -201,7 +201,32 @@ function canManagePublicRegistrations(event) {
 function publicRegistrationActions(event) {
   if (isExternalEvent(event) || !canManagePublicRegistrations(event)) return "";
   const disabled = Number(event.registeredCount || 0) < 1 ? "disabled" : "";
-  return `<button class="btn btn-soft" data-public-registrations="${event.id}" ${disabled}>Xem nhanh danh sách</button><button class="btn btn-download-list" data-public-export="${event.id}" ${disabled}>▦ Tải danh sách</button>`;
+  return `<button class="btn btn-soft btn-public-registration" data-public-registrations="${event.id}" ${disabled}>Xem danh sách</button><button class="btn btn-download-list btn-public-registration" data-public-export="${event.id}" ${disabled}>▦ Tải danh sách</button>`;
+}
+
+function ensurePublicRegistrationDialog() {
+  let dialog = $("#publicRegistrationDialog");
+  if (dialog) return dialog;
+  document.body.insertAdjacentHTML("beforeend", '<dialog id="publicRegistrationDialog"><div class="modal quick-registration-modal"><div class="modal-head"><div><h2 id="publicRegistrationTitle">Danh sách đăng ký</h2><p id="publicRegistrationSummary"></p></div><button type="button" class="btn btn-small" data-close-public-registration>Đóng</button></div><div class="table-wrap"><table class="quick-registration-table"><thead><tr><th>STT</th><th>MSSV/Mã số</th><th>Họ tên</th><th>Khoa/Đơn vị</th><th>Đối tượng</th><th>Thời gian</th></tr></thead><tbody id="publicRegistrationRows"></tbody></table></div></div></dialog>');
+  dialog = $("#publicRegistrationDialog");
+  return dialog;
+}
+
+let xlsxLoader = null;
+function ensureXlsx() {
+  if (globalThis.XLSX) return Promise.resolve(globalThis.XLSX);
+  if (xlsxLoader) return xlsxLoader;
+  xlsxLoader = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js?ifaa=public-export-v2";
+    script.onload = () => {
+      if (globalThis.XLSX) resolve(globalThis.XLSX);
+      else { xlsxLoader = null; reject(Error("Không thể khởi tạo thư viện xuất Excel.")); }
+    };
+    script.onerror = () => { xlsxLoader = null; reject(Error("Không thể tải thư viện xuất Excel. Vui lòng thử lại.")); };
+    document.head.appendChild(script);
+  });
+  return xlsxLoader;
 }
 
 async function fetchManagedRegistrations(eventId) {
@@ -217,11 +242,12 @@ async function openPublicRegistrations(eventId, button) {
   button.disabled = true;
   button.textContent = "Đang tải…";
   try {
+    const dialog = ensurePublicRegistrationDialog();
     const rows = await fetchManagedRegistrations(eventId);
     $("#publicRegistrationTitle").textContent = selected?.title || "Danh sách đăng ký";
     $("#publicRegistrationSummary").textContent = `${rows.length} lượt đăng ký`;
     $("#publicRegistrationRows").innerHTML = rows.map((item, index) => `<tr><td>${index + 1}</td><td><b>${safe(item.identifier || item.mssv || "")}</b></td><td>${safe(item.name || "")}</td><td>${safe(item.faculty || "")}</td><td>${safe(item.participantType || "Sinh viên")}</td><td>${safe(formatDateTime(item.createdAt))}</td></tr>`).join("") || '<tr><td colspan="6" class="empty">Sự kiện này chưa có người đăng ký.</td></tr>';
-    $("#publicRegistrationDialog").showModal();
+    dialog.showModal();
   } catch (error) {
     show(error.message || "Không thể tải danh sách đăng ký.", "error");
   } finally {
@@ -238,6 +264,7 @@ async function downloadPublicRegistrations(eventId, button) {
   try {
     const registrations = await fetchManagedRegistrations(eventId);
     if (!registrations.length) throw Error("Sự kiện này chưa có người đăng ký.");
+    const XLSX = await ensureXlsx();
     const questionColumns = [];
     registrations.forEach((registration) => (registration.registrationFormSnapshot?.items || []).forEach((question) => {
       if (!questionColumns.some((item) => item.id === question.id && item.label === question.label)) questionColumns.push({ id: question.id, label: question.label || "Câu hỏi bổ sung" });
