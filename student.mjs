@@ -729,7 +729,7 @@ function populateFacultyOptions() {
 
   const savedMajor = directory.major || normalizeFacultyMajor(profile?.major) || legacyMajor || "";
   const mtcnMajors = FACULTY_MAJORS.filter((name) => name !== DEFAULT_FACULTY);
-  $("#profileMajor").innerHTML = '<option value="">-- Chọn ngành --</option>' + mtcnMajors.map((name) => `<option value="${safe(name)}">${safe(name)}</option>`).join("");
+  $("#profileMajor").innerHTML = '<option value="">-- Chọn ngành --</option>' + mtcnMajors.map((name) => `<option value="${safe(name)}">${safe(name.replace(/^Ngành\s+/, ""))}</option>`).join("");
   $("#profileMajor").value = mtcnMajors.includes(savedMajor) ? savedMajor : "";
   $("#profileMajorOther").value = savedMajor && !mtcnMajors.includes(savedMajor) ? savedMajor : "";
   syncProfileOrganizationFields(true);
