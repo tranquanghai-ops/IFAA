@@ -68,16 +68,18 @@ test("các filter student hiện hữu giữ điều kiện eligibility", () => 
   assert.match(studentSource, /return \["upcoming", "open", "full"\]\.includes\(state\)/);
 });
 
-test("hidden Group bị loại trước filter và sorting phía student", () => {
-  assert.match(studentSource, /if \(event\.deletedAt \|\| groups\.get\(event\.groupId\)\?\.deletedAt \|\| groupHiddenFromStudents\(groups\.get\(event\.groupId\)\)\) return false/);
-  assert.match(studentSource, /const focusedEvent = linkedEventCode \? events\.find\(\(event\) => !event\.deletedAt && eventState\(event\) !== "hidden" && !groupHiddenFromStudents\(groups\.get\(event\.groupId\)\)/);
-  assert.match(studentSource, /const focusedGroup = linkedCode \? \[\.\.\.groups\.values\(\)\]\.find\(\(group\) => !group\.deletedAt && !groupHiddenFromStudents\(group\)/);
+test("hidden Event và Group chỉ ảnh hưởng Admin, không phải điều kiện visibility student", () => {
+  assert.match(studentSource, /if \(event\.deletedAt \|\| groups\.get\(event\.groupId\)\?\.deletedAt\) return false/);
+  assert.doesNotMatch(studentSource, /groupHiddenFromStudents/);
+  assert.match(studentSource, /return studentEventState\(event, Date\.now\(\), myRegs\.has\(event\.id\)\)/);
 });
 
-test("Event đã kết thúc còn hiện 60 ngày rồi tự ẩn khỏi student", () => {
+test("Event đã kết thúc còn hiện 90 ngày; Event đã đăng ký luôn hiện", () => {
   const end = new Date("2026-09-15T10:00:00").getTime();
   const hiddenEnded = { status: "hidden", date: "2026-09-15", endTime: "10:00" };
   assert.equal(studentEventState(hiddenEnded, end + STUDENT_ENDED_RETENTION_MS - 1), "ended");
   assert.equal(studentEventState(hiddenEnded, end + STUDENT_ENDED_RETENTION_MS), "hidden");
-  assert.equal(studentEventState({ status: "hidden", date: "2026-09-20", endTime: "10:00" }, end), "hidden");
+  assert.equal(studentEventState(hiddenEnded, end + STUDENT_ENDED_RETENTION_MS * 2, true), "ended");
+  assert.equal(studentEventState({ status: "hidden", date: "2026-09-20", endTime: "10:00", openAt: "2026-09-10T10:00:00", capacity: 10 }, end), "open");
+  assert.equal(STUDENT_ENDED_RETENTION_MS, 90 * 24 * 60 * 60 * 1000);
 });

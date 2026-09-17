@@ -98,11 +98,10 @@ test("quyền hide Group giữ nguyên theo quyền sửa Group, không cấp ch
   assert.doesNotMatch(groupRules, /eventCoManager|attendanceCoManager|managesEvent|managesSession/);
 });
 
-test("Group hidden làm Event biến mất khỏi student UI mà không cascade document", () => {
-  assert.match(studentSource, /function groupHiddenFromStudents\(group\)/);
-  assert.match(studentSource, /group\?\.hidden === true \|\| Boolean\(group\?\.hiddenAt\)/);
-  assert.match(studentSource, /groupHiddenFromStudents\(groups\.get\(event\.groupId\)\)/);
-  assert.match(studentSource, /activeGroupSnapshot\.data\(\)\.deletedAt \|\| groupHiddenFromStudents\(activeGroupSnapshot\.data\(\)\)/);
+test("Group hidden chỉ làm gọn Admin, không ẩn Event hoặc chặn đăng ký phía student", () => {
+  assert.match(studentSource, /if \(event\.deletedAt \|\| groups\.get\(event\.groupId\)\?\.deletedAt\) return false/);
+  assert.doesNotMatch(studentSource, /groupHiddenFromStudents/);
+  assert.match(studentSource, /!activeGroupSnapshot\.exists\(\) \|\| activeGroupSnapshot\.data\(\)\.deletedAt/);
 });
 
 test("Attendance create/edit dùng giờ 24 giờ HH:mm", () => {
