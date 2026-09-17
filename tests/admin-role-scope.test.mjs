@@ -259,3 +259,20 @@ test("UI admin không render raw UID người cấp quyền và dùng checkbox m
   assert.match(html, /adminScopeFilter/);
   assert.match(html, /Sau đại học/);
 });
+
+test("Bộ lọc Admin dùng ba cột desktop và Sub-admin chọn Khoa chung với ngành", () => {
+  const html = readFileSync("admin/index.html", "utf8");
+  const styles = readFileSync("styles.css", "utf8");
+  const adminSource = readFileSync("admin/admin.mjs", "utf8");
+  assert.match(html, /form-grid admin-filter-grid/);
+  assert.match(styles, /\.admin-filter-grid\{grid-template-columns:repeat\(3,minmax\(0,1fr\)\)\}/);
+  assert.match(adminSource, /admin-faculty-scope/);
+  assert.match(adminSource, /Khoa \/ Ngành \/ Chương trình/);
+  assert.match(adminSource, /facultyScopeSelected \? "faculty" : "department"/);
+  assert.match(adminSource, /admin-scope-option:checked:not\(\.admin-faculty-scope\)/);
+});
+
+test("Sub-admin không chạy kiểm tra danh sách sinh viên Khoa khi không có quyền list", () => {
+  const adminSource = readFileSync("admin/admin.mjs", "utf8");
+  assert.match(adminSource, /if \(highAdminAccess\(\)\) loadFacultyStudentMeta\(\);/);
+});
