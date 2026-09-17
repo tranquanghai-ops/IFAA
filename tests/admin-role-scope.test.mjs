@@ -220,6 +220,32 @@ test("Người cấp quyền hiển thị tên/email, không bao giờ lộ UID 
   assert.equal(grantorLabel({}, profileOf), "—");
 });
 
+test("admin.mjs import đầy đủ mọi symbol role-scope được tham chiếu (chống lỗi runtime như allowedScopeForNewAdmin)", () => {
+  const adminSource = readFileSync("admin/admin.mjs", "utf8");
+  const moduleSource = readFileSync("admin/modules/role-scope.mjs", "utf8");
+  const importMatch = adminSource.match(/import \{([^}]+)\} from "\.\/modules\/role-scope\.mjs\?v=\d+"/);
+  assert.ok(importMatch, "admin.mjs phải import từ role-scope.mjs");
+  const imported = new Set(importMatch[1].split(",").map((name) => name.trim()).filter(Boolean));
+  const used = [...adminSource.matchAll(/\b(allowedScopeForNewAdmin|assignableScopeOptions|canCreateCategory|canManageAdmin|canManageResource|categoryScope|creatableRoles|defaultResourceScope|filterSortAdmins|grantorLabel|normalizeAdminAccess|roleDocument|scopeLabels|accessLabel|departmentLabel|departmentCategory|scopeSubset|normalizeScopeIds|adminMatchesScopeFilter|adminRoleSortKey|ROLE_ORDER)\b/g)].map((match) => match[1]);
+  const missing = [...new Set(used)].filter((name) => !imported.has(name));
+  assert.deepEqual(missing, [], `admin.mjs dùng nhưng chưa import: ${missing.join(", ")}`);
+  const exported = [...moduleSource.matchAll(/^export function (\w+)/gm)].map((match) => match[1]);
+  for (const name of imported) {
+    if (/^[A-Z_]+$/.test(name)) continue;
+    assert.ok(exported.includes(name), `role-scope.mjs không export ${name}`);
+  }
+});
+
+test("Menu trái: Thùng rác nằm sau Thiết lập, không đổi logic hiển thị", () => {
+  const html = readFileSync("admin/index.html", "utf8");
+  const sidebar = html.match(/id="adminSidebar"[\s\S]*?<\/aside>/)?.[0] || "";
+  assert.ok(sidebar.includes('id="trashNav"'));
+  assert.ok(sidebar.indexOf('id="settingsNav"') < sidebar.indexOf('id="trashNav"'), "Thùng rác phải nằm sau Thiết lập");
+  assert.match(sidebar, /id="trashNav" class="nav-btn hidden" data-pane="trash"/);
+  const adminSource = readFileSync("admin/admin.mjs", "utf8");
+  assert.match(adminSource, /\$\("#trashNav"\)\.?classList\.toggle\("hidden", !highAdminAccess\(\)\)/);
+});
+
 test("UI admin không render raw UID người cấp quyền và dùng checkbox multi-scope", () => {
   const adminSource = readFileSync("admin/admin.mjs", "utf8");
   assert.doesNotMatch(adminSource, /record\.addedByEmail \|\| record\.addedByUid/);

@@ -13,7 +13,7 @@ import { creatorLabel } from "./modules/resource-ui.mjs?v=1";
 import { createAdminRegistrationService } from "./modules/registrations/registration-service.mjs?v=2";
 import { createAdminStudentService } from "./modules/students/student-service.mjs?v=2";
 import { addCoManagerUid, canEditResourceCoManagers, inheritedAttendanceCoManagerUids, isResourceCoManager, normalizeCoManagerUids } from "./modules/co-managers.mjs?v=1";
-import { DEPARTMENTS, FACULTY_SCOPE_ID, ROLE_LABELS, accessLabel, assignableScopeOptions, canCreateCategory, canManageAdmin, canManageResource, categoryScope, creatableRoles, defaultResourceScope, filterSortAdmins, grantorLabel, normalizeAdminAccess, roleDocument, scopeLabels } from "./modules/role-scope.mjs?v=2";
+import { DEPARTMENTS, FACULTY_SCOPE_ID, ROLE_LABELS, accessLabel, allowedScopeForNewAdmin, assignableScopeOptions, canCreateCategory, canManageAdmin, canManageResource, categoryScope, creatableRoles, defaultResourceScope, filterSortAdmins, grantorLabel, normalizeAdminAccess, roleDocument, scopeLabels } from "./modules/role-scope.mjs?v=2";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
 const DEFAULT_PUBLIC_BASE_URL = "https://ifa.tdtu.edu.vn/dang-ky-su-kien";
