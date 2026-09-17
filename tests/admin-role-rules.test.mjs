@@ -13,10 +13,12 @@ const graphicSubEmail = "graphic-sub@tdtu.edu.vn";
 const facultySubEmail = "faculty-sub@tdtu.edu.vn";
 const legacyAdminEmail = "legacy-admin@tdtu.edu.vn";
 const legacySubEmail = "legacy-sub@tdtu.edu.vn";
+const digitalGradHeadEmail = "digital-grad-head@tdtu.edu.vn";
+const multiSubEmail = "multi-sub@tdtu.edu.vn";
 let env;
 
 const dbFor = (uid, email) => env.authenticatedContext(uid, { email, email_verified: true }).firestore();
-const role = (email, value, scopeType, scopeId = "") => ({ email, role: value, scopeType, scopeId, addedByUid: "owner", addedAt: new Date() });
+const role = (email, value, scopeType, scopeId = "", scopeIds = null) => ({ email, role: value, scopeType, scopeId, ...(scopeIds ? { scopeIds } : {}), addedByUid: "owner", addedAt: new Date() });
 const eventData = (uid, email, overrides = {}) => ({
   title: "Event", category: "Ngành Thiết kế nội thất", location: "A", status: "open",
   capacity: 20, registeredCount: 0, allowedFaculties: ["IFA"], groupId: "", groupName: "",
@@ -38,10 +40,14 @@ async function seed() {
       setDoc(doc(db, "admins", facultySubEmail), role(facultySubEmail, "sub_admin", "faculty", "mtcn")),
       setDoc(doc(db, "admins", legacyAdminEmail), { email: legacyAdminEmail, role: "admin" }),
       setDoc(doc(db, "admins", legacySubEmail), { email: legacySubEmail, role: "subadmin" }),
+      setDoc(doc(db, "admins", digitalGradHeadEmail), role(digitalGradHeadEmail, "department_admin", "department", "digital-art", ["digital-art", "graduate"])),
+      setDoc(doc(db, "admins", multiSubEmail), role(multiSubEmail, "sub_admin", "department", "interior", ["interior", "graduate"])),
       setDoc(doc(db, "events", "INTERIOR"), eventData("interior-sub", interiorSubEmail)),
       setDoc(doc(db, "events", "GRAPHIC"), eventData("graphic-sub", graphicSubEmail, { category: "Ngành Đồ họa", scopeId: "graphic" })),
+      setDoc(doc(db, "events", "GRADUATE"), eventData("multi-sub", multiSubEmail, { category: "Sau đại học", scopeId: "graduate" })),
       setDoc(doc(db, "events", "EXTERNAL"), eventData("interior-sub", interiorSubEmail, { category: "Sự kiện Khoa khác" })),
-      setDoc(doc(db, "attendanceSessions", "INTERIOR_ATT"), { title: "Attendance", status: "open", scopeType: "department", scopeId: "interior", createdByUid: "interior-sub", createdByEmail: interiorSubEmail, createdAt: new Date(), coManagerUids: [], checkinCount: 0, pendingCount: 0 })
+      setDoc(doc(db, "attendanceSessions", "INTERIOR_ATT"), { title: "Attendance", status: "open", scopeType: "department", scopeId: "interior", createdByUid: "interior-sub", createdByEmail: interiorSubEmail, createdAt: new Date(), coManagerUids: [], checkinCount: 0, pendingCount: 0 }),
+      setDoc(doc(db, "attendanceSessions", "GRADUATE_ATT"), { title: "Graduate Attendance", status: "open", scopeType: "department", scopeId: "graduate", createdByUid: "multi-sub", createdByEmail: multiSubEmail, createdAt: new Date(), coManagerUids: [], checkinCount: 0, pendingCount: 0 })
     ]);
   });
 }
@@ -123,5 +129,65 @@ describe("Scoped Event, Group and Attendance", () => {
     delete legacyEvent.scopeId;
     await assertSucceeds(addDoc(collection(dbFor("legacy-sub", legacySubEmail), "events"), legacyEvent));
     await assertSucceeds(updateDoc(doc(dbFor("legacy-admin", legacyAdminEmail), "events", "GRAPHIC"), { title: "Legacy Admin" }));
+  });
+});
+
+describe("Multi-scope admin", () => {
+  test("Trưởng ngành digital-art+graduate quản lý Event thuộc cả hai scope, không phải Interior", async () => {
+    await assertSucceeds(updateDoc(doc(dbFor("dg-head", digitalGradHeadEmail), "events", "GRADUATE"), { title: "Graduate managed" }));
+    await assertSucceeds(addDoc(collection(dbFor("dg-head", digitalGradHeadEmail), "events"), eventData("dg-head", digitalGradHeadEmail, { category: "Ngành Nghệ thuật số", scopeId: "digital-art" })));
+    await assertSucceeds(addDoc(collection(dbFor("dg-head", digitalGradHeadEmail), "events"), eventData("dg-head", digitalGradHeadEmail, { category: "Sau đại học", scopeId: "graduate" })));
+    await assertFails(addDoc(collection(dbFor("dg-head", digitalGradHeadEmail), "events"), eventData("dg-head", digitalGradHeadEmail, { category: "Ngành Thiết kế nội thất", scopeId: "interior" })));
+    await assertFails(updateDoc(doc(dbFor("dg-head", digitalGradHeadEmail), "events", "INTERIOR"), { title: "Denied" }));
+  });
+
+  test("Trưởng ngành multi-scope tạo Sub-admin: subset cho phép, ngoài scope bị chặn", async () => {
+    await assertSucceeds(setDoc(doc(dbFor("dg-head", digitalGradHeadEmail), "admins", "s1@tdtu.edu.vn"), { ...role("s1@tdtu.edu.vn", "sub_admin", "department", "digital-art", ["digital-art"]), addedByUid: "dg-head" }));
+    await assertSucceeds(setDoc(doc(dbFor("dg-head", digitalGradHeadEmail), "admins", "s2@tdtu.edu.vn"), { ...role("s2@tdtu.edu.vn", "sub_admin", "department", "graduate", ["graduate"]), addedByUid: "dg-head" }));
+    await assertSucceeds(setDoc(doc(dbFor("dg-head", digitalGradHeadEmail), "admins", "s3@tdtu.edu.vn"), { ...role("s3@tdtu.edu.vn", "sub_admin", "department", "digital-art", ["digital-art", "graduate"]), addedByUid: "dg-head" }));
+    await assertFails(setDoc(doc(dbFor("dg-head", digitalGradHeadEmail), "admins", "s4@tdtu.edu.vn"), { ...role("s4@tdtu.edu.vn", "sub_admin", "department", "digital-art", ["digital-art", "interior"]), addedByUid: "dg-head" }));
+    await assertFails(setDoc(doc(dbFor("dg-head", digitalGradHeadEmail), "admins", "s5@tdtu.edu.vn"), { ...role("s5@tdtu.edu.vn", "sub_admin", "department", "interior", ["interior"]), addedByUid: "dg-head" }));
+  });
+
+  test("Trưởng ngành không thể sửa/xóa Sub-admin ngoài subset dù đang thấy", async () => {
+    await assertFails(updateDoc(doc(dbFor("dg-head", digitalGradHeadEmail), "admins", multiSubEmail), { role: "sub_admin" }));
+    await assertFails(deleteDoc(doc(dbFor("dg-head", digitalGradHeadEmail), "admins", multiSubEmail)));
+  });
+
+  test("Sub-admin multi-scope (interior+graduate) thao tác đúng hai scope, DENY digital-art", async () => {
+    await assertSucceeds(addDoc(collection(dbFor("multi-sub", multiSubEmail), "events"), eventData("multi-sub", multiSubEmail, { category: "Ngành Thiết kế nội thất", scopeId: "interior" })));
+    await assertSucceeds(addDoc(collection(dbFor("multi-sub", multiSubEmail), "events"), eventData("multi-sub", multiSubEmail, { category: "Sau đại học", scopeId: "graduate" })));
+    await assertFails(addDoc(collection(dbFor("multi-sub", multiSubEmail), "events"), eventData("multi-sub", multiSubEmail, { category: "Ngành Đồ họa", scopeId: "graphic" })));
+    await assertSucceeds(addDoc(collection(dbFor("multi-sub", multiSubEmail), "eventGroups"), { name: "Grad", maxRegistrations: 2, unlimited: false, scopeType: "department", scopeId: "graduate", createdByUid: "multi-sub", createdByEmail: multiSubEmail, createdAt: new Date() }));
+    await assertFails(addDoc(collection(dbFor("multi-sub", multiSubEmail), "eventGroups"), { name: "Graphics", maxRegistrations: 2, unlimited: false, scopeType: "department", scopeId: "graphic", createdByUid: "multi-sub", createdByEmail: multiSubEmail, createdAt: new Date() }));
+  });
+
+  test("Scope ghi không hợp lệ bị chặn: unknown, rỗng, thiếu scopeId khớp", async () => {
+    await assertFails(setDoc(doc(dbFor("owner", ownerEmail), "admins", "x1@tdtu.edu.vn"), { ...role("x1@tdtu.edu.vn", "department_admin", "department", "digital-art", ["digital-art", "khong-ton-tai"]), addedByUid: "owner" }));
+    await assertFails(setDoc(doc(dbFor("owner", ownerEmail), "admins", "x2@tdtu.edu.vn"), { ...role("x2@tdtu.edu.vn", "sub_admin", "department", "digital-art", []), addedByUid: "owner" }));
+    await assertFails(setDoc(doc(dbFor("owner", ownerEmail), "admins", "x3@tdtu.edu.vn"), { ...role("x3@tdtu.edu.vn", "department_admin", "department", "graduate", ["digital-art", "graduate"]), addedByUid: "owner" }));
+  });
+
+  test("Tự đổi scope/role của chính mình bị chặn", async () => {
+    await assertFails(updateDoc(doc(dbFor("dg-head", digitalGradHeadEmail), "admins", digitalGradHeadEmail), { scopeIds: ["digital-art", "graduate", "interior"] }));
+    await assertFails(updateDoc(doc(dbFor("multi-sub", multiSubEmail), "admins", multiSubEmail), { scopeIds: ["graphic"] }));
+  });
+
+  test("Sub-admin multi-scope vẫn không quản lý role/user Admin", async () => {
+    await assertFails(setDoc(doc(dbFor("multi-sub", multiSubEmail), "admins", "newsub@tdtu.edu.vn"), { ...role("newsub@tdtu.edu.vn", "sub_admin", "department", "graduate", ["graduate"]), addedByUid: "multi-sub" }));
+  });
+
+  test("Attendance multi-scope: đọc/tạo đúng scope, DENY scope ngoài danh sách", async () => {
+    await assertSucceeds(getDoc(doc(dbFor("dg-head", digitalGradHeadEmail), "attendanceSessions", "GRADUATE_ATT")));
+    await assertFails(getDoc(doc(dbFor("dg-head", digitalGradHeadEmail), "attendanceSessions", "INTERIOR_ATT")));
+    await assertSucceeds(updateDoc(doc(dbFor("dg-head", digitalGradHeadEmail), "attendanceSessions", "GRADUATE_ATT"), { title: "Managed" }));
+    await assertSucceeds(addDoc(collection(dbFor("dg-head", digitalGradHeadEmail), "attendanceSessions"), { title: "New Grad Att", status: "open", scopeType: "department", scopeId: "graduate", createdByUid: "dg-head", createdByEmail: digitalGradHeadEmail, createdAt: new Date(), coManagerUids: [], checkinCount: 0, pendingCount: 0 }));
+    await assertFails(addDoc(collection(dbFor("dg-head", digitalGradHeadEmail), "attendanceSessions"), { title: "Bad Scope", status: "open", scopeType: "department", scopeId: "interior", createdByUid: "dg-head", createdByEmail: digitalGradHeadEmail, createdAt: new Date(), coManagerUids: [], checkinCount: 0, pendingCount: 0 }));
+    await assertSucceeds(getDoc(doc(dbFor("multi-sub", multiSubEmail), "attendanceSessions", "GRADUATE_ATT")));
+  });
+
+  test("Legacy scopeId đơn (không scopeIds) vẫn ghi và quản lý được", async () => {
+    await assertSucceeds(setDoc(doc(dbFor("owner", ownerEmail), "admins", "legacy-head@tdtu.edu.vn"), role("legacy-head@tdtu.edu.vn", "department_admin", "department", "interior")));
+    await assertSucceeds(updateDoc(doc(dbFor("interior-head", interiorHeadEmail), "events", "INTERIOR"), { title: "Legacy still works" }));
   });
 });
