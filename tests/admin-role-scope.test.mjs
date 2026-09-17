@@ -276,3 +276,54 @@ test("Sub-admin không chạy kiểm tra danh sách sinh viên Khoa khi không c
   const adminSource = readFileSync("admin/admin.mjs", "utf8");
   assert.match(adminSource, /if \(highAdminAccess\(\)\) loadFacultyStudentMeta\(\);/);
 });
+
+test("Sửa và tạo Admin: Trưởng ngành 1/nhiều scope, Sub-admin nhiều scope, subset enforcement và legacy scopeId", () => {
+  const systemAdmin = normalizeAdminAccess({}, { owner: true });
+  const highAdmin = normalizeAdminAccess({ role: "admin" });
+  const deptAdminMulti = normalizeAdminAccess({ role: "department_admin", scopeType: "department", scopeId: "graphic", scopeIds: ["graphic", "interior"] });
+  const deptAdminSingle = normalizeAdminAccess({ role: "department_admin", scopeType: "department", scopeId: "industrial", scopeIds: ["industrial"] });
+
+  // 1. Sửa Admin Trưởng ngành 1 scope
+  const targetDeptSingle = roleDocument("department_admin", "department", ["industrial"]);
+  assert.equal(allowedScopeForNewAdmin(systemAdmin, targetDeptSingle), true);
+  assert.equal(allowedScopeForNewAdmin(highAdmin, targetDeptSingle), true);
+  assert.deepEqual(targetDeptSingle, { role: "department_admin", scopeType: "department", scopeId: "industrial", scopeIds: ["industrial"] });
+
+  // 2. Sửa Admin Trưởng ngành nhiều scope
+  const targetDeptMulti = roleDocument("department_admin", "department", ["graphic", "interior"]);
+  assert.equal(allowedScopeForNewAdmin(systemAdmin, targetDeptMulti), true);
+  assert.equal(allowedScopeForNewAdmin(highAdmin, targetDeptMulti), true);
+  assert.deepEqual(targetDeptMulti, { role: "department_admin", scopeType: "department", scopeId: "graphic", scopeIds: ["graphic", "interior"] });
+
+  // 3. Sửa Sub-admin nhiều scope
+  const targetSubMulti = roleDocument("sub_admin", "department", ["graphic", "interior"]);
+  assert.equal(allowedScopeForNewAdmin(systemAdmin, targetSubMulti), true);
+  assert.equal(allowedScopeForNewAdmin(highAdmin, targetSubMulti), true);
+  assert.equal(allowedScopeForNewAdmin(deptAdminMulti, targetSubMulti), true);
+
+  // 4. Lưu thay đổi không lỗi
+  assert.doesNotThrow(() => {
+    const docToSave = roleDocument("sub_admin", "department", ["graphic"]);
+    if (!allowedScopeForNewAdmin(deptAdminMulti, docToSave)) throw Error("Forbidden");
+  });
+
+  // 5. Tạo Admin mới vẫn hoạt động
+  assert.doesNotThrow(() => {
+    const newAdminDoc = roleDocument("department_admin", "department", ["fashion", "digital-art"]);
+    if (!allowedScopeForNewAdmin(highAdmin, newAdminDoc)) throw Error("Forbidden");
+  });
+
+  // 6. Subset enforcement vẫn đúng: Trưởng ngành chỉ có ["industrial"] không thể cấp ["graphic"]
+  const outsideSubDoc = roleDocument("sub_admin", "department", ["graphic"]);
+  assert.equal(allowedScopeForNewAdmin(deptAdminSingle, outsideSubDoc), false);
+  const partiallyOutsideSub = roleDocument("sub_admin", "department", ["graphic", "industrial"]);
+  assert.equal(allowedScopeForNewAdmin(deptAdminMulti, partiallyOutsideSub), false);
+
+  // 7. Legacy scopeId vẫn hoạt động khi đọc/chuyển đổi
+  const legacyDeptAdmin = normalizeAdminAccess({ role: "department_admin", scopeType: "department", scopeId: "interior" });
+  assert.deepEqual(legacyDeptAdmin.scopeIds, ["interior"]);
+  assert.equal(legacyDeptAdmin.scopeId, "interior");
+  const docFromLegacy = roleDocument("sub_admin", "department", [], "interior");
+  assert.deepEqual(docFromLegacy.scopeIds, ["interior"]);
+  assert.equal(allowedScopeForNewAdmin(deptAdminMulti, docFromLegacy), true);
+});
