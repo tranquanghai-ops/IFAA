@@ -5,7 +5,7 @@ import { getBlob, getStorage, ref } from "https://www.gstatic.com/firebasejs/11.
 import { firebaseConfig, STUDENT_DOMAIN, OWNER_EMAIL } from "./firebase-config.mjs";
 import { eventNeedsRegistrationForm, formatRegistrationAnswer, registrationConfig, registrationFormSnapshot, validPersonalEmail, validPhone, validateRegistrationSubmission } from "./registration-form.mjs";
 import { EVENT_ATTACHMENT_MAX_BYTES, formatAttachmentSize, normalizeEventAttachments } from "./event-attachments.mjs";
-import { compareStudentAllEvents, matchesStudentGroupFilter } from "./student-event-sort.mjs?v=1";
+import { compareStudentAllEvents, matchesStudentGroupFilter, studentEventState } from "./student-event-sort.mjs?v=2";
 import { canManageResource, normalizeAdminAccess } from "./admin/modules/role-scope.mjs?v=2";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
@@ -410,22 +410,8 @@ function dayPeriod(time) {
   return "Buổi tối";
 }
 
-function eventEnd(event) {
-  const date = new Date(`${event.date}T${event.endTime || event.startTime || "23:59"}:00`);
-  return Number.isNaN(date.getTime()) ? Infinity : date.getTime();
-}
-
 function eventState(event) {
-  if (event.status === "hidden" || event.status === "draft") return "hidden";
-  const now = Date.now();
-  if (now > eventEnd(event)) return "ended";
-  if (event.status === "closed") return "closed";
-  const open = millis(event.openAt) ?? 0;
-  const close = millis(event.closeAt) ?? Infinity;
-  if (now < open) return "upcoming";
-  if (now > close) return "closed";
-  if (!event.unlimitedCapacity && (event.registeredCount || 0) >= (event.capacity || 0)) return "full";
-  return "open";
+  return studentEventState(event);
 }
 
 async function runRegistrationTransaction(operation) {
@@ -588,7 +574,7 @@ function groupHiddenFromStudents(group) {
 }
 
 function render() {
-  const focusedEvent = linkedEventCode ? events.find((event) => !event.deletedAt && !groupHiddenFromStudents(groups.get(event.groupId)) && event.shareCode && shareCode(event.shareCode) === shareCode(linkedEventCode)) : null;
+  const focusedEvent = linkedEventCode ? events.find((event) => !event.deletedAt && eventState(event) !== "hidden" && !groupHiddenFromStudents(groups.get(event.groupId)) && event.shareCode && shareCode(event.shareCode) === shareCode(linkedEventCode)) : null;
   const focusedGroup = linkedCode ? [...groups.values()].find((group) => !group.deletedAt && !groupHiddenFromStudents(group) && (group.id === linkedCode || groupCode(group) === shareCode(linkedCode))) : null;
   const linkedEventMode = !!focusedEvent;
   const linkedMode = !!linkedCode;

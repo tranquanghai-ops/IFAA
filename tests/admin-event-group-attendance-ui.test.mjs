@@ -119,3 +119,7 @@ test("không còn Group đang dùng thì ẩn group filter và category chiếm 
   assert.match(studentSource, /#studentAdvancedFilters["']\)\.classList\.toggle\("single-filter", !showGroupFilter\)/);
   assert.match(styles, /\.event-filter-panel\.single-filter\{grid-template-columns:minmax\(0,1fr\)\}/);
 });
+
+test("empty state phía student căn giữa toàn bộ nội dung", () => {
+  assert.match(styles, /\.event-grid>\.event-empty,\.event-list>\.event-empty\{[^}]*align-items:center;justify-content:center;[^}]*text-align:center/);
+});

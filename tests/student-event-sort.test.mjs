@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { compareStudentAllEvents, matchesStudentGroupFilter } from "../student-event-sort.mjs";
+import { STUDENT_ENDED_RETENTION_MS, compareStudentAllEvents, matchesStudentGroupFilter, studentEventState } from "../student-event-sort.mjs";
 
 const stateOf = (event) => event.state;
 const now = new Date("2026-09-15T12:00:00Z").getTime();
@@ -70,6 +70,14 @@ test("các filter student hiện hữu giữ điều kiện eligibility", () => 
 
 test("hidden Group bị loại trước filter và sorting phía student", () => {
   assert.match(studentSource, /if \(event\.deletedAt \|\| groups\.get\(event\.groupId\)\?\.deletedAt \|\| groupHiddenFromStudents\(groups\.get\(event\.groupId\)\)\) return false/);
-  assert.match(studentSource, /const focusedEvent = linkedEventCode \? events\.find\(\(event\) => !event\.deletedAt && !groupHiddenFromStudents\(groups\.get\(event\.groupId\)\)/);
+  assert.match(studentSource, /const focusedEvent = linkedEventCode \? events\.find\(\(event\) => !event\.deletedAt && eventState\(event\) !== "hidden" && !groupHiddenFromStudents\(groups\.get\(event\.groupId\)\)/);
   assert.match(studentSource, /const focusedGroup = linkedCode \? \[\.\.\.groups\.values\(\)\]\.find\(\(group\) => !group\.deletedAt && !groupHiddenFromStudents\(group\)/);
+});
+
+test("Event đã kết thúc còn hiện 60 ngày rồi tự ẩn khỏi student", () => {
+  const end = new Date("2026-09-15T10:00:00").getTime();
+  const hiddenEnded = { status: "hidden", date: "2026-09-15", endTime: "10:00" };
+  assert.equal(studentEventState(hiddenEnded, end + STUDENT_ENDED_RETENTION_MS - 1), "ended");
+  assert.equal(studentEventState(hiddenEnded, end + STUDENT_ENDED_RETENTION_MS), "hidden");
+  assert.equal(studentEventState({ status: "hidden", date: "2026-09-20", endTime: "10:00" }, end), "hidden");
 });
