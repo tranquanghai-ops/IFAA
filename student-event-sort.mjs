@@ -12,12 +12,13 @@ function eventDateTime(event, useEnd = false) {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-export const STUDENT_ENDED_RETENTION_MS = 60 * 24 * 60 * 60 * 1000;
+export const STUDENT_ENDED_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 
-export function studentEventState(event, now = Date.now()) {
+export function studentEventState(event, now = Date.now(), preserveRegisteredEvent = false) {
   const end = eventDateTime(event, true);
-  if (end !== null && now > end) return now - end >= STUDENT_ENDED_RETENTION_MS ? "hidden" : "ended";
-  if (event?.status === "hidden" || event?.status === "draft") return "hidden";
+  if (end !== null && now > end) return preserveRegisteredEvent || now - end < STUDENT_ENDED_RETENTION_MS ? "ended" : "hidden";
+  // status=hidden chỉ dùng để làm gọn giao diện Admin; public vẫn suy ra trạng thái theo lịch sự kiện.
+  if (event?.status === "draft") return "hidden";
   if (event?.status === "closed") return "closed";
   const open = valueMillis(event?.openAt) ?? 0;
   const close = valueMillis(event?.closeAt) ?? Infinity;
