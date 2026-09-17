@@ -64,6 +64,7 @@
 
 /* V2.0: bộ lọc sự kiện và khung nhóm */
 .event-filter-panel{display:grid;grid-template-columns:repeat(2,minmax(220px,1fr));gap:12px;margin:0 0 18px;padding:16px 18px;border:1px solid var(--line);border-radius:16px;background:#fff;box-shadow:var(--shadow)}
+.event-filter-panel.single-filter{grid-template-columns:minmax(0,1fr)}
 .event-filter-panel .field label{font-size:13px}
 .event-filter-panel select{width:100%;border:1px solid #cfd5dd;border-radius:11px;padding:10px 12px;background:#fff;color:var(--ink)}
 .event-list{display:grid;gap:20px}

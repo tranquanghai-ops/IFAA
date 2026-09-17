@@ -98,7 +98,24 @@ test("quyền hide Group giữ nguyên theo quyền sửa Group, không cấp ch
   assert.doesNotMatch(groupRules, /eventCoManager|attendanceCoManager|managesEvent|managesSession/);
 });
 
-test("Group hidden không làm Event biến mất khỏi student UI", () => {
-  assert.match(studentSource, /if \(event\.deletedAt \|\| groups\.get\(event\.groupId\)\?\.deletedAt\) return false/);
-  assert.doesNotMatch(studentSource, /groups\.get\(event\.groupId\)\?\.(hidden|hiddenAt)/);
+test("Group hidden làm Event biến mất khỏi student UI mà không cascade document", () => {
+  assert.match(studentSource, /function groupHiddenFromStudents\(group\)/);
+  assert.match(studentSource, /group\?\.hidden === true \|\| Boolean\(group\?\.hiddenAt\)/);
+  assert.match(studentSource, /groupHiddenFromStudents\(groups\.get\(event\.groupId\)\)/);
+  assert.match(studentSource, /activeGroupSnapshot\.data\(\)\.deletedAt \|\| groupHiddenFromStudents\(activeGroupSnapshot\.data\(\)\)/);
+});
+
+test("Attendance create/edit dùng giờ 24 giờ HH:mm", () => {
+  for (const id of ["attendanceStandaloneStartTime", "attendanceStandaloneEndTime", "attendanceEditStartTime", "attendanceEditEndTime"]) {
+    assert.match(adminHtml, new RegExp(`id="${id}" class="time-24" type="text"[^>]+placeholder="HH:mm"[^>]+pattern=`));
+  }
+  assert.match(adminSource, /const validTime24 = \(value\) =>/);
+  assert.match(adminSource, /Giờ điểm danh phải theo định dạng 24 giờ HH:mm/);
+});
+
+test("không còn Group đang dùng thì ẩn group filter và category chiếm cả hàng", () => {
+  assert.match(studentSource, /const showGroupFilter = availableGroups\.length > 0/);
+  assert.match(studentSource, /#studentGroupFilterField["']\)\.classList\.toggle\("hidden", !showGroupFilter\)/);
+  assert.match(studentSource, /#studentAdvancedFilters["']\)\.classList\.toggle\("single-filter", !showGroupFilter\)/);
+  assert.match(styles, /\.event-filter-panel\.single-filter\{grid-template-columns:minmax\(0,1fr\)\}/);
 });

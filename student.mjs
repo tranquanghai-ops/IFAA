@@ -573,16 +573,23 @@ function refreshStudentFilters(sourceEvents, focusedGroup) {
   const availableGroupIds = [...new Set(sourceEvents.map((event) => event.groupId).filter(Boolean))];
   const availableGroups = availableGroupIds.map((id) => groups.get(id)).filter(Boolean).sort((a, b) => groupPosition(a) - groupPosition(b));
   const hasUngrouped = sourceEvents.some((event) => !event.groupId);
+  const showGroupFilter = availableGroups.length > 0;
+  $("#studentGroupFilterField").classList.toggle("hidden", !showGroupFilter);
+  $("#studentAdvancedFilters").classList.toggle("single-filter", !showGroupFilter);
   groupSelect.innerHTML = '<option value="">Tất cả nhóm sự kiện</option>' + availableGroups.map((group) => `<option value="${group.id}">${safe(group.name)}</option>`).join("") + (hasUngrouped ? '<option value="__ungrouped__">Không thuộc nhóm</option>' : "");
   const validCurrentGroup = availableGroups.some((group) => group.id === currentGroup) || (hasUngrouped && currentGroup === "__ungrouped__");
   groupSelect.value = validCurrentGroup ? currentGroup : "";
-  groupSelect.disabled = !!focusedGroup;
+  groupSelect.disabled = !!focusedGroup || !showGroupFilter;
   studentGroupFilter = groupSelect.value;
 }
 
+function groupHiddenFromStudents(group) {
+  return group?.hidden === true || Boolean(group?.hiddenAt);
+}
+
 function render() {
-  const focusedEvent = linkedEventCode ? events.find((event) => !event.deletedAt && event.shareCode && shareCode(event.shareCode) === shareCode(linkedEventCode)) : null;
-  const focusedGroup = linkedCode ? [...groups.values()].find((group) => !group.deletedAt && (group.id === linkedCode || groupCode(group) === shareCode(linkedCode))) : null;
+  const focusedEvent = linkedEventCode ? events.find((event) => !event.deletedAt && !groupHiddenFromStudents(groups.get(event.groupId)) && event.shareCode && shareCode(event.shareCode) === shareCode(linkedEventCode)) : null;
+  const focusedGroup = linkedCode ? [...groups.values()].find((group) => !group.deletedAt && !groupHiddenFromStudents(group) && (group.id === linkedCode || groupCode(group) === shareCode(linkedCode))) : null;
   const linkedEventMode = !!focusedEvent;
   const linkedMode = !!linkedCode;
   $("#linkedEventPanel").classList.toggle("hidden", !linkedEventMode && !(linkedEventCode && eventsLoaded));
@@ -624,7 +631,7 @@ function render() {
   }
 
   const accessibleEvents = events.filter((event) => {
-    if (event.deletedAt || groups.get(event.groupId)?.deletedAt) return false;
+    if (event.deletedAt || groups.get(event.groupId)?.deletedAt || groupHiddenFromStudents(groups.get(event.groupId))) return false;
     if (!facultyAllowed(event)) return false;
     if (filter === "mine") return myRegs.has(event.id) && (!linkedCode || event.groupId === focusedGroup?.id);
     if (eventState(event) === "hidden") return false;
@@ -951,7 +958,7 @@ async function register(eventId, submission = null) {
       if (event.deletedAt) throw Error("Sự kiện không còn khả dụng.");
       if (event.groupId) {
         const activeGroupSnapshot = await transaction.get(doc(db, "eventGroups", event.groupId));
-        if (!activeGroupSnapshot.exists() || activeGroupSnapshot.data().deletedAt) throw Error("Nhóm sự kiện không còn khả dụng.");
+        if (!activeGroupSnapshot.exists() || activeGroupSnapshot.data().deletedAt || groupHiddenFromStudents(activeGroupSnapshot.data())) throw Error("Nhóm sự kiện không còn khả dụng.");
       }
       if (!allowedFaculties(event).includes(profile.faculty)) throw Error("Sự kiện không mở cho khoa/đơn vị của bạn.");
       let group = null;

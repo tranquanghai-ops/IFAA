@@ -49,6 +49,7 @@ const parseVietnamDate = (value) => {
   if (date.getFullYear() !== Number(year) || date.getMonth() !== Number(month) - 1 || date.getDate() !== Number(day)) return "";
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 };
+const validTime24 = (value) => /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(String(value || ""));
 
 document.querySelectorAll(".date-vn").forEach((input) => input.addEventListener("blur", () => {
   const iso = parseVietnamDate(input.value);
@@ -1930,6 +1931,7 @@ async function createStandaloneAttendance() {
   const location = $("#attendanceStandaloneLocation").value.trim();
   const startTime = $("#attendanceStandaloneStartTime").value;
   const endTime = $("#attendanceStandaloneEndTime").value;
+  if ((startTime && !validTime24(startTime)) || (endTime && !validTime24(endTime))) throw Error("Giờ điểm danh phải theo định dạng 24 giờ HH:mm, ví dụ 08:30 hoặc 17:45.");
   if (!title || !date || !endDate) throw Error("Vui lòng nhập tên, ngày tổ chức và ngày kết thúc điểm danh.");
   const startDay = new Date(date + "T12:00:00"), finishDay = new Date(endDate + "T12:00:00");
   if (finishDay < startDay) throw Error("Ngày kết thúc không được trước ngày tổ chức.");
@@ -2416,6 +2418,7 @@ $("#attendanceEditForm").onsubmit = async (event) => {
   const date = parseVietnamDate($("#attendanceEditDate").value), endDate = parseVietnamDate($("#attendanceEditEndDate").value); if (!date || !endDate) return notice("Ngày không hợp lệ. Vui lòng nhập theo dạng ngày/tháng/năm.", "error"); if (endDate < date) return notice("Ngày kết thúc không được trước ngày tổ chức.", "error");
   const endTime = $("#attendanceEditEndTime").value;
   const startTime = $("#attendanceEditStartTime").value;
+  if ((startTime && !validTime24(startTime)) || (endTime && !validTime24(endTime))) return notice("Giờ điểm danh phải theo định dạng 24 giờ HH:mm, ví dụ 08:30 hoặc 17:45.", "error");
   const update = { date, endDate, startTime, endTime, startAt: attendanceStartTimestamp(date, startTime), endAt: attendanceEndTimestamp(endDate, endTime), updatedAt: serverTimestamp() };
   if (!item.eventId) { update.title = $("#attendanceEditTitle").value.trim(); update.location = $("#attendanceEditLocation").value.trim(); }
   await updateDoc(doc(db, "attendanceSessions", id), update);
