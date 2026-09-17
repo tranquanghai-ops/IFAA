@@ -46,6 +46,10 @@ test("Attendance kế thừa snapshot co-manager và sau đó độc lập Event
   assert.deepEqual(event.coManagerUids, ["a", "b"]);
 });
 
+test("người tạo Attendance không bị giữ lại trong danh sách co-manager kế thừa", () => {
+  assert.deepEqual(inheritedAttendanceCoManagerUids({ coManagerUids: ["creator", "other"] }, "creator"), ["other"]);
+});
+
 test("scoped login và subscriptions chỉ truy vấn resource được giao", () => {
   const eventConfigStart = adminSource.indexOf("} = createAdminEventService({");
   const eventServiceConfig = adminSource.slice(eventConfigStart, adminSource.indexOf("const {", eventConfigStart + 10));
@@ -73,7 +77,7 @@ test("Attendance có UI chỉnh danh sách độc lập và ẩn với co-manage
 });
 
 test("create Attendance lưu snapshot coManagerUids kế thừa", () => {
-  assert.match(adminSource, /attendanceCoManagerUids = inheritedAttendanceCoManagerUids\(selected\)/);
+  assert.match(adminSource, /attendanceCoManagerUids = inheritedAttendanceCoManagerUids\(selected, user\.uid\)/);
   assert.match(adminSource, /coManagerUids: \[\.\.\.new Set\(attendanceCoManagerUids\)\]/);
 });
 

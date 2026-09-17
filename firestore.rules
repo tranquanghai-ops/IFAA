@@ -112,6 +112,28 @@ service cloud.firestore {
     function attendanceCoManagerData(data){ return signedIn() && data.get('coManagerUids', []).hasAny([request.auth.uid]); }
     function attendanceCoManager(sessionId){ return signedIn() && attendanceSession(sessionId).get('coManagerUids', []).hasAny([request.auth.uid]); }
     function managesEvent(eventId){ return eventCoManager(eventId) || canManageResourceData(get(eventPath(eventId)).data); }
+    function linkedAttendanceMatchesEvent(data){
+      let event = get(eventPath(data.eventId)).data;
+      let storedScopeType = event.get('scopeType', '');
+      let storedScopeId = event.get('scopeId', '');
+      let legacyDepartment = categoryDepartment(event.get('category', ''));
+      return managesEvent(data.eventId)
+        && ((storedScopeType != ''
+            && data.get('scopeType', '') == storedScopeType
+            && data.get('scopeId', '') == storedScopeId)
+          || (storedScopeType == ''
+            && data.get('scopeType', '') == 'legacy'
+            && data.get('scopeId', '') == '')
+          || (storedScopeType == ''
+            && legacyDepartment != ''
+            && data.get('scopeType', '') == 'department'
+            && data.get('scopeId', '') == legacyDepartment)
+          || (storedScopeType == ''
+            && legacyDepartment == ''
+            && event.get('category', '') == 'Sự kiện Khoa'
+            && data.get('scopeType', '') == 'faculty'
+            && data.get('scopeId', '') == 'mtcn'));
+    }
     function managesSession(sessionId){ return attendanceCoManager(sessionId) || canManageResourceData(attendanceSession(sessionId)); }
     function managesSessionAfter(sessionId){ return (existsAfter(attendanceSessionPath(sessionId)) && canManageResourceData(attendanceSessionAfter(sessionId))) || (subAdmin()
       && existsAfter(attendanceSessionPath(sessionId))
@@ -573,8 +595,7 @@ service cloud.firestore {
         && validCoManagers(request.resource.data)
         && (request.resource.data.get('eventId', '') == ''
           || (exists(eventPath(request.resource.data.eventId))
-            && request.resource.data.get('scopeType', '') == get(eventPath(request.resource.data.eventId)).data.get('scopeType', '')
-            && request.resource.data.get('scopeId', '') == get(eventPath(request.resource.data.eventId)).data.get('scopeId', '')));
+            && linkedAttendanceMatchesEvent(request.resource.data)));
       allow update: if !request.resource.data.diff(resource.data).affectedKeys()
           .hasAny(['checkinCount','pendingCount','counterMutationId','counterSourceId'])
         ? validAttendanceMetadataUpdate(sessionId)
