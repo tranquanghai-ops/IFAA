@@ -21,6 +21,6 @@ export function addCoManagerUid(current, uid, ownerUid = "") {
   return [...normalized, candidate];
 }
 
-export function inheritedAttendanceCoManagerUids(event) {
-  return normalizeCoManagerUids(event?.coManagerUids);
+export function inheritedAttendanceCoManagerUids(event, creatorUid = "") {
+  return normalizeCoManagerUids(event?.coManagerUids).filter((uid) => uid !== creatorUid);
 }

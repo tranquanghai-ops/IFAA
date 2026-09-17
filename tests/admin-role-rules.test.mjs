@@ -123,6 +123,24 @@ describe("Scoped Event, Group and Attendance", () => {
     await assertSucceeds(updateDoc(doc(dbFor("interior-head", interiorHeadEmail), "attendanceSessions", "INTERIOR_ATT"), { title: "Managed" }));
   });
 
+  test("Attendance liên kết Event legacy dùng scope suy ra từ category", async () => {
+    await env.withSecurityRulesDisabled(async (context) => {
+      const legacyEvent = eventData("interior-head", interiorHeadEmail);
+      delete legacyEvent.scopeType;
+      delete legacyEvent.scopeId;
+      await setDoc(doc(context.firestore(), "events", "LEGACY_INTERIOR"), legacyEvent);
+    });
+    const base = {
+      eventId: "LEGACY_INTERIOR", title: "Legacy linked Attendance", status: "open",
+      scopeType: "department", scopeId: "interior", createdByUid: "owner",
+      createdByEmail: ownerEmail, createdAt: new Date(), coManagerUids: [],
+      checkinCount: 0, pendingCount: 0
+    };
+    await assertSucceeds(addDoc(collection(dbFor("owner", ownerEmail), "attendanceSessions"), base));
+    // Owner có quyền tạo mọi scope; lần ghi này chỉ có thể bị chặn vì scope không khớp Event nguồn.
+    await assertFails(addDoc(collection(dbFor("owner", ownerEmail), "attendanceSessions"), { ...base, scopeId: "graphic" }));
+  });
+
   test("Legacy Admin/Sub-admin giữ behavior không cần migration", async () => {
     const legacyEvent = eventData("legacy-sub", legacySubEmail);
     delete legacyEvent.scopeType;

@@ -12,7 +12,7 @@ import { createAdminGroupService } from "./modules/groups/group-service.mjs?v=2"
 import { creatorLabel } from "./modules/resource-ui.mjs?v=1";
 import { createAdminRegistrationService } from "./modules/registrations/registration-service.mjs?v=2";
 import { createAdminStudentService } from "./modules/students/student-service.mjs?v=2";
-import { addCoManagerUid, canEditResourceCoManagers, inheritedAttendanceCoManagerUids, isResourceCoManager, normalizeCoManagerUids } from "./modules/co-managers.mjs?v=1";
+import { addCoManagerUid, canEditResourceCoManagers, inheritedAttendanceCoManagerUids, isResourceCoManager, normalizeCoManagerUids } from "./modules/co-managers.mjs?v=2";
 import { DEPARTMENTS, FACULTY_SCOPE_ID, ROLE_LABELS, accessLabel, allowedScopeForNewAdmin, assignableScopeOptions, canCreateCategory, canManageAdmin, canManageResource, categoryScope, creatableRoles, defaultResourceScope, filterSortAdmins, grantorLabel, normalizeAdminAccess, roleDocument, scopeLabels } from "./modules/role-scope.mjs?v=3";
 
 const DEFAULT_FACULTY = "Khoa Mỹ thuật Công nghiệp";
@@ -1898,7 +1898,7 @@ function fillAttendanceForm(eventId = "") {
   populatePermissionCopyOptions();
   $("#attendancePermissionLookup").value = "";
   attendanceRosterImport = [];
-  attendanceCoManagerUids = inheritedAttendanceCoManagerUids(selected);
+  attendanceCoManagerUids = inheritedAttendanceCoManagerUids(selected, user.uid);
   void attendanceCoManagerSection();
   $("#attendanceRosterFile").value = "";
   $("#attendanceRosterFileName").textContent = "Chưa chọn tệp (không bắt buộc)";
@@ -1994,7 +1994,7 @@ $("#attendanceCreateDialog").addEventListener("close", resetAttendanceCreateStat
 
 $("#attendanceSourceEvent").onchange = (event) => {
   const selected = events.find((item) => item.id === event.target.value);
-  attendanceCoManagerUids = inheritedAttendanceCoManagerUids(selected);
+  attendanceCoManagerUids = inheritedAttendanceCoManagerUids(selected, user.uid);
   void attendanceCoManagerSection();
   if (!selected) return;
   $("#attendanceStandaloneTitle").value = selected.title || "";
