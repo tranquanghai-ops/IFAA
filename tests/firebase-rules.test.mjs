@@ -43,6 +43,11 @@ async function seedBase() {
         status: "open", createdByUid: "other-sub", createdByEmail: otherSubEmail,
         checkinCount: 0, pendingCount: 0
       }),
+      setDoc(doc(db, "attendanceSessions", "PRIVATE"), {
+        attendanceType: "private", source: "private", eventId: "", scopeType: "private", scopeId: "",
+        title: "Private", status: "open", createdByUid: "sub", createdByEmail: subEmail,
+        coManagerUids: [], checkinCount: 0, pendingCount: 0
+      }),
       setDoc(doc(db, "scannerAssignments", "OWN_" + scannerEmail), {
         sessionId: "OWN", email: scannerEmail, role: "scanner", active: true
       }),
@@ -371,6 +376,16 @@ describe("role matrix and session ownership", () => {
     await assertFails(uploadBytes(ref(storageFor("sub", subEmail), "attendance/OTHER/sub.jpg"), image, { contentType: "image/jpeg" }));
     await assertSucceeds(uploadBytes(ref(storageFor("scanner", scannerEmail), "attendance/OWN/scan.jpg"), image, { contentType: "image/jpeg" }));
     await assertFails(getBytes(ref(storageFor("outside", outsiderEmail), "attendance/OWN/scan.jpg")));
+  });
+
+  test("Storage của điểm danh riêng chỉ creator/System Admin truy cập", async () => {
+    const image = new Uint8Array([255, 216, 255, 217]);
+    const path = "attendance/PRIVATE/private.jpg";
+    await assertSucceeds(uploadBytes(ref(storageFor("sub", subEmail), path), image, { contentType: "image/jpeg" }));
+    await assertFails(getBytes(ref(storageFor("admin", adminEmail), path)));
+    await assertFails(uploadBytes(ref(storageFor("other-sub", otherSubEmail), "attendance/PRIVATE/other.jpg"), image, { contentType: "image/jpeg" }));
+    await assertSucceeds(getBytes(ref(storageFor("owner", ownerEmail), path)));
+    await assertSucceeds(deleteObject(ref(storageFor("owner", ownerEmail), path)));
   });
 
   test("Leader can read session check-ins; student can read own; unauthorized user cannot", async () => {

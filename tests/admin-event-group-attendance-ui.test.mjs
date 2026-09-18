@@ -34,7 +34,7 @@ test("Group và Attendance đều render metadata Người tạo an toàn", () =
 
 test("Attendance filter bắt đầu bằng Tất cả và mặc định all", () => {
   const filters = [...adminHtml.matchAll(/data-attendance-filter="([^"]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(filters.slice(0, 5), ["all", "open", "scheduled", "ended", "finalized"]);
+  assert.deepEqual(filters.slice(0, 6), ["all", "private", "open", "scheduled", "ended", "finalized"]);
   assert.match(adminSource, /let attendanceFilter = "all";/);
 });
 
@@ -62,6 +62,27 @@ test("Group hidden chỉ nằm tab Đã ẩn và restore quay về active", () =
   assert.deepEqual(groupsForVisibility([active, hidden], "hidden"), [hidden]);
   assert.equal(isGroupHidden({ ...hidden, hidden: false, hiddenAt: null }), false);
   assert.match(adminHtml, /data-group-visibility="active">Đang hoạt động<\/button><button[^>]+data-group-visibility="hidden">Đã ẩn/);
+  assert.match(groupSource, /data-hide-group=/);
+  assert.match(groupSource, /data-show-group=/);
+});
+
+test("Điểm danh riêng có create/filter riêng và hard delete, không vào Trash", () => {
+  assert.match(adminHtml, /id="newPrivateAttendanceBtn"[^>]*>＋ Tạo điểm danh riêng/);
+  assert.match(adminHtml, /id="privateAttendanceFilter"[^>]*data-attendance-filter="private"/);
+  assert.match(adminSource, /attendanceType: attendancePrivateCreate \? "private" : "event"/);
+  assert.match(adminSource, /openAttendanceCreate\("", \{ privateSession: true \}\)/);
+  assert.match(adminSource, /Phiên riêng và toàn bộ dữ liệu liên quan sẽ bị xóa ngay, không chuyển vào Thùng rác/);
+  assert.match(adminSource, /const trashedAttendance = attendanceSessions\.filter\(\(item\) => item\.deletedAt && item\.attendanceType !== "private"\)/);
+  assert.match(adminSource, /if \(isOwner\) sources\.push\(query\(collection\(db, "attendanceSessions"\), where\("attendanceType", "==", "private"\)\)\)/);
+  assert.match(adminSource, /if \(item\?\.attendanceType === "private"\) return isOwner \|\| item\.createdByUid === user\?\.uid/);
+});
+
+test("menu Admin giữ Multi-Scope và Thùng rác ở cuối", () => {
+  assert.match(adminHtml, /id="adminRole"/);
+  assert.match(adminHtml, /id="adminScopeType"/);
+  assert.match(adminHtml, /id="adminDepartmentList"/);
+  assert.match(adminHtml, /id="adminRoleFilter"/);
+  assert.ok(adminHtml.indexOf('data-pane="trash"') > adminHtml.indexOf('data-pane="settings"'));
 });
 
 test("Admin Events ẩn Event thuộc hidden Group nhưng giữ Event riêng", () => {

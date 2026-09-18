@@ -8,7 +8,7 @@ import { loadFacultyDataset, publishFacultyDataset } from "../faculty-dataset.mj
 import { createAdminEventService } from "./modules/events/event-service.mjs?v=7";
 import { createEventAttachmentService } from "./modules/events/event-attachment-service.mjs?v=1";
 import { createAdminExportService } from "./modules/exports/export-service.mjs?v=2";
-import { createAdminGroupService } from "./modules/groups/group-service.mjs?v=2";
+import { createAdminGroupService } from "./modules/groups/group-service.mjs?v=3";
 import { creatorLabel } from "./modules/resource-ui.mjs?v=1";
 import { createAdminRegistrationService } from "./modules/registrations/registration-service.mjs?v=2";
 import { createAdminStudentService } from "./modules/students/student-service.mjs?v=2";
@@ -112,6 +112,7 @@ let attendanceSessions = [];
 let eventCoManagerUids = [];
 let attendanceCoManagerUids = [];
 let attendanceManageCoManagerUids = [];
+let attendancePrivateCreate = false;
 const coManagerProfiles = new Map();
 let attendanceFilter = "all";
 let attendanceView = localStorage.getItem("ifaa-attendance-view") === "list" ? "list" : "cards";
@@ -190,7 +191,7 @@ async function attendanceCoManagerSection() {
   coManagerRows("#attendanceCoManagerRows", attendanceCoManagerUids, true, "attendance-create");
 }
 async function attendanceManageCoManagerSection(item) {
-  const editable = canEditCoManagers(item);
+  const editable = item?.attendanceType !== "private" && canEditCoManagers(item);
   $("#attendanceManageCoManagerSection")?.classList.toggle("hidden", !editable);
   if (!editable) return;
   attendanceManageCoManagerUids = normalizeCoManagerUids(item?.coManagerUids);
@@ -804,7 +805,7 @@ function render() {
   renderGroups({ activeEvents, orderedGroups });
 
   if ($("#trashAttendanceRows")) {
-    const trashedAttendance = attendanceSessions.filter((item) => item.deletedAt);
+    const trashedAttendance = attendanceSessions.filter((item) => item.deletedAt && item.attendanceType !== "private");
     $("#trashAttendanceRows").innerHTML = highAdminAccess() && trashedAttendance.length ? trashedAttendance.map((item) => { const deletedTime = millis(item.deletedAt), purgeTime = deletedTime ? deletedTime + TRASH_RETENTION_MS : 0; return `<tr><td><input type="checkbox" data-trash-select="attendance" value="${item.id}" ${trashSelection.attendance.has(item.id) ? "checked" : ""} aria-label="Chọn ${safe(item.title)}"></td><td><b>${safe(item.title)}</b></td><td>${safe(vietnamDate(item.date))}</td><td>${deletedTime ? ts(item.deletedAt) : "—"}</td><td>${purgeTime ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "short" }).format(new Date(purgeTime)) : "—"}</td><td><button class="btn btn-small btn-restore" data-restore-attendance="${item.id}">↶ Khôi phục</button> <button class="btn btn-small btn-danger" data-purge-attendance="${item.id}">Xóa vĩnh viễn</button></td></tr>`; }).join("") : '<tr><td colspan="6" class="empty">Không có phiên điểm danh trong thùng rác.</td></tr>';
   }
   refreshRegistrationFilters();
@@ -835,7 +836,8 @@ function renderEventFaculties(selected = [DEFAULT_FACULTY]) {
 }
 
 async function permanentlyDeleteAttendance(selected) {
-  if (!selected || !highAdminAccess()) throw Error("Chỉ Admin cấp cao hoặc Chủ sở hữu được xóa vĩnh viễn.");
+  const privateCreator = selected?.attendanceType === "private" && (selected.createdByUid === user?.uid || isOwner);
+  if (!selected || (!privateCreator && !highAdminAccess())) throw Error("Bạn không có quyền xóa vĩnh viễn phiên điểm danh này.");
   const collections = ["scannerAssignments", "checkins", "attendanceRoster", "attendanceGrants"];
   for (const name of collections) {
     const snap = await getDocs(query(collection(db, name), where("sessionId", "==", selected.id)));
@@ -872,7 +874,7 @@ async function cleanupExpiredTrash() {
       purgingGroupIds.delete(selected.id);
     }
   }
-  for (const selected of attendanceSessions.filter((item) => item.deletedAt && (millis(item.deletedAt) || Infinity) <= cutoff)) {
+  for (const selected of attendanceSessions.filter((item) => item.attendanceType !== "private" && item.deletedAt && (millis(item.deletedAt) || Infinity) <= cutoff)) {
     try { await permanentlyDeleteAttendance(selected); } catch (error) { console.warn("Không thể tự xóa phiên điểm danh hết hạn:", error); }
   }
 }
@@ -912,10 +914,27 @@ function subscribeAttendanceSessions() {
     const unsubscribes = sources.map((source, index) => onSnapshot(source, (snapshot) => apply(maps[index], snapshot), handleError));
     return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
   }
-  const sessionsQuery = isScopedManager
-    ? query(collection(db, "attendanceSessions"), where("coManagerUids", "array-contains", user.uid))
-    : collection(db, "attendanceSessions");
-  return onSnapshot(sessionsQuery, (snapshot) => applyAttendanceSessions(snapshot.docs.map(normalizeAttendanceSession)), handleError);
+  if (isScopedManager) {
+    const sessionsQuery = query(collection(db, "attendanceSessions"), where("coManagerUids", "array-contains", user.uid));
+    return onSnapshot(sessionsQuery, (snapshot) => applyAttendanceSessions(snapshot.docs.map(normalizeAttendanceSession)), handleError);
+  }
+  // Không nghe toàn collection: truy vấn như vậy vừa lộ phiên riêng, vừa bị Rules từ chối
+  // ngay khi collection có một phiên private của người khác.
+  const sources = [
+    query(collection(db, "attendanceSessions"), where("eventId", "!=", "")),
+    query(collection(db, "attendanceSessions"), where("source", "==", "standalone")),
+    query(collection(db, "attendanceSessions"), where("createdByUid", "==", user.uid)),
+    query(collection(db, "attendanceSessions"), where("coManagerUids", "array-contains", user.uid))
+  ];
+  if (isOwner) sources.push(query(collection(db, "attendanceSessions"), where("attendanceType", "==", "private")));
+  const maps = sources.map(() => new Map());
+  const apply = (target, snapshot) => {
+    target.clear();
+    snapshot.docs.map(normalizeAttendanceSession).forEach((item) => target.set(item.id, item));
+    applyAttendanceSessions([...new Map(maps.flatMap((map) => [...map])).values()]);
+  };
+  const unsubscribes = sources.map((source, index) => onSnapshot(source, (snapshot) => apply(maps[index], snapshot), handleError));
+  return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
 }
 
 function listen() {
@@ -1472,9 +1491,13 @@ function attendanceHasRegistrationRoster(item) {
 
 function highAdminAccess() { return ["system_admin", "high_admin", "faculty_admin"].includes(currentRole); }
 function managesResource(item) { return canManageResource(currentAccess, item, user?.uid); }
-function managesAttendance(item) { return managesResource(item) || isResourceCoManager(item, user?.uid); }
+function managesAttendance(item) {
+  if (item?.attendanceType === "private") return isOwner || item.createdByUid === user?.uid;
+  return managesResource(item) || isResourceCoManager(item, user?.uid);
+}
 function canReopenAttendance(item) {
   if (!item || !["ended", "finalized"].includes(item.status)) return false;
+  if (item.attendanceType === "private") return isOwner || item.createdByUid === user?.uid;
   if (highAdminAccess()) return true;
   if (isResourceCoManager(item, user?.uid)) return true;
   const endedAt = millis(item.endedAt);
@@ -1577,7 +1600,8 @@ function renderAttendance() {
   const target = $("#attendanceRows");
   if (!target) return;
   const list = activeAttendanceSessions(attendanceSessions)
-    .filter((item) => attendanceFilter === "all" || attendanceRuntimeState(item) === attendanceFilter)
+    .filter((item) => attendanceFilter === "all"
+      || (attendanceFilter === "private" ? item.attendanceType === "private" && (isOwner || item.createdByUid === user?.uid) : attendanceRuntimeState(item) === attendanceFilter))
     .sort((a, b) => (millis(b.createdAt) || 0) - (millis(a.createdAt) || 0));
   target.className = `att-grid attendance-view-${attendanceView}`;
   document.querySelectorAll("[data-attendance-view]").forEach((button) => button.classList.toggle("active", button.dataset.attendanceView === attendanceView));
@@ -1590,9 +1614,10 @@ function renderAttendance() {
     const checkinCount = attendanceCheckinCounts.get(item.id) || 0;
     const scannerCount = attendanceScannerCounts.get(item.id) || 0;
     const pendingCount = Number(item.pendingCount || 0);
-    const canDeleteAttendance = managesResource(item);
+    const privateAttendance = item.attendanceType === "private";
+    const canDeleteAttendance = privateAttendance ? isOwner || item.createdByUid === user?.uid : managesResource(item);
     return `<article class="att-row">
-    <div><span class="att-badge ${safe(runtimeState)}" data-attendance-state="${item.id}" data-runtime-state="${safe(runtimeState)}">${safe(attendanceStatusLabel(runtimeState))}</span>
+    <div><span class="att-badge ${safe(runtimeState)}" data-attendance-state="${item.id}" data-runtime-state="${safe(runtimeState)}">${safe(attendanceStatusLabel(runtimeState))}</span>${privateAttendance ? '<span class="att-badge">RIÊNG</span>' : ""}
     <h3>${safe(item.title)}</h3><div class="att-meta">${safe(vietnamDate(item.date))}${item.location ? ` · ${safe(item.location)}` : ""}${rosterMeta}</div><div class="att-meta"><b>Người tạo:</b> ${safe(creatorLabel(item))}</div><div class="att-meta attendance-timing" data-attendance-timing="${item.id}">${safe(attendanceTimingStatus(item))}</div><div class="attendance-card-stats"><span><b>${checkinCount}</b> SV đã điểm danh</span><span><b>${scannerCount}</b> SV được cấp quyền quét</span>${pendingCount ? `<button type="button" class="attendance-pending-stat" data-attendance-open-pending="${item.id}"><b>${pendingCount}</b> hình cần nhập MSSV</button>` : ""}</div></div>
     <div class="att-actions attendance-card-actions"><button class="btn" data-attendance-manage="${item.id}">Quản lý</button><button class="btn" data-attendance-copy="${item.id}">Copy link</button><button class="btn btn-success" data-attendance-quick-export="${item.id}">↓ Danh sách</button>${canDeleteAttendance ? `<button class="btn btn-danger" data-delete-attendance="${item.id}">Xóa</button>` : ""}</div>
   </article>`;
@@ -1913,18 +1938,30 @@ function resetAttendanceCreateState() {
   attendanceRosterImport = [];
   attendanceCoManagerUids = [];
   attendanceManageCoManagerUids = [];
+  attendancePrivateCreate = false;
 }
 
-function openAttendanceCreate(eventId = "") {
+function openAttendanceCreate(eventId = "", { privateSession = false } = {}) {
   resetAttendanceCreateState();
+  attendancePrivateCreate = privateSession;
   if ($("#attendanceManageDialog")?.open) $("#attendanceManageDialog").close();
   $("#attendanceCreateForm").reset();
   fillAttendanceForm(eventId);
+  $("#attendanceCreateTitle").textContent = privateSession ? "Tạo điểm danh riêng" : "Tạo điểm danh sự kiện";
+  $("#attendanceCreateDescription").textContent = privateSession
+    ? "Phiên riêng chỉ hiển thị với tài khoản tạo và được xóa vĩnh viễn ngay khi bạn xóa."
+    : "Thông tin và danh sách được lưu riêng cho phiên điểm danh.";
+  $("#attendanceSourceEventField").classList.toggle("hidden", privateSession);
+  $("#attendanceCoManagerSection").classList.toggle("hidden", privateSession);
+  if (privateSession) {
+    $("#attendanceSourceEvent").value = "";
+    attendanceCoManagerUids = [];
+  }
   $("#attendanceCreateDialog").showModal();
 }
 
 async function createStandaloneAttendance() {
-  const eventId = $("#attendanceSourceEvent").value;
+  const eventId = attendancePrivateCreate ? "" : $("#attendanceSourceEvent").value;
   const title = $("#attendanceStandaloneTitle").value.trim();
   const date = parseVietnamDate($("#attendanceStandaloneDate").value);
   const endDate = parseVietnamDate($("#attendanceStandaloneEndDate").value);
@@ -1948,11 +1985,11 @@ async function createStandaloneAttendance() {
   const hasRegistrationRoster = Boolean(eventId) || roster.length > 0;
   const permissionMembers = attendancePermissionMembers;
   const sourceEvent = eventId ? events.find((item) => item.id === eventId) : null;
-  const attendanceScope = sourceEvent?.scopeType
+  const attendanceScope = attendancePrivateCreate ? { scopeType: "private", scopeId: "" } : sourceEvent?.scopeType
     ? { scopeType: sourceEvent.scopeType, scopeId: sourceEvent.scopeId || "" }
     : sourceEvent ? categoryScope(sourceEvent.category, currentAccess) : defaultResourceScope(currentAccess);
   const writes = [
-    { ref: doc(db, "attendanceSessions", sessionId), data: { eventId, source: eventId ? "registration" : "standalone", ...attendanceScope, hasRegistrationRoster, liveRegistrationRoster: Boolean(eventId), title, date, endDate, startAt: attendanceStartTimestamp(date, startTime), endAt: attendanceEndTimestamp(endDate, endTime), location, startTime, endTime, status: "open", rosterCount: eventId ? Number(sourceEvent?.registeredCount || 0) : roster.length, checkinCount: 0, pendingCount: 0, scannerCount: permissionMembers.length, coManagerUids: [...new Set(attendanceCoManagerUids)], createdByUid: user.uid, createdByEmail: user.email, createdByName: user.displayName || "", createdAt: serverTimestamp() } },
+    { ref: doc(db, "attendanceSessions", sessionId), data: { eventId, attendanceType: attendancePrivateCreate ? "private" : "event", source: attendancePrivateCreate ? "private" : eventId ? "registration" : "standalone", ...attendanceScope, hasRegistrationRoster, liveRegistrationRoster: Boolean(eventId), title, date, endDate, startAt: attendanceStartTimestamp(date, startTime), endAt: attendanceEndTimestamp(endDate, endTime), location, startTime, endTime, status: "open", rosterCount: eventId ? Number(sourceEvent?.registeredCount || 0) : roster.length, checkinCount: 0, pendingCount: 0, scannerCount: permissionMembers.length, coManagerUids: attendancePrivateCreate ? [] : [...new Set(attendanceCoManagerUids)], createdByUid: user.uid, createdByEmail: user.email, createdByName: user.displayName || "", createdAt: serverTimestamp() } },
     ...roster.map((item) => ({ ref: doc(db, "attendanceRoster", sessionId + "_" + item.mssv), data: { sessionId, eventId, mssv: item.mssv, name: item.name || "", email: item.email || item.mssv.toLowerCase() + "@student.tdtu.edu.vn", uid: item.uid || "", createdAt: serverTimestamp() } }))
   ];
   const assignmentWrites = permissionMembers.flatMap((item) => {
@@ -1972,7 +2009,7 @@ async function createStandaloneAttendance() {
     assignmentWrites.slice(offset, offset + 450).forEach((entry) => batch.set(entry.ref, entry.data));
     await batch.commit();
   }
-  notice(eventId ? `Đã tạo điểm danh dùng chung danh sách đăng ký và cấp quyền cho ${permissionMembers.length} tài khoản.` : `Đã tạo điểm danh với ${roster.length} sinh viên và ${permissionMembers.length} tài khoản được cấp quyền.`, "success");
+  notice(attendancePrivateCreate ? `Đã tạo điểm danh riêng với ${roster.length} sinh viên.` : eventId ? `Đã tạo điểm danh dùng chung danh sách đăng ký và cấp quyền cho ${permissionMembers.length} tài khoản.` : `Đã tạo điểm danh với ${roster.length} sinh viên và ${permissionMembers.length} tài khoản được cấp quyền.`, "success");
   await audit("attendance.create", "attendanceSession", sessionId, { title, scannerCount: permissionMembers.length, rosterCount: roster.length });
   showPane("attendance");
 }
@@ -2226,6 +2263,9 @@ document.addEventListener("click", async (event) => {
   if (button.id === "newAttendanceBtn") {
     openAttendanceCreate();
   }
+  if (button.id === "newPrivateAttendanceBtn") {
+    openAttendanceCreate("", { privateSession: true });
+  }
   if (button.dataset.closeAttendanceCreate !== undefined) $("#attendanceCreateDialog").close();
   if (button.dataset.closeAttendanceManage !== undefined) { attendanceRosterUnsubscribe?.(); attendanceRosterUnsubscribe = null; $("#attendanceManageDialog").close(); }
   if (button.dataset.closeAttendanceImage !== undefined) { $("#attendanceImageDialog").close(); attendanceViewerCheckinId = ""; if (attendanceViewerObjectUrl) { URL.revokeObjectURL(attendanceViewerObjectUrl); attendanceViewerObjectUrl = ""; } }
@@ -2311,6 +2351,18 @@ document.addEventListener("click", async (event) => {
   }
   if (button.dataset.deleteAttendance) {
     const selected = attendanceSessions.find((item) => item.id === button.dataset.deleteAttendance);
+    if (selected?.attendanceType === "private") {
+      if (!isOwner && selected.createdByUid !== user?.uid) return notice("Chỉ người tạo hoặc Chủ sở hữu hệ thống được xóa điểm danh riêng này.", "error");
+      if (!(await confirmAction({ title: "Xóa vĩnh viễn điểm danh riêng?", message: "Phiên riêng và toàn bộ dữ liệu liên quan sẽ bị xóa ngay, không chuyển vào Thùng rác.", verification: "XÓA" }))) return;
+      await permanentlyDeleteAttendance(selected);
+      if (selectedAttendanceSession?.id === selected.id) {
+        selectedAttendanceSession = null;
+        attendanceRosterUnsubscribe?.(); attendanceRosterUnsubscribe = null;
+        if ($("#attendanceManageDialog")?.open) $("#attendanceManageDialog").close();
+      }
+      notice("Đã xóa vĩnh viễn điểm danh riêng.", "success");
+      return;
+    }
     if (!selected || !managesResource(selected)) return notice("Bạn không có quyền xóa phiên điểm danh này.", "error");
     if (!(await confirmAction({ title: "Đưa điểm danh vào thùng rác?", message: "Phiên điểm danh sẽ được giữ 30 ngày. Nhập XÓA để tiếp tục.", verification: "XÓA" }))) return;
     await updateDoc(doc(db, "attendanceSessions", selected.id), { deletedAt: serverTimestamp(), deletedByUid: user.uid, deletedByEmail: user.email });
@@ -2517,9 +2569,11 @@ onAuthStateChanged(auth, async (currentUser) => {
   $("#settingsNav").classList.toggle("hidden", !isOwner);
   $("#trashNav").classList.toggle("hidden", !highAdminAccess());
   $("#studentsNav").classList.toggle("hidden", !highAdminAccess());
+  $("#privateAttendanceFilter").textContent = isOwner ? "Điểm danh riêng" : "Riêng của tôi";
   if (isScopedManager) {
     $("#newEventBtn")?.classList.add("hidden");
     $("#newAttendanceBtn")?.classList.add("hidden");
+    $("#newPrivateAttendanceBtn")?.classList.add("hidden");
     document.querySelectorAll(".nav-btn").forEach((button) => {
       if (!["events", "attendance"].includes(button.dataset.pane)) button.classList.add("hidden");
     });

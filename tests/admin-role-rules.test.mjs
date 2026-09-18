@@ -1,7 +1,8 @@
 import { after, before, beforeEach, describe, test } from "node:test";
+import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
-import { addDoc, collection, deleteDoc, doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
+import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, query, setDoc, updateDoc, where } from "firebase/firestore";
 
 const ownerEmail = "tranquanghai@tdtu.edu.vn";
 const highEmail = "high@tdtu.edu.vn";
@@ -90,6 +91,31 @@ describe("Admin role hierarchy", () => {
 });
 
 describe("Scoped Event, Group and Attendance", () => {
+  test("Điểm danh riêng chỉ creator/System Admin đọc, sửa và xóa", async () => {
+    const privateData = {
+      attendanceType: "private", source: "private", eventId: "", title: "Lớp riêng", status: "open",
+      scopeType: "private", scopeId: "", createdByUid: "interior-sub", createdByEmail: interiorSubEmail,
+      createdAt: new Date(), coManagerUids: [], checkinCount: 0, pendingCount: 0
+    };
+    const creatorDb = dbFor("interior-sub", interiorSubEmail);
+    await assertSucceeds(setDoc(doc(creatorDb, "attendanceSessions", "PRIVATE_OWN"), privateData));
+    await assertSucceeds(getDoc(doc(creatorDb, "attendanceSessions", "PRIVATE_OWN")));
+    await assertSucceeds(updateDoc(doc(creatorDb, "attendanceSessions", "PRIVATE_OWN"), { title: "Đã sửa" }));
+    await assertFails(getDoc(doc(dbFor("high", highEmail), "attendanceSessions", "PRIVATE_OWN")));
+    await assertFails(getDoc(doc(dbFor("faculty", facultyEmail), "attendanceSessions", "PRIVATE_OWN")));
+    await assertFails(getDoc(doc(dbFor("interior-head", interiorHeadEmail), "attendanceSessions", "PRIVATE_OWN")));
+    await assertFails(getDoc(doc(dbFor("graphic-sub", graphicSubEmail), "attendanceSessions", "PRIVATE_OWN")));
+    const unrelatedQuery = await assertSucceeds(getDocs(query(collection(dbFor("high", highEmail), "attendanceSessions"), where("createdByUid", "==", "high"))));
+    assert.equal(unrelatedQuery.empty, true);
+    await assertSucceeds(getDoc(doc(dbFor("owner", ownerEmail), "attendanceSessions", "PRIVATE_OWN")));
+    const ownerPrivateQuery = await assertSucceeds(getDocs(query(collection(dbFor("owner", ownerEmail), "attendanceSessions"), where("attendanceType", "==", "private"))));
+    assert.equal(ownerPrivateQuery.size, 1);
+    await assertSucceeds(deleteDoc(doc(dbFor("owner", ownerEmail), "attendanceSessions", "PRIVATE_OWN")));
+
+    await assertSucceeds(setDoc(doc(creatorDb, "attendanceSessions", "PRIVATE_DELETE"), privateData));
+    await assertSucceeds(deleteDoc(doc(creatorDb, "attendanceSessions", "PRIVATE_DELETE")));
+  });
+
   test("Department admin quản lý own department, không cross-department", async () => {
     await assertSucceeds(updateDoc(doc(dbFor("interior-head", interiorHeadEmail), "events", "INTERIOR"), { title: "Updated" }));
     await assertFails(updateDoc(doc(dbFor("interior-head", interiorHeadEmail), "events", "GRAPHIC"), { title: "Denied" }));

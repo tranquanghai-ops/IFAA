@@ -30,7 +30,8 @@ test("legacy snapshot dùng document ID canonical và default field an toàn", (
 });
 
 test("closed Attendance xuất hiện trong All và Owner/Admin có thể mở lại", () => {
-  assert.match(adminSource, /attendanceFilter === "all" \|\| attendanceRuntimeState\(item\) === attendanceFilter/);
+  assert.match(adminSource, /attendanceFilter === "all"/);
+  assert.match(adminSource, /attendanceRuntimeState\(item\) === attendanceFilter/);
   assert.match(adminSource, /if \(!item \|\| !\["ended", "finalized"\]\.includes\(item\.status\)\) return false;/);
   assert.match(adminSource, /finalizedAt: null, finalizedBy: ""/);
 });
@@ -66,14 +67,14 @@ test("không nhận nhầm điểm danh của event khác", () => {
 test("luồng click và validation create đều dùng cùng active-session lookup", () => {
   assert.match(adminSource, /if \(activeAttendanceSessionForEvent\(attendanceSessions, eventId\)\) throw Error\("Sự kiện này đã có phiên điểm danh\."\)/);
   assert.match(adminSource, /const existing = activeAttendanceSessionForEvent\(attendanceSessions, button\.dataset\.attendanceEvent\)/);
-  assert.match(adminSource, /data: \{ eventId, source: eventId \? "registration" : "standalone"/);
+  assert.match(adminSource, /data: \{ eventId, attendanceType: attendancePrivateCreate \? "private" : "event", source:/);
   assert.doesNotMatch(adminSource, /attendanceSessions\.some\(\(item\) => item\.eventId === eventId\)/);
 });
 
 test("deleted session không mở Manage và nút Create chung xóa selected state", () => {
   assert.match(adminSource, /selectedAttendanceSession = activeAttendanceSessionById\(attendanceSessions, sessionId\)/);
   assert.match(adminSource, /function resetAttendanceCreateState\(\) \{\s*selectedAttendanceSession = null;/);
-  assert.match(adminSource, /function openAttendanceCreate\(eventId = ""\) \{\s*resetAttendanceCreateState\(\)/);
+  assert.match(adminSource, /function openAttendanceCreate\(eventId = "", \{ privateSession = false \} = \{\}\) \{\s*resetAttendanceCreateState\(\)/);
   assert.match(adminSource, /attendanceCreateDialog"\)\.addEventListener\("close", resetAttendanceCreateState\)/);
   assert.match(adminSource, /if \(button\.id === "newAttendanceBtn"\) \{\s*openAttendanceCreate\(\);/);
   assert.match(adminSource, /if \(selectedAttendanceSession\?\.id === selected\.id\) \{\s*selectedAttendanceSession = null;/);
