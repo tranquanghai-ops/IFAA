@@ -67,7 +67,7 @@ test("Group hidden chỉ nằm tab Đã ẩn và restore quay về active", () =
 });
 
 test("Điểm danh riêng có create/filter riêng và hard delete, không vào Trash", () => {
-  assert.match(adminHtml, /id="newPrivateAttendanceBtn"[^>]*>＋ Tạo điểm danh riêng/);
+  assert.match(adminHtml, /id="newPrivateAttendanceBtn" class="btn btn-private-attendance">＋ Tạo điểm danh riêng/);
   assert.match(adminHtml, /id="privateAttendanceFilter"[^>]*data-attendance-filter="private"/);
   assert.match(adminSource, /attendanceType: attendancePrivateCreate \? "private" : "event"/);
   assert.match(adminSource, /openAttendanceCreate\("", \{ privateSession: true \}\)/);
@@ -75,6 +75,15 @@ test("Điểm danh riêng có create/filter riêng và hard delete, không vào 
   assert.match(adminSource, /const trashedAttendance = attendanceSessions\.filter\(\(item\) => item\.deletedAt && item\.attendanceType !== "private"\)/);
   assert.match(adminSource, /if \(isOwner\) sources\.push\(query\(collection\(db, "attendanceSessions"\), where\("attendanceType", "==", "private"\)\)\)/);
   assert.match(adminSource, /if \(item\?\.attendanceType === "private"\) return isOwner \|\| item\.createdByUid === user\?\.uid/);
+});
+
+test("nút điểm danh riêng và action card có style compact responsive", () => {
+  assert.match(styles, /\.btn-private-attendance\{[^}]*background:linear-gradient\(135deg,#315fe8,#2648bd\);color:#fff/);
+  assert.match(styles, /\.btn-private-attendance:focus-visible\{outline:3px solid rgba\(49,95,232,\.28\)/);
+  assert.match(styles, /\.attendance-card-actions\{display:grid;grid-template-columns:repeat\(auto-fit,minmax\(108px,1fr\)\)/);
+  assert.match(styles, /\.attendance-card-actions \.btn\{[^}]*min-height:34px;height:auto;padding:7px 11px/);
+  assert.match(styles, /@media\(max-width:760px\)\{\.attendance-card-actions,\.attendance-view-cards \.attendance-card-actions\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+  assert.match(adminHtml, /styles\.css\?v=4\.11/);
 });
 
 test("menu Admin giữ Multi-Scope và Thùng rác ở cuối", () => {
