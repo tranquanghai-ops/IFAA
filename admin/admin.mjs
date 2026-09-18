@@ -1627,8 +1627,9 @@ function renderAttendance() {
   const target = $("#attendanceRows");
   if (!target) return;
   const list = activeAttendanceSessions(attendanceSessions)
-    .filter((item) => attendanceFilter === "all"
-      || (attendanceFilter === "private" ? item.attendanceType === "private" && (isOwner || item.createdByUid === user?.uid) : attendanceRuntimeState(item) === attendanceFilter))
+    .filter((item) => attendanceFilter === "private"
+      ? item.attendanceType === "private" && (isOwner || item.createdByUid === user?.uid)
+      : item.attendanceType !== "private" && (attendanceFilter === "all" || attendanceRuntimeState(item) === attendanceFilter))
     .sort((a, b) => (millis(b.createdAt) || 0) - (millis(a.createdAt) || 0));
   target.className = `att-grid attendance-view-${attendanceView}`;
   document.querySelectorAll("[data-attendance-view]").forEach((button) => button.classList.toggle("active", button.dataset.attendanceView === attendanceView));
