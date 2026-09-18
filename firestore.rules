@@ -106,6 +106,16 @@ service cloud.firestore {
     function validCoManagers(data){ return data.get('coManagerUids', []) is list
       && data.get('coManagerUids', []).size() <= 20
       && !data.get('coManagerUids', []).hasAny([data.createdByUid]); }
+    function privateAttendanceData(data){ return data.get('attendanceType', '') == 'private'
+      && data.get('source', '') == 'private'
+      && data.get('eventId', '') == ''
+      && data.get('scopeType', '') == 'private'
+      && data.get('scopeId', '') == ''
+      && data.get('coManagerUids', []).size() == 0; }
+    function privateAttendanceCreatorData(data){ return signedIn()
+      && privateAttendanceData(data)
+      && data.createdByUid == request.auth.uid; }
+    function privateAttendanceManagerData(data){ return systemAdmin() || privateAttendanceCreatorData(data); }
     function ownershipFieldsUnchanged(){ return !request.resource.data.diff(resource.data).affectedKeys()
       .hasAny(['owner','ownerId','ownerUid','creator','creatorId','creatorUid','createdByUid','createdByEmail','createdByName','createdAt']); }
     function eventCoManager(eventId){ return signedIn() && get(eventPath(eventId)).data.get('coManagerUids', []).hasAny([request.auth.uid]); }
@@ -134,13 +144,15 @@ service cloud.firestore {
             && data.get('scopeType', '') == 'faculty'
             && data.get('scopeId', '') == 'mtcn'));
     }
-    function managesSession(sessionId){ return attendanceCoManager(sessionId) || canManageResourceData(attendanceSession(sessionId)); }
-    function managesSessionAfter(sessionId){ return (existsAfter(attendanceSessionPath(sessionId)) && canManageResourceData(attendanceSessionAfter(sessionId))) || (subAdmin()
-      && existsAfter(attendanceSessionPath(sessionId))
-      && attendanceSessionAfter(sessionId).createdByUid == request.auth.uid)
-      || (signedIn()
-        && existsAfter(attendanceSessionPath(sessionId))
-        && attendanceSessionAfter(sessionId).get('coManagerUids', []).hasAny([request.auth.uid])); }
+    function managesSession(sessionId){ return privateAttendanceData(attendanceSession(sessionId))
+      ? privateAttendanceManagerData(attendanceSession(sessionId))
+      : attendanceCoManager(sessionId) || canManageResourceData(attendanceSession(sessionId)); }
+    function managesSessionAfter(sessionId){ return existsAfter(attendanceSessionPath(sessionId))
+      && (privateAttendanceData(attendanceSessionAfter(sessionId))
+        ? privateAttendanceManagerData(attendanceSessionAfter(sessionId))
+        : canManageResourceData(attendanceSessionAfter(sessionId))
+          || (subAdmin() && attendanceSessionAfter(sessionId).createdByUid == request.auth.uid)
+          || (signedIn() && attendanceSessionAfter(sessionId).get('coManagerUids', []).hasAny([request.auth.uid]))); }
     function checkinPath(checkinId){ return /databases/$(database)/documents/checkins/$(checkinId); }
     function counter(data, field){ return data.get(field, 0); }
     function decrementedCounter(data, field){ return counter(data, field) > 0 ? counter(data, field) - 1 : 0; }
@@ -364,7 +376,9 @@ service cloud.firestore {
       let ownSubAdmin = subAdmin() && resource.data.createdByUid == request.auth.uid;
       let hierarchy = ownSubAdmin ? false : canManageResourceData(resource.data);
       let coManager = attendanceCoManager(sessionId);
-      return ((coManager
+      return (privateAttendanceData(resource.data)
+        ? privateAttendanceManagerData(resource.data) && privateAttendanceData(request.resource.data)
+        : ((coManager
           && request.resource.data.createdByUid == resource.data.createdByUid
           && request.resource.data.createdByEmail == resource.data.createdByEmail
           && request.resource.data.createdAt == resource.data.createdAt
@@ -376,7 +390,7 @@ service cloud.firestore {
           && request.resource.data.status != 'finalized'
           && (resource.data.status != 'ended'
             || request.resource.data.status != 'open'
-            || (resource.data.endedAt is timestamp && request.time <= resource.data.endedAt + duration.value(5, 'd')))))
+            || (resource.data.endedAt is timestamp && request.time <= resource.data.endedAt + duration.value(5, 'd'))))))
         && ownershipFieldsUnchanged()
         && scopeFieldsUnchanged()
         && counter(request.resource.data, 'checkinCount') == counter(resource.data, 'checkinCount')
@@ -588,14 +602,21 @@ service cloud.firestore {
     }
 
     match /attendanceSessions/{sessionId} {
-      allow read: if attendanceCoManagerData(resource.data) || canManageResourceData(resource.data) || assigned(sessionId);
-      allow create: if canCreateScopedResource(request.resource.data)
+      allow read: if privateAttendanceData(resource.data)
+        ? privateAttendanceManagerData(resource.data) || assigned(sessionId)
+        : attendanceCoManagerData(resource.data) || canManageResourceData(resource.data) || assigned(sessionId);
+      allow create: if (privateAttendanceData(request.resource.data)
+          && admin()
+          && request.resource.data.createdByUid == request.auth.uid
+          && request.resource.data.status == 'open')
+        || (request.resource.data.get('attendanceType', '') != 'private'
+          && canCreateScopedResource(request.resource.data)
         && request.resource.data.createdByUid == request.auth.uid
         && request.resource.data.status == 'open'
         && validCoManagers(request.resource.data)
         && (request.resource.data.get('eventId', '') == ''
           || (exists(eventPath(request.resource.data.eventId))
-            && linkedAttendanceMatchesEvent(request.resource.data)));
+            && linkedAttendanceMatchesEvent(request.resource.data))));
       allow update: if !request.resource.data.diff(resource.data).affectedKeys()
           .hasAny(['checkinCount','pendingCount','counterMutationId','counterSourceId'])
         ? validAttendanceMetadataUpdate(sessionId)
@@ -613,7 +634,9 @@ service cloud.firestore {
               && attendanceDocumentMutationLinked(sessionId))
             || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checkinCount','pendingCount','counterMutationId','counterSourceId','updatedAt'])
               && canonicalizationSessionLinked(sessionId))));
-      allow delete: if highAdmin();
+      allow delete: if privateAttendanceData(resource.data)
+        ? privateAttendanceManagerData(resource.data)
+        : highAdmin();
     }
 
     match /facultyStudents/{mssv} {
@@ -637,7 +660,8 @@ service cloud.firestore {
       allow update: if managesSession(resource.data.sessionId)
         && request.resource.data.sessionId == resource.data.sessionId;
       allow delete: if managesSession(resource.data.sessionId)
-        && attendanceSession(resource.data.sessionId).status != 'finalized';
+        && (attendanceSession(resource.data.sessionId).status != 'finalized'
+          || privateAttendanceManagerData(attendanceSession(resource.data.sessionId)));
     }
 
     match /scannerAssignments/{assignmentId} {
@@ -650,7 +674,8 @@ service cloud.firestore {
         && request.resource.data.sessionId == resource.data.sessionId
         && attendanceSession(resource.data.sessionId).status != 'finalized';
       allow delete: if managesSession(resource.data.sessionId)
-        && attendanceSession(resource.data.sessionId).status != 'finalized';
+        && (attendanceSession(resource.data.sessionId).status != 'finalized'
+          || privateAttendanceManagerData(attendanceSession(resource.data.sessionId)));
     }
 
     match /attendanceGrants/{grantId} {
@@ -659,7 +684,8 @@ service cloud.firestore {
       allow update: if managesSession(resource.data.sessionId)
         && request.resource.data.sessionId == resource.data.sessionId;
       allow delete: if managesSession(resource.data.sessionId)
-        && attendanceSession(resource.data.sessionId).status != 'finalized';
+        && (attendanceSession(resource.data.sessionId).status != 'finalized'
+          || privateAttendanceManagerData(attendanceSession(resource.data.sessionId)));
     }
 
     match /auditLogs/{logId} {
@@ -769,7 +795,8 @@ service cloud.firestore {
           && request.resource.data.scannerUid == request.auth.uid
           && request.resource.data.scannerEmail == email()
           && checkinCounterLinked(checkinId, resource.data.sessionId));
-      allow delete: if highAdmin();
+      allow delete: if highAdmin()
+        || privateAttendanceManagerData(attendanceSession(resource.data.sessionId));
     }
   }
 }

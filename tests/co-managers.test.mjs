@@ -64,21 +64,21 @@ test("scoped-only user không có nút tạo global hoặc xóa resource", () =>
   assert.match(adminSource, /if \(isScopedManager\) \{[\s\S]*#newEventBtn[\s\S]*#newAttendanceBtn/);
   assert.match(eventServiceSource, /const canDelete = !getIsScopedManager\(\) && canManageResource\(event\)/);
   assert.match(eventServiceSource, /data-delete="\$\{event\.id\}" \$\{canDelete \? "" : "disabled"\}/);
-  assert.match(adminSource, /const canDeleteAttendance = managesResource\(item\)/);
+  assert.match(adminSource, /const canDeleteAttendance = privateAttendance \? isOwner \|\| item\.createdByUid === user\?\.uid : managesResource\(item\)/);
   assert.match(adminSource, /\$\{canDeleteAttendance \? `<button class="btn btn-danger" data-delete-attendance/);
 });
 
 test("Attendance có UI chỉnh danh sách độc lập và ẩn với co-manager", () => {
   assert.match(adminHtml, /id="attendanceManageCoManagerSection"/);
   assert.match(adminHtml, /id="attendanceManageCoManagerSave"/);
-  assert.match(adminSource, /const editable = canEditCoManagers\(item\)/);
+  assert.match(adminSource, /const editable = item\?\.attendanceType !== "private" && canEditCoManagers\(item\)/);
   assert.match(adminSource, /classList\.toggle\("hidden", !editable\)/);
   assert.match(adminSource, /attendance\.co_managers\.update/);
 });
 
 test("create Attendance lưu snapshot coManagerUids kế thừa", () => {
   assert.match(adminSource, /attendanceCoManagerUids = inheritedAttendanceCoManagerUids\(selected, user\.uid\)/);
-  assert.match(adminSource, /coManagerUids: \[\.\.\.new Set\(attendanceCoManagerUids\)\]/);
+  assert.match(adminSource, /coManagerUids: attendancePrivateCreate \? \[\] : \[\.\.\.new Set\(attendanceCoManagerUids\)\]/);
 });
 
 test("Check-in chỉ nhận co-manager từ chính Attendance đang mở", () => {

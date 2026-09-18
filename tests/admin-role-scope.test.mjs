@@ -166,7 +166,7 @@ test("Attendance/Event create lưu scope và UI role dùng module canonical", ()
   const adminSource = readFileSync("admin/admin.mjs", "utf8");
   const eventSource = readFileSync("admin/modules/events/event-service.mjs", "utf8");
   assert.match(eventSource, /Object\.assign\(data, getCategoryScope\(data\.category\)\)/);
-  assert.match(adminSource, /const attendanceScope = sourceEvent\?\.scopeType/);
+  assert.match(adminSource, /const attendanceScope = attendancePrivateCreate \? \{ scopeType: "private", scopeId: "" \} : sourceEvent\?\.scopeType/);
   assert.match(adminSource, /\.\.\.attendanceScope/);
 });
 
