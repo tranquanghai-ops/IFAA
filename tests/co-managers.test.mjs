@@ -24,6 +24,15 @@ test("UID đồng quản lý được trim, loại rỗng và duplicate", () => 
   assert.deepEqual(normalizeCoManagerUids([" u1 ", "u1", "", null, "u2"]), ["u1", "u2"]);
 });
 
+test("resolve đồng quản lý dùng profile trước và fallback admin đã đồng bộ UID", () => {
+  assert.match(adminSource, /query\(collection\(db, "profiles"\), where\("email", "==", normalized\), limit\(1\)\)/);
+  assert.match(adminSource, /getDoc\(doc\(db, "admins", normalized\)\)/);
+  assert.match(adminSource, /const uid = String\(data\.uid \|\| ""\)\.trim\(\)/);
+  assert.match(adminSource, /syncAdminIdentity\(currentUser\)/);
+  assert.match(adminSource, /uid: currentUser\.uid,[\s\S]*lastLoginAt: serverTimestamp\(\)/);
+  assert.match(adminSource, /Không thể xác định UID của email này/);
+});
+
 test("thêm đồng quản lý chặn duplicate và người tạo", () => {
   assert.deepEqual(addCoManagerUid([], "u2", "u1"), ["u2"]);
   assert.throws(() => addCoManagerUid(["u2"], "u2", "u1"), /đã là đồng quản lý/);

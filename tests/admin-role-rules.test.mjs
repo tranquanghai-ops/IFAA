@@ -88,6 +88,15 @@ describe("Admin role hierarchy", () => {
     await assertFails(setDoc(doc(dbFor("interior-sub", interiorSubEmail), "admins", "x@tdtu.edu.vn"), { ...role("x@tdtu.edu.vn", "sub_admin", "department", "interior"), addedByUid: "interior-sub" }));
     await assertFails(updateDoc(doc(dbFor("interior-sub", interiorSubEmail), "admins", interiorSubEmail), { scopeId: "graphic" }));
   });
+
+  test("Admin tự đồng bộ đúng UID nhưng không thể đổi quyền hoặc giả UID", async () => {
+    const subDb = dbFor("interior-sub", interiorSubEmail);
+    await assertSucceeds(updateDoc(doc(subDb, "admins", interiorSubEmail), { uid: "interior-sub", lastLoginAt: new Date() }));
+    assert.equal((await getDoc(doc(subDb, "admins", interiorSubEmail))).data().uid, "interior-sub");
+    await assertFails(updateDoc(doc(subDb, "admins", interiorSubEmail), { uid: "forged" }));
+    await assertFails(updateDoc(doc(dbFor("high", highEmail), "admins", interiorSubEmail), { uid: "high" }));
+    await assertSucceeds(updateDoc(doc(dbFor("interior-head", interiorHeadEmail), "admins", interiorHeadEmail), { uid: "interior-head", lastLoginAt: new Date() }));
+  });
 });
 
 describe("Scoped Event, Group and Attendance", () => {
