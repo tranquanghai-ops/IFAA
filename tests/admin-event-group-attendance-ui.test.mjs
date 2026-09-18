@@ -34,8 +34,12 @@ test("Group và Attendance đều render metadata Người tạo an toàn", () =
 
 test("Attendance filter bắt đầu bằng Tất cả và mặc định all", () => {
   const filters = [...adminHtml.matchAll(/data-attendance-filter="([^"]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(filters.slice(0, 6), ["all", "private", "open", "scheduled", "ended", "finalized"]);
+  assert.deepEqual(filters.slice(0, 6), ["all", "open", "scheduled", "ended", "finalized", "private"]);
   assert.match(adminSource, /let attendanceFilter = "all";/);
+});
+
+test("Attendance thường và riêng được tách biệt trong mọi tab", () => {
+  assert.match(adminSource, /attendanceFilter === "private"\s*\? item\.attendanceType === "private" && \(isOwner \|\| item\.createdByUid === user\?\.uid\)\s*:\s*item\.attendanceType !== "private" && \(attendanceFilter === "all" \|\| attendanceRuntimeState\(item\) === attendanceFilter\)/);
 });
 
 test("Attendance empty state span toàn bộ grid", () => {
