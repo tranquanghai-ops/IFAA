@@ -58,11 +58,12 @@ const duplicateKey = "ifaa-checkin-duplicate-sound";
 let user = null, session = null, assignment = null, isManager = false, isAttendanceCoManager = false, managerName = "";
 let unsubscribeRows = null, unsubscribeSession = null;
 let cameraStream = null, cameraControls = null, nativeDetector = null, enhancedReader = null;
-let cameraRequest = 0, scanning = false, pendingPhoto = "", lastDecoded = "", lastDecodedAt = 0;
+let cameraRequest = 0, photoCaptureRequest = 0, scanning = false, pendingPhoto = "", lastDecoded = "", lastDecodedAt = 0;
 let rosterCache = new Map(), flushing = false, toastTimer = 0, photoPreviewScale = 1, checkinViewerScale = 1;
 let sessionExpiryTimer = 0;
 let liveRowsById = new Map(), checkinImageObjectUrl = "";
 let zxingLoadPromise = null;
+let memoryOutboxes = new Map(), scanAudioContext = null, scanAudioUnlocked = false;
 
 function loadZxingLibrary() {
   if (window.ZXingBrowser) return Promise.resolve(window.ZXingBrowser);
@@ -79,12 +80,20 @@ function loadZxingLibrary() {
 }
 
 async function uploadCheckinPhoto(checkinId, dataUrl) {
-  const response = await fetch(dataUrl);
-  const blob = await response.blob();
+  const blob = dataUrlToBlob(dataUrl);
   if (!blob.type.startsWith("image/") || blob.size > 1.5 * 1024 * 1024) throw Error("Hình điểm danh không hợp lệ hoặc lớn hơn 1,5 MB.");
   const path = `attendance/${session.id}/${checkinId}.jpg`;
   const uploaded = await uploadBytes(ref(storage, path), blob, { contentType: "image/jpeg", cacheControl: "private,max-age=0,no-store" });
   return { path, url: await getDownloadURL(uploaded.ref) };
+}
+
+function dataUrlToBlob(dataUrl) {
+  const match = String(dataUrl || "").match(/^data:([^;,]+)?(;base64)?,(.*)$/s);
+  if (!match) throw Error("Dữ liệu hình điểm danh không hợp lệ.");
+  const binary = match[2] ? atob(match[3]) : decodeURIComponent(match[3]);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return new Blob([bytes], { type: match[1] || "image/jpeg" });
 }
 
 async function photoSource(data) {
@@ -145,15 +154,39 @@ function showDirectCameraAction(show = true) {
   link.href = directCheckinUrl.toString();
   actions.classList.toggle("hidden", !show);
 }
+function getScanAudioContext() {
+  const Audio = window.AudioContext || window.webkitAudioContext;
+  if (!Audio) return null;
+  return scanAudioContext || (scanAudioContext = new Audio());
+}
+async function unlockScanAudio() {
+  try {
+    const audio = getScanAudioContext();
+    if (!audio) return false;
+    if (audio.state === "suspended") await audio.resume();
+    if (!scanAudioUnlocked && audio.state === "running") {
+      const oscillator = audio.createOscillator(), gain = audio.createGain();
+      gain.gain.value = 0;
+      oscillator.connect(gain); gain.connect(audio.destination);
+      oscillator.start(); oscillator.stop(audio.currentTime + 0.01);
+      scanAudioUnlocked = true;
+    }
+    return audio.state === "running";
+  } catch { return false; }
+}
 function playTone(frequency, duration, delay = 0) {
   try {
-    const Audio = window.AudioContext || window.webkitAudioContext;
-    const audio = playTone.audio || (playTone.audio = new Audio());
-    const oscillator = audio.createOscillator(), gain = audio.createGain();
-    oscillator.connect(gain); gain.connect(audio.destination); oscillator.frequency.value = frequency;
-    gain.gain.setValueAtTime(0.13, audio.currentTime + delay);
-    gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + delay + duration);
-    oscillator.start(audio.currentTime + delay); oscillator.stop(audio.currentTime + delay + duration);
+    const audio = getScanAudioContext();
+    if (!audio) return;
+    const schedule = () => {
+      const oscillator = audio.createOscillator(), gain = audio.createGain();
+      oscillator.connect(gain); gain.connect(audio.destination); oscillator.frequency.value = frequency;
+      gain.gain.setValueAtTime(0.13, audio.currentTime + delay);
+      gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + delay + duration);
+      oscillator.start(audio.currentTime + delay); oscillator.stop(audio.currentTime + delay + duration);
+    };
+    if (audio.state === "suspended") void audio.resume().then(schedule).catch(() => {});
+    else schedule();
   } catch {}
 }
 function feedback(success = true) {
@@ -168,12 +201,21 @@ function feedback(success = true) {
 function validMssv(value) { return /^(?=.{8,12}$)(?=.*\d)[A-Z0-9]+$/.test(value); }
 function outboxKey() { return `ifaa-checkin-outbox:${sessionId || "none"}:${user?.uid || "guest"}`; }
 function outbox() {
-  try { const value = JSON.parse(localStorage.getItem(outboxKey()) || "[]"); return Array.isArray(value) ? value : []; }
-  catch { return []; }
+  const key = outboxKey(), memory = memoryOutboxes.get(key) || [];
+  if (memory.length) return memory;
+  try { const value = JSON.parse(localStorage.getItem(key) || "[]"); return Array.isArray(value) ? value : []; }
+  catch { return memory; }
 }
 function saveOutbox(items) {
-  if (items.length) localStorage.setItem(outboxKey(), JSON.stringify(items));
-  else localStorage.removeItem(outboxKey());
+  const key = outboxKey();
+  if (items.length) memoryOutboxes.set(key, items);
+  else memoryOutboxes.delete(key);
+  try {
+    if (items.length) localStorage.setItem(key, JSON.stringify(items));
+    else localStorage.removeItem(key);
+  } catch {
+    // Safari private mode can reject localStorage; keep the queue alive in memory for this tab.
+  }
 }
 function sessionDeadlineMillis() {
   const endDate = session?.endDate || session?.date;
@@ -296,15 +338,34 @@ async function resolveStudent(rawMssv) {
   }
   return cached || { mssv, name: "Không có dữ liệu", email: mssv.toLowerCase() + "@student.tdtu.edu.vn", uid: "" };
 }
-function encodePhoto(canvas) {
+function canvasJpegData(canvas, quality) {
+  if (!canvas.toBlob) {
+    const dataUrl = canvas.toDataURL("image/jpeg", quality);
+    return Promise.resolve({ dataUrl, size: dataUrlToBlob(dataUrl).size });
+  }
+  return new Promise((resolve, reject) => canvas.toBlob((blob) => {
+    if (!blob) {
+      try {
+        const dataUrl = canvas.toDataURL("image/jpeg", quality);
+        resolve({ dataUrl, size: dataUrlToBlob(dataUrl).size });
+      } catch (error) { reject(error); }
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => reject(Error("Không thể đọc ảnh vừa chụp."));
+    reader.onload = () => resolve({ dataUrl: String(reader.result || ""), size: blob.size });
+    reader.readAsDataURL(blob);
+  }, "image/jpeg", quality));
+}
+async function encodePhoto(canvas) {
   for (const quality of [.68, .55, .42]) {
-    const data = canvas.toDataURL("image/jpeg", quality);
-    if (data.length < 820000) return data;
+    const image = await canvasJpegData(canvas, quality);
+    if (image.size < 600 * 1024) return image.dataUrl;
   }
   const reduced = document.createElement("canvas"), ratio = Math.min(1, 900 / canvas.width);
   reduced.width = Math.max(1, Math.round(canvas.width * ratio)); reduced.height = Math.max(1, Math.round(canvas.height * ratio));
   reduced.getContext("2d").drawImage(canvas, 0, 0, reduced.width, reduced.height);
-  return reduced.toDataURL("image/jpeg", .5);
+  return (await canvasJpegData(reduced, .5)).dataUrl;
 }
 async function startNativeDetector(request) {
   if (!("BarcodeDetector" in window)) return;
@@ -339,6 +400,7 @@ async function startCamera() {
     showDirectCameraAction(true);
     return;
   }
+  await unlockScanAudio();
   releaseCamera(); const request = ++cameraRequest;
   try {
     $("#startCamera").disabled = true; $("#cameraSelect").disabled = true;
@@ -534,10 +596,13 @@ async function flushOutbox() {
     setScanStatus("warn", "Đã lưu trên điện thoại — chờ gửi", `${outbox().length} lượt đang chờ · ${error.message || "mất kết nối"}`);
   } finally { flushing = false; }
 }
-function capturePhoto() {
+async function capturePhoto() {
   try {
+    const request = ++photoCaptureRequest;
     const canvas = captureFrame({ maxWidth: 1200, cropSelector: ".scanner-video-wrap" });
-    pendingPhoto = encodePhoto(canvas);
+    const photo = await encodePhoto(canvas);
+    if (request !== photoCaptureRequest) return;
+    pendingPhoto = photo;
     photoPreviewScale = 1;
     $("#photoPreview").src = pendingPhoto;
     $("#photoPreview").style.width = "100%";
@@ -685,15 +750,17 @@ onAuthStateChanged(auth, async (currentUser) => {
   }
 });
 
-$("#successSound").value = localStorage.getItem(successKey) || "bell"; $("#duplicateSound").value = localStorage.getItem(duplicateKey) || "low";
-$("#successSound").onchange = () => localStorage.setItem(successKey, $("#successSound").value); $("#duplicateSound").onchange = () => localStorage.setItem(duplicateKey, $("#duplicateSound").value);
-$("#testSuccess").onclick = () => feedback(true); $("#testDuplicate").onclick = () => feedback(false); $("#loginCardBtn").onclick = () => user ? window.location.reload() : login(); $("#logoutBtn").onclick = () => signOut(auth);
+function storedSetting(key, fallback) { try { return localStorage.getItem(key) || fallback; } catch { return fallback; } }
+function saveSetting(key, value) { try { localStorage.setItem(key, value); } catch {} }
+$("#successSound").value = storedSetting(successKey, "bell"); $("#duplicateSound").value = storedSetting(duplicateKey, "low");
+$("#successSound").onchange = () => saveSetting(successKey, $("#successSound").value); $("#duplicateSound").onchange = () => saveSetting(duplicateKey, $("#duplicateSound").value);
+$("#testSuccess").onclick = async () => { await unlockScanAudio(); feedback(true); }; $("#testDuplicate").onclick = async () => { await unlockScanAudio(); feedback(false); }; $("#loginCardBtn").onclick = () => user ? window.location.reload() : login(); $("#logoutBtn").onclick = () => signOut(auth);
 $("#startCamera").onclick = startCamera; $("#stopCamera").onclick = () => { releaseCamera(); setScanStatus("", "Đã dừng camera", "Nhấn Bắt đầu quét để tiếp tục."); }; $("#cameraSelect").onchange = () => { if (scanning) void startCamera(); };
-$("#capturePhoto").onclick = capturePhoto;
+$("#capturePhoto").onclick = () => { void capturePhoto(); };
 $("#savePhoto").onclick = async () => { if (await submitCheckin($("#photoMssv").value)) $("#photoDialog").close(); };
-$("#retakePhoto").onclick = capturePhoto;
-$("#closePhotoDialog").onclick = () => { pendingPhoto = ""; $("#photoDialog").close(); };
-$("#photoDialog").addEventListener("cancel", () => { pendingPhoto = ""; });
+$("#retakePhoto").onclick = () => { void capturePhoto(); };
+$("#closePhotoDialog").onclick = () => { photoCaptureRequest += 1; pendingPhoto = ""; $("#photoDialog").close(); };
+$("#photoDialog").addEventListener("cancel", () => { photoCaptureRequest += 1; pendingPhoto = ""; });
 $("#photoZoomOut").onclick = () => { photoPreviewScale = setImageScale($("#photoPreview"), photoPreviewScale - 0.25); };
 $("#photoZoomReset").onclick = () => { photoPreviewScale = setImageScale($("#photoPreview"), 1); };
 $("#photoZoomIn").onclick = () => { photoPreviewScale = setImageScale($("#photoPreview"), photoPreviewScale + 0.25); };

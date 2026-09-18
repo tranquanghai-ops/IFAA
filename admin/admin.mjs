@@ -172,11 +172,29 @@ function coManagerRows(target, uids, editable, context) {
 async function resolveCoManagerEmail(email) {
   const normalized = String(email || "").trim().toLowerCase();
   if (!/^\S+@\S+\.\S+$/.test(normalized)) throw Error("Email đồng quản lý không hợp lệ.");
-  const snapshot = await getDocs(query(collection(db, "profiles"), where("email", "==", normalized), limit(1)));
-  if (snapshot.empty) throw Error("Người này chưa có hồ sơ IFA+. Họ cần đăng nhập IFA+ ít nhất một lần trước.");
-  const profile = snapshot.docs[0];
-  coManagerProfiles.set(profile.id, { uid: profile.id, email: profile.data().email || normalized, name: profile.data().name || profile.data().displayName || "" });
-  return profile.id;
+  try {
+    const snapshot = await getDocs(query(collection(db, "profiles"), where("email", "==", normalized), limit(1)));
+    if (!snapshot.empty) {
+      const profile = snapshot.docs[0];
+      coManagerProfiles.set(profile.id, { uid: profile.id, email: profile.data().email || normalized, name: profile.data().name || profile.data().displayName || "" });
+      return profile.id;
+    }
+  } catch (error) {
+    if (error?.code !== "permission-denied") throw error;
+  }
+  try {
+    const adminSnapshot = await getDoc(doc(db, "admins", normalized));
+    if (adminSnapshot.exists()) {
+      const data = adminSnapshot.data();
+      const uid = String(data.uid || "").trim();
+      if (!uid) throw Error("Tài khoản quản trị này chưa đồng bộ UID. Vui lòng yêu cầu người dùng tải lại trang Admin một lần rồi thử lại.");
+      coManagerProfiles.set(uid, { uid, email: data.email || normalized, name: data.name || "" });
+      return uid;
+    }
+  } catch (error) {
+    if (error?.code !== "permission-denied") throw error;
+  }
+  throw Error("Không thể xác định UID của email này. Người dùng cần có hồ sơ IFA+ hoặc tài khoản quản trị đã đăng nhập ít nhất một lần.");
 }
 async function setEventCoManagers(event, copy = false) {
   eventCoManagerUids = copy ? [] : normalizeCoManagerUids(event?.coManagerUids);
@@ -579,6 +597,15 @@ async function accessRole(currentUser) {
     getDocs(query(collection(db, "attendanceSessions"), where("coManagerUids", "array-contains", currentUser.uid), limit(1)))
   ]);
   return eventAssignments.empty && attendanceAssignments.empty ? null : { role: "scoped_manager", scopeType: "resource", scopeId: "", legacy: false };
+}
+
+async function syncAdminIdentity(currentUser) {
+  const normalized = String(currentUser?.email || "").trim().toLowerCase();
+  if (!normalized || normalized === OWNER_EMAIL) return;
+  await updateDoc(doc(db, "admins", normalized), {
+    uid: currentUser.uid,
+    lastLoginAt: serverTimestamp()
+  });
 }
 
 async function syncStorageAdminAccess(currentUser, access) {
@@ -2560,6 +2587,8 @@ onAuthStateChanged(auth, async (currentUser) => {
   isOwner = currentRole === "system_admin";
   isSubAdmin = currentRole === "sub_admin";
   isScopedManager = currentRole === "scoped_manager";
+  if (!isScopedManager) try { await syncAdminIdentity(currentUser); }
+  catch (error) { console.warn("Không thể đồng bộ UID quản trị.", error); }
   $("#accountEmail").textContent = currentUser.email;
   $("#roleText").textContent = `Quyền hiện tại: ${isScopedManager ? "Đồng quản lý · chỉ tài nguyên được giao" : accessLabel(currentAccess)}`;
   $("#adminLogin").classList.add("hidden");
